@@ -15,6 +15,24 @@ from core.silence_monitor import SilenceMonitor
 from documents.loader import DocumentLoader
 from ui.capture_guard import CaptureGuard
 
+# ─── Theme ───────────────────────────────────────────────────
+BG_PRIMARY = "#0c0c14"
+BG_HEADER = "#12121e"
+BG_PANEL = "#0e0e1a"
+BG_PANEL_HEADER = "#16162a"
+BG_TEXT = "#0a0a12"
+ACCENT = "#3b82f6"
+ACCENT_HOVER = "#2563eb"
+ACCENT_WARM = "#f59e0b"
+ACCENT_WARM_HOVER = "#d97706"
+TEXT_PRIMARY = "#e2e8f0"
+TEXT_SECONDARY = "#94a3b8"
+TEXT_MUTED = "#475569"
+TEXT_TRANSLATION = "#60a5fa"
+DANGER = "#ef4444"
+SURFACE = "#1e1e2e"
+BORDER = "#1e293b"
+
 
 class TranslatorApp(ctk.CTk):
 
@@ -37,7 +55,7 @@ class TranslatorApp(ctk.CTk):
     def _configure_window(self):
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.configure(fg_color="#0d0d0d")
+        self.configure(fg_color=BG_PRIMARY)
         self.attributes("-topmost", True)
         self.attributes("-alpha", WINDOW_OPACITY)
         self.minsize(*WINDOW_MIN_SIZE)
@@ -58,86 +76,177 @@ class TranslatorApp(ctk.CTk):
 
     def _build_ui(self):
         self._build_header()
+        self._build_toolbar()
         self._build_panels()
+        self._build_statusbar()
 
     def _build_header(self):
-        header = ctk.CTkFrame(self, fg_color="#1a1a2e", height=45, corner_radius=0)
+        header = ctk.CTkFrame(self, fg_color=BG_HEADER, height=48, corner_radius=0)
         header.pack(fill="x")
         header.pack_propagate(False)
 
+        # Logo / Title
+        title_frame = ctk.CTkFrame(header, fg_color="transparent")
+        title_frame.pack(side="left", padx=16)
+
         ctk.CTkLabel(
-            header, text=f"  AUDIO TRANSLATOR  |  {AI_PROVIDER.upper()}",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#00d4ff",
-        ).pack(side="left", padx=15)
+            title_frame, text="AUDIO TRANSLATOR",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left")
 
-        # Status
-        self._status_label = ctk.CTkLabel(
-            header, text="Iniciando...",
-            font=ctk.CTkFont(size=11), text_color="#888888",
-        )
-        self._status_label.pack(side="right", padx=15)
-
-        # Switch ocultación
-        self._hide_var = ctk.BooleanVar(value=True)
-        self._hide_switch = ctk.CTkSwitch(
-            header, text="Oculta", variable=self._hide_var,
-            command=self._toggle_capture,
-            font=ctk.CTkFont(size=11), text_color="#cccccc",
-            progress_color="#00d4ff", button_color="#ffffff",
-            button_hover_color="#dddddd", fg_color="#333333",
-            width=40, height=20,
-        )
-        self._hide_switch.pack(side="right", padx=10)
+        # Provider badge
+        ctk.CTkLabel(
+            title_frame, text=f"  {AI_PROVIDER.upper()}",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
+        ).pack(side="left", padx=(8, 0))
 
         # REC indicator
+        self._rec_frame = ctk.CTkFrame(header, fg_color="transparent")
+        self._rec_frame.pack(side="left", padx=(20, 0))
+
         ctk.CTkLabel(
-            header, text="● REC",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#ff4444",
-        ).pack(side="right", padx=5)
+            self._rec_frame, text="●",
+            font=ctk.CTkFont(size=10), text_color=DANGER,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            self._rec_frame, text=" REC",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=DANGER,
+        ).pack(side="left")
+
+    def _build_toolbar(self):
+        toolbar = ctk.CTkFrame(self, fg_color=BG_HEADER, height=36, corner_radius=0)
+        toolbar.pack(fill="x")
+        toolbar.pack_propagate(False)
+
+        # Separator line
+        sep = ctk.CTkFrame(toolbar, fg_color=BORDER, height=1)
+        sep.place(relx=0, rely=0, relwidth=1)
+
+        # ─── Left: Opacity control ──────────────────
+        left = ctk.CTkFrame(toolbar, fg_color="transparent")
+        left.pack(side="left", padx=16)
+
+        ctk.CTkLabel(
+            left, text="Opacidad",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+
+        self._opacity_slider = ctk.CTkSlider(
+            left, from_=0.3, to=1.0, number_of_steps=14,
+            width=100, height=14,
+            progress_color=ACCENT, button_color=TEXT_PRIMARY,
+            button_hover_color="#ffffff", fg_color=SURFACE,
+            corner_radius=7, button_corner_radius=7,
+            command=self._change_opacity,
+        )
+        self._opacity_slider.set(WINDOW_OPACITY)
+        self._opacity_slider.pack(side="left")
+
+        # ─── Right: Controls ────────────────────────
+        right = ctk.CTkFrame(toolbar, fg_color="transparent")
+        right.pack(side="right", padx=16)
+
+        # Screen capture switch
+        self._hide_var = ctk.BooleanVar(value=True)
+        self._hide_switch = ctk.CTkSwitch(
+            right, text="Oculta", variable=self._hide_var,
+            command=self._toggle_capture,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=TEXT_SECONDARY,
+            progress_color=ACCENT, button_color=TEXT_PRIMARY,
+            button_hover_color="#ffffff", fg_color=SURFACE,
+            width=36, height=18,
+        )
+        self._hide_switch.pack(side="right", padx=(12, 0))
+
+        ctk.CTkLabel(
+            right, text="Screen",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="right")
+
+        # Separator
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+
+        # Pin button
+        self._pinned = True
+        self._pin_btn = ctk.CTkButton(
+            right, text="Pin", width=50, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._toggle_pin,
+        )
+        self._pin_btn.pack(side="right")
 
     def _build_panels(self):
-        content = ctk.CTkFrame(self, fg_color="#0d0d0d")
-        content.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+        content = ctk.CTkFrame(self, fg_color=BG_PRIMARY)
+        content.pack(fill="both", expand=True, padx=12, pady=(8, 4))
         content.grid_columnconfigure(0, weight=1)
         content.grid_columnconfigure(1, weight=1)
         content.grid_rowconfigure(0, weight=1)
 
         self._interviewer_text = self._build_panel(
-            content, column=0, title="  🎙  Interviewer", title_color="#4a9eff",
+            content, column=0, title="Interviewer", icon="●", icon_color=ACCENT,
         )
         self._ai_text = self._build_panel(
-            content, column=1, title="  🤖  AI Response", title_color="#ffb347",
+            content, column=1, title="AI Response", icon="●", icon_color=ACCENT_WARM,
         )
 
-    def _build_panel(self, parent, column: int, title: str, title_color: str) -> ctk.CTkTextbox:
-        frame = ctk.CTkFrame(parent, fg_color="#111122", corner_radius=10)
-        padx = (0, 5) if column == 0 else (5, 0)
+    def _build_panel(self, parent, column: int, title: str, icon: str, icon_color: str) -> ctk.CTkTextbox:
+        frame = ctk.CTkFrame(parent, fg_color=BG_PANEL, corner_radius=12, border_width=1, border_color=BORDER)
+        padx = (0, 4) if column == 0 else (4, 0)
         frame.grid(row=0, column=column, sticky="nsew", padx=padx)
 
-        header = ctk.CTkFrame(frame, fg_color="#1a1a3e", height=35, corner_radius=10)
-        header.pack(fill="x", padx=5, pady=5)
-        header.pack_propagate(False)
+        # Panel header
+        panel_header = ctk.CTkFrame(frame, fg_color=BG_PANEL_HEADER, height=38, corner_radius=12)
+        panel_header.pack(fill="x", padx=6, pady=(6, 0))
+        panel_header.pack_propagate(False)
 
         ctk.CTkLabel(
-            header, text=title,
-            font=ctk.CTkFont(size=13, weight="bold"), text_color=title_color,
-        ).pack(side="left", padx=10, anchor="w")
+            panel_header, text=f"  {icon}  {title}",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=icon_color,
+        ).pack(side="left", padx=8, anchor="w")
 
+        # Text area
         textbox = ctk.CTkTextbox(
-            frame, fg_color="#0a0a1a", text_color="#e0e0e0",
-            font=ctk.CTkFont(size=13), corner_radius=8,
-            wrap="word", state="disabled",
+            frame, fg_color=BG_TEXT, text_color=TEXT_PRIMARY,
+            font=ctk.CTkFont(family="Consolas", size=12),
+            corner_radius=8, wrap="word", state="disabled",
+            border_width=0,
         )
-        textbox.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+        textbox.pack(fill="both", expand=True, padx=6, pady=6)
 
-        textbox._textbox.tag_configure("timestamp", foreground="#555555")
-        textbox._textbox.tag_configure("original", foreground="#e0e0e0")
-        textbox._textbox.tag_configure("answer", foreground="#ffb347")
-        textbox._textbox.tag_configure("translation", foreground="#4a9eff")
-        textbox._textbox.tag_configure("thinking", foreground="#888888")
+        # Text tags
+        textbox._textbox.tag_configure("timestamp", foreground=TEXT_MUTED)
+        textbox._textbox.tag_configure("original", foreground=TEXT_PRIMARY)
+        textbox._textbox.tag_configure("answer", foreground=ACCENT_WARM)
+        textbox._textbox.tag_configure("translation", foreground=TEXT_TRANSLATION)
+        textbox._textbox.tag_configure("thinking", foreground=TEXT_SECONDARY)
 
         return textbox
+
+    def _build_statusbar(self):
+        statusbar = ctk.CTkFrame(self, fg_color=BG_HEADER, height=28, corner_radius=0)
+        statusbar.pack(fill="x", side="bottom")
+        statusbar.pack_propagate(False)
+
+        # Separator
+        sep = ctk.CTkFrame(statusbar, fg_color=BORDER, height=1)
+        sep.place(relx=0, rely=0, relwidth=1)
+
+        self._status_label = ctk.CTkLabel(
+            statusbar, text="Iniciando...",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
+        )
+        self._status_label.pack(side="left", padx=16)
 
     # ─── UI Helpers ──────────────────────────────────────────
 
@@ -161,7 +270,17 @@ class TranslatorApp(ctk.CTk):
         if self._capture_guard:
             label = "Oculta" if self._capture_guard.is_hidden else "Visible"
             self._hide_switch.configure(text=label)
-            self._set_status(f"Ventana {label.upper()} ante screen share")
+
+    def _toggle_pin(self):
+        self._pinned = not self._pinned
+        self.attributes("-topmost", self._pinned)
+        if self._pinned:
+            self._pin_btn.configure(fg_color=ACCENT, text="Pin")
+        else:
+            self._pin_btn.configure(fg_color=SURFACE, text="Pin")
+
+    def _change_opacity(self, value):
+        self.attributes("-alpha", value)
 
     # ─── Event Queue ─────────────────────────────────────────
 
