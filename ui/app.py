@@ -12,8 +12,11 @@ from core.audio_capture import AudioCapture
 from core.transcriber import Transcriber
 from core.translator import TextTranslator
 from core.silence_monitor import SilenceMonitor
+from core.history import ConversationHistory
+from core.job_description import JobDescription
 from documents.loader import DocumentLoader
 from ui.capture_guard import CaptureGuard
+from ui.job_modal import JobDescriptionModal
 
 # ─── Theme ───────────────────────────────────────────────────
 BG_PRIMARY = "#0c0c14"
@@ -43,6 +46,8 @@ class TranslatorApp(ctk.CTk):
         self._audio_queue: queue.Queue = queue.Queue()
         self._running = True
         self._capture_guard: CaptureGuard | None = None
+        self._ai_provider = None
+        self._history = ConversationHistory()
 
         self._configure_window()
         self._build_ui()
@@ -184,6 +189,20 @@ class TranslatorApp(ctk.CTk):
         )
         self._pin_btn.pack(side="right")
 
+        # Separator
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+
+        # Job Description button
+        jd_color = "#22c55e" if JobDescription.exists() else SURFACE
+        self._jd_btn = ctk.CTkButton(
+            right, text="Job Desc", width=70, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=jd_color, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._open_job_modal,
+        )
+        self._jd_btn.pack(side="right")
+
     def _build_panels(self):
         content = ctk.CTkFrame(self, fg_color=BG_PRIMARY)
         content.pack(fill="both", expand=True, padx=12, pady=(8, 4))
@@ -282,6 +301,18 @@ class TranslatorApp(ctk.CTk):
     def _change_opacity(self, value):
         self.attributes("-alpha", value)
 
+    def _open_job_modal(self):
+        current = JobDescription.load()
+        JobDescriptionModal(self, current, self._save_job_description)
+
+    def _save_job_description(self, text: str):
+        JobDescription.save(text)
+        if self._ai_provider:
+            self._ai_provider.set_job_description(text)
+        has_jd = bool(text.strip())
+        self._jd_btn.configure(fg_color="#22c55e" if has_jd else SURFACE)
+        self._set_status("Job Description guardada" if has_jd else "Job Description eliminada")
+
     # ─── Event Queue ─────────────────────────────────────────
 
     def _emit(self, event_type: str, text: str, timestamp: str = ""):
@@ -317,6 +348,16 @@ class TranslatorApp(ctk.CTk):
         if handler:
             handler()
 
+        # Log to history
+        if event_type == "interviewer":
+            self._history.log_interviewer(text, timestamp)
+        elif event_type == "ai":
+            self._history.log_ai_response(text, timestamp)
+        elif event_type == "interviewer_translation":
+            self._history.log_interviewer(text, timestamp)
+        elif event_type == "ai_translation":
+            self._history.log_ai_response(text, timestamp)
+
     # ─── Backend ─────────────────────────────────────────────
 
     def _start_backend(self):
@@ -333,6 +374,8 @@ class TranslatorApp(ctk.CTk):
         # AI Provider
         ai_provider = create_ai_provider(AI_PROVIDER)
         ai_provider.set_context(docs_context)
+        ai_provider.set_job_description(JobDescription.load())
+        self._ai_provider = ai_provider
 
         # Whisper
         self._emit("status", "Cargando Whisper...")

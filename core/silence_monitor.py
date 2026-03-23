@@ -15,12 +15,12 @@ class ConversationEntry:
 
 
 class SilenceMonitor:
-    """Detecta silencios prolongados y genera respuestas con IA."""
+    """Detecta silencios prolongados y genera respuestas con IA con memoria conversacional."""
 
     def __init__(self, ai_provider: AIProvider, translator: TextTranslator, on_event):
         self._ai = ai_provider
         self._translator = translator
-        self._on_event = on_event  # callback para enviar eventos a la UI
+        self._on_event = on_event
 
         self._buffer: list[ConversationEntry] = []
         self._lock = threading.Lock()
@@ -28,16 +28,16 @@ class SilenceMonitor:
         self._answered_up_to = 0
         self._running = False
 
+        # Historial de chat para mantener contexto
+        self._chat_history: list[dict] = []
+
     def record_speech(self, text: str, language: str):
-        """Registra texto transcrito en el buffer."""
         with self._lock:
             self._buffer.append(ConversationEntry(text, language))
         self._last_speech_time = time.time()
 
     def run(self):
-        """Loop de monitoreo (ejecutar en un hilo)."""
         self._running = True
-
         while self._running:
             time.sleep(1)
             self._check_silence()
@@ -69,7 +69,13 @@ class SilenceMonitor:
 
         self._on_event("ai_thinking", "Analizando con documentos...", "")
 
-        answer = self._ai.ask(full_text, detected_lang)
+        # Enviar pregunta con historial
+        answer = self._ai.ask(full_text, detected_lang, self._chat_history)
+
+        # Guardar en historial para mantener contexto
+        self._chat_history.append({"role": "user", "content": full_text})
+        self._chat_history.append({"role": "assistant", "content": answer})
+
         self._on_event("ai", answer, timestamp)
 
         if self._translator.needs_translation(detected_lang):
