@@ -34,7 +34,7 @@ AI_MODELS = {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # User data lives in AppData (persists across updates, works with .exe)
-APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "AudioTranslator")
+APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "InterviewPilot")
 DOCS_FOLDER = os.path.join(APP_DATA_DIR, "docs")
 HISTORY_DIR = os.path.join(APP_DATA_DIR, "history")
 
@@ -43,7 +43,7 @@ os.makedirs(DOCS_FOLDER, exist_ok=True)
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # ─── UI ──────────────────────────────────────────────────────
-WINDOW_TITLE = "Audio Translator"
+WINDOW_TITLE = "InterviewPilot"
 WINDOW_SIZE = "900x600"
 WINDOW_MIN_SIZE = (700, 400)
 WINDOW_OPACITY = 0.92

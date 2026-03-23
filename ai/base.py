@@ -28,9 +28,23 @@ class AIProvider(ABC):
         except Exception as e:
             return f"Error ({self.name}): {e}"
 
+    def ask_with_images(self, images: list[str], detected_lang: str, chat_history: list[dict] | None = None) -> str:
+        """Envía imágenes (base64) al modelo con vision para análisis."""
+        try:
+            return self._call_vision_api(images, detected_lang, chat_history or [])
+        except Exception as e:
+            return f"Error ({self.name}): {e}"
+
     @abstractmethod
     def _call_api(self, question: str, detected_lang: str, chat_history: list[dict]) -> str:
         pass
+
+    def _call_vision_api(self, images: list[str], detected_lang: str, chat_history: list[dict]) -> str:
+        """Override en providers con soporte de vision. Por defecto usa _call_api."""
+        return self._call_api(
+            "[The user sent images but this model doesn't support vision]",
+            detected_lang, chat_history,
+        )
 
     def _build_system_prompt(self, detected_lang: str) -> str:
         lang_name = LANG_NAMES.get(detected_lang, detected_lang)
@@ -69,6 +83,20 @@ class AIProvider(ABC):
             )
 
         return prompt
+
+    def _build_vision_prompt(self, detected_lang: str) -> str:
+        lang_name = LANG_NAMES.get(detected_lang, detected_lang)
+        return (
+            f"You are an expert software engineer helping in a live technical challenge.\n\n"
+            f"INSTRUCTIONS:\n"
+            f"- Analyze the coding problem shown in the screenshot(s).\n"
+            f"- The images may show a scrolling view — combine ALL frames to understand the full problem.\n"
+            f"- Provide a CLEAR, COMPLETE solution with working code.\n"
+            f"- Explain your approach briefly BEFORE the code (1-2 sentences).\n"
+            f"- Use optimal time/space complexity.\n"
+            f"- If the problem platform is visible (LeetCode, HackerRank, etc), follow their format.\n"
+            f"- Respond in {lang_name} ({detected_lang}) for explanations, but code stays in English.\n"
+        )
 
     def _build_messages(self, question: str, detected_lang: str, chat_history: list[dict]) -> list[dict]:
         """Construye la lista de mensajes con historial para APIs tipo chat."""

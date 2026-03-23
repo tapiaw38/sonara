@@ -1,5 +1,6 @@
 import queue
 import threading
+from datetime import datetime
 
 import customtkinter as ctk
 
@@ -12,6 +13,7 @@ from core.audio_capture import AudioCapture
 from core.transcriber import Transcriber
 from core.translator import TextTranslator
 from core.silence_monitor import SilenceMonitor
+from core.screen_capture import ScreenCapture
 from core.history import ConversationHistory
 from core.job_description import JobDescription
 from documents.loader import DocumentLoader
@@ -49,6 +51,7 @@ class TranslatorApp(ctk.CTk):
         self._running = True
         self._capture_guard: CaptureGuard | None = None
         self._ai_provider = None
+        self._screen_capture = ScreenCapture()
         self._history = ConversationHistory()
 
         self._configure_window()
@@ -97,7 +100,7 @@ class TranslatorApp(ctk.CTk):
         title_frame.pack(side="left", padx=16)
 
         ctk.CTkLabel(
-            title_frame, text="AUDIO TRANSLATOR",
+            title_frame, text="INTERVIEWPILOT",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
@@ -153,6 +156,28 @@ class TranslatorApp(ctk.CTk):
         )
         self._opacity_slider.set(WINDOW_OPACITY)
         self._opacity_slider.pack(side="left")
+
+        # Separator
+        ctk.CTkFrame(left, fg_color=BORDER, width=1, height=20).pack(side="left", padx=12)
+
+        # Screenshot button
+        ctk.CTkButton(
+            left, text="Screenshot", width=80, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=SURFACE, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._take_screenshot,
+        ).pack(side="left", padx=(0, 4))
+
+        # Record button
+        self._rec_btn = ctk.CTkButton(
+            left, text="Grabar 5s", width=80, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=SURFACE, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._record_screen,
+        )
+        self._rec_btn.pack(side="left")
 
         # ─── Right: Controls ────────────────────────
         right = ctk.CTkFrame(toolbar, fg_color="transparent")
@@ -327,6 +352,54 @@ class TranslatorApp(ctk.CTk):
 
     def _change_opacity(self, value):
         self.attributes("-alpha", value)
+
+    # ─── Screen Capture ───────────────────────────────────────
+
+    def _take_screenshot(self):
+        if not self._ai_provider:
+            self._set_status("AI provider no inicializado")
+            return
+        self._set_status("Capturando screenshot...")
+        self.iconify()
+        self.after(500, self._do_screenshot)
+
+    def _do_screenshot(self):
+        def capture():
+            img_b64 = self._screen_capture.screenshot()
+            self.after(0, self.deiconify)
+            self._emit("ai_thinking", "Analizando screenshot...", "")
+            answer = self._ai_provider.ask_with_images(
+                [img_b64], "es", self._get_chat_history(),
+            )
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self._emit("ai", answer, timestamp)
+        threading.Thread(target=capture, daemon=True).start()
+
+    def _record_screen(self):
+        if not self._ai_provider:
+            self._set_status("AI provider no inicializado")
+            return
+        self._rec_btn.configure(fg_color=DANGER, text="Grabando...")
+        self._set_status("Grabando pantalla 5s...")
+        self.iconify()
+        self.after(500, self._do_record)
+
+    def _do_record(self):
+        def capture():
+            frames = self._screen_capture.record_frames(duration=5, fps=2)
+            self.after(0, self.deiconify)
+            self.after(0, lambda: self._rec_btn.configure(fg_color=SURFACE, text="Grabar 5s"))
+            self._emit("ai_thinking", f"Analizando {len(frames)} frames...", "")
+            answer = self._ai_provider.ask_with_images(
+                frames, "es", self._get_chat_history(),
+            )
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self._emit("ai", answer, timestamp)
+        threading.Thread(target=capture, daemon=True).start()
+
+    def _get_chat_history(self) -> list[dict]:
+        """Obtiene el historial del silence monitor si existe."""
+        return []
 
     def _open_job_modal(self):
         current = JobDescription.load()
