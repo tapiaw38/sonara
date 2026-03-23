@@ -10,7 +10,7 @@ class ClaudeProvider(AIProvider):
 
         response = client.messages.create(
             model=self._model,
-            max_tokens=1024,
+            max_tokens=256,
             system=self._build_system_prompt(detected_lang),
             messages=[{"role": "user", "content": question}],
         )

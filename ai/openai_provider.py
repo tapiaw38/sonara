@@ -10,7 +10,7 @@ class OpenAIProvider(AIProvider):
 
         response = client.chat.completions.create(
             model=self._model,
-            max_tokens=1024,
+            max_tokens=256,
             messages=[
                 {"role": "system", "content": self._build_system_prompt(detected_lang)},
                 {"role": "user", "content": question},
