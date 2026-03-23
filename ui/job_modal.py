@@ -23,6 +23,9 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
         self._on_save = on_save
 
+        # Hide window while building UI to avoid white flash
+        self.withdraw()
+
         # Window config
         self.title("Job Description")
         self.geometry("600x500")
@@ -32,10 +35,11 @@ class JobDescriptionModal(ctk.CTkToplevel):
         self.transient(parent)
         self.grab_set()
 
-        # Center on parent
-        self.after(10, lambda: self._center_on(parent))
-
         self._build_ui(current_text)
+
+        # Center and show after UI is fully built
+        self._center_on(parent)
+        self.deiconify()
 
     def _center_on(self, parent):
         parent.update_idletasks()

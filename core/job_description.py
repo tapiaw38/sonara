@@ -1,9 +1,9 @@
 import os
 
-from config import BASE_DIR
+from config import APP_DATA_DIR
 
 
-JD_FILE = os.path.join(BASE_DIR, "job_description.txt")
+JD_FILE = os.path.join(APP_DATA_DIR, "job_description.txt")
 
 
 class JobDescription:

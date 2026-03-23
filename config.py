@@ -32,7 +32,15 @@ AI_MODELS = {
 
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOCS_FOLDER = os.path.join(BASE_DIR, "docs")
+
+# User data lives in AppData (persists across updates, works with .exe)
+APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "AudioTranslator")
+DOCS_FOLDER = os.path.join(APP_DATA_DIR, "docs")
+HISTORY_DIR = os.path.join(APP_DATA_DIR, "history")
+
+# Create folders on startup
+os.makedirs(DOCS_FOLDER, exist_ok=True)
+os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # ─── UI ──────────────────────────────────────────────────────
 WINDOW_TITLE = "Audio Translator"

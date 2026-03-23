@@ -17,6 +17,8 @@ from core.job_description import JobDescription
 from documents.loader import DocumentLoader
 from ui.capture_guard import CaptureGuard
 from ui.job_modal import JobDescriptionModal
+from ui.history_modal import HistoryModal
+from ui.docs_modal import DocsModal
 
 # ─── Theme ───────────────────────────────────────────────────
 BG_PRIMARY = "#0c0c14"
@@ -192,6 +194,31 @@ class TranslatorApp(ctk.CTk):
         # Separator
         ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
 
+        # History button
+        ctk.CTkButton(
+            right, text="Historial", width=70, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=SURFACE, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._open_history_modal,
+        ).pack(side="right")
+
+        # Separator
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+
+        # Docs button
+        self._docs_btn = ctk.CTkButton(
+            right, text="Docs", width=55, height=26,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=SURFACE, hover_color=ACCENT_HOVER,
+            text_color="#ffffff", corner_radius=6,
+            command=self._open_docs_modal,
+        )
+        self._docs_btn.pack(side="right")
+
+        # Separator
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+
         # Job Description button
         jd_color = "#22c55e" if JobDescription.exists() else SURFACE
         self._jd_btn = ctk.CTkButton(
@@ -305,6 +332,22 @@ class TranslatorApp(ctk.CTk):
         current = JobDescription.load()
         JobDescriptionModal(self, current, self._save_job_description)
 
+    def _open_docs_modal(self):
+        DocsModal(self, self._reload_docs)
+
+    def _reload_docs(self):
+        """Recarga documentos y actualiza el contexto del AI provider."""
+        loader = DocumentLoader(DOCS_FOLDER)
+        docs_context, files = loader.load_all()
+        if self._ai_provider:
+            self._ai_provider.set_context(docs_context)
+        has_docs = len(files) > 0
+        self._docs_btn.configure(fg_color="#22c55e" if has_docs else SURFACE)
+        self._set_status(f"Docs: {', '.join(files)}" if files else "Sin documentos")
+
+    def _open_history_modal(self):
+        HistoryModal(self)
+
     def _save_job_description(self, text: str):
         JobDescription.save(text)
         if self._ai_provider:
@@ -342,6 +385,8 @@ class TranslatorApp(ctk.CTk):
             "ai_translation": lambda: self._append_to(
                 self._ai_text, f"↳ {text}\n", timestamp, "translation"),
             "status": lambda: self._set_status(text),
+            "docs_loaded": lambda: self._docs_btn.configure(
+                fg_color="#22c55e" if int(text) > 0 else SURFACE),
         }
 
         handler = handlers.get(event_type)
@@ -368,6 +413,7 @@ class TranslatorApp(ctk.CTk):
         self._emit("status", "Cargando documentos...")
         loader = DocumentLoader(DOCS_FOLDER)
         docs_context, files = loader.load_all()
+        self._emit("docs_loaded", str(len(files)), "")
         if files:
             self._emit("status", f"Docs: {', '.join(files)}")
 

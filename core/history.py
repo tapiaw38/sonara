@@ -1,15 +1,14 @@
 import os
 from datetime import datetime
 
-from config import BASE_DIR
+from config import HISTORY_DIR
 
 
 class ConversationHistory:
     """Guarda el historial de conversaciones en archivos txt."""
 
     def __init__(self):
-        self._history_dir = os.path.join(BASE_DIR, "history")
-        os.makedirs(self._history_dir, exist_ok=True)
+        self._history_dir = HISTORY_DIR
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._filepath = os.path.join(self._history_dir, f"session_{timestamp}.txt")
