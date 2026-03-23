@@ -1,0 +1,11 @@
+pyaudiowpatch
+faster-whisper
+deep-translator
+numpy
+customtkinter
+pymupdf
+google-generativeai
+anthropic
+openai
+groq
+python-dotenv
