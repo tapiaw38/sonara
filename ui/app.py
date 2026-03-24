@@ -55,6 +55,7 @@ class TranslatorApp(ctk.CTk):
         self._screen_capture = ScreenCapture()
         self._history = ConversationHistory()
         self._listening_status: str = ""
+        self._device_name: str = ""
 
         self._configure_window()
         self._build_ui()
@@ -399,6 +400,9 @@ class TranslatorApp(ctk.CTk):
         self._history_btn.configure(text=t("history"))
         self._docs_btn.configure(text=t("docs"))
         self._jd_btn.configure(text=t("job_desc"))
+        if self._device_name:
+            self._listening_status = t("listening", device=self._device_name)
+            self._set_status(self._listening_status)
 
     # ─── Screen Capture ───────────────────────────────────────
 
@@ -564,7 +568,8 @@ class TranslatorApp(ctk.CTk):
         audio_capture = AudioCapture(self._audio_queue)
         try:
             device_name = audio_capture.initialize()
-            self._listening_status = t("listening", device=device_name[:30])
+            self._device_name = device_name[:30]
+            self._listening_status = t("listening", device=self._device_name)
             self._emit("status", self._listening_status)
         except RuntimeError as e:
             self._emit("status", f"ERROR: {e}")
