@@ -1,5 +1,7 @@
 import customtkinter as ctk
 
+from ui.i18n import t
+
 # ─── Theme (same as app.py) ──────────────────────────────────
 BG_PRIMARY = "#0c0c14"
 BG_HEADER = "#12121e"
@@ -54,13 +56,13 @@ class JobDescriptionModal(ctk.CTkToplevel):
         header.pack_propagate(False)
 
         ctk.CTkLabel(
-            header, text="Job Description",
+            header, text=t("jd_title"),
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left", padx=20)
 
         ctk.CTkLabel(
-            header, text="Pega la descripcion del puesto al que aplicas",
+            header, text=t("jd_subtitle"),
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=(8, 0))
@@ -92,7 +94,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
         btn_frame.pack(side="right", padx=16)
 
         ctk.CTkButton(
-            btn_frame, text="Cancelar", width=80, height=30,
+            btn_frame, text=t("cancel"), width=80, height=30,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=SURFACE, hover_color=BORDER,
             text_color=TEXT_SECONDARY, corner_radius=6,
@@ -100,7 +102,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
-            btn_frame, text="Guardar", width=80, height=30,
+            btn_frame, text=t("save"), width=80, height=30,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=SUCCESS, hover_color=SUCCESS_HOVER,
             text_color="#ffffff", corner_radius=6,
@@ -109,7 +111,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
         # Character count
         self._char_label = ctk.CTkLabel(
-            footer, text="0 caracteres",
+            footer, text=t("characters", n=0),
             font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=TEXT_MUTED,
         )
@@ -120,7 +122,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
     def _update_count(self, event=None):
         text = self._textbox.get("1.0", "end-1c")
-        self._char_label.configure(text=f"{len(text)} caracteres")
+        self._char_label.configure(text=t("characters", n=len(text)))
 
     def _save(self):
         text = self._textbox.get("1.0", "end-1c")

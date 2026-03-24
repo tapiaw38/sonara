@@ -4,6 +4,7 @@ import re
 import customtkinter as ctk
 
 from config import HISTORY_DIR
+from ui.i18n import t
 
 # ─── Theme (same as app.py) ──────────────────────────────────
 BG_PRIMARY = "#0c0c14"
@@ -35,7 +36,7 @@ class HistoryModal(ctk.CTkToplevel):
         self.withdraw()
 
         # Window config
-        self.title("Historial de Conversaciones")
+        self.title(t("history_title"))
         self.geometry("900x600")
         self.configure(fg_color=BG_PRIMARY)
         self.resizable(True, True)
@@ -68,7 +69,7 @@ class HistoryModal(ctk.CTkToplevel):
         header.pack_propagate(False)
 
         ctk.CTkLabel(
-            header, text="Historial",
+            header, text=t("history_header"),
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left", padx=20)
@@ -82,7 +83,7 @@ class HistoryModal(ctk.CTkToplevel):
 
         # Close button
         ctk.CTkButton(
-            header, text="Cerrar", width=70, height=28,
+            header, text=t("close"), width=70, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=SURFACE, hover_color=BORDER,
             text_color=TEXT_SECONDARY, corner_radius=6,
@@ -113,7 +114,7 @@ class HistoryModal(ctk.CTkToplevel):
         sidebar_header.pack_propagate(False)
 
         ctk.CTkLabel(
-            sidebar_header, text="Sesiones",
+            sidebar_header, text=t("sessions"),
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color=TEXT_SECONDARY,
         ).pack(side="left")
@@ -139,7 +140,7 @@ class HistoryModal(ctk.CTkToplevel):
 
         # Empty state
         self._empty_label = ctk.CTkLabel(
-            viewer, text="Selecciona una sesion para ver la conversacion",
+            viewer, text=t("select_session"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=TEXT_MUTED,
         )
@@ -168,7 +169,7 @@ class HistoryModal(ctk.CTkToplevel):
 
     def _load_sessions(self):
         if not os.path.isdir(self._history_dir):
-            self._session_count_label.configure(text="Sin historial")
+            self._session_count_label.configure(text=t("no_history"))
             return
 
         files = sorted(
@@ -177,7 +178,7 @@ class HistoryModal(ctk.CTkToplevel):
         )
 
         if not files:
-            self._session_count_label.configure(text="Sin historial")
+            self._session_count_label.configure(text=t("no_history"))
             return
 
         # Group by date
@@ -188,7 +189,7 @@ class HistoryModal(ctk.CTkToplevel):
                 date = match.group(1)
                 grouped.setdefault(date, []).append(f)
 
-        self._session_count_label.configure(text=f"{len(files)} sesiones")
+        self._session_count_label.configure(text=t("n_sessions", n=len(files)))
 
         # Build sidebar items
         for date, session_files in grouped.items():

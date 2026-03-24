@@ -5,6 +5,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from config import DOCS_FOLDER
+from ui.i18n import t
 
 # ─── Theme (same as app.py) ──────────────────────────────────
 BG_PRIMARY = "#0c0c14"
@@ -35,7 +36,7 @@ class DocsModal(ctk.CTkToplevel):
 
         self.withdraw()
 
-        self.title("Documentos")
+        self.title(t("documents"))
         self.geometry("550x450")
         self.configure(fg_color=BG_PRIMARY)
         self.resizable(True, True)
@@ -68,7 +69,7 @@ class DocsModal(ctk.CTkToplevel):
         header.pack_propagate(False)
 
         ctk.CTkLabel(
-            header, text="Documentos",
+            header, text=t("documents"),
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left", padx=20)
@@ -82,7 +83,7 @@ class DocsModal(ctk.CTkToplevel):
 
         # Add button in header
         ctk.CTkButton(
-            header, text="+ Agregar", width=90, height=28,
+            header, text=t("add"), width=90, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=SUCCESS, hover_color=SUCCESS_HOVER,
             text_color="#ffffff", corner_radius=6,
@@ -104,7 +105,7 @@ class DocsModal(ctk.CTkToplevel):
         # Empty state
         self._empty_label = ctk.CTkLabel(
             self._list_frame,
-            text="No hay documentos cargados\n\nAgrega tu CV, PDFs o notas\npara que la IA los use como contexto",
+            text=t("no_docs_loaded"),
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=TEXT_MUTED, justify="center",
         )
@@ -118,13 +119,13 @@ class DocsModal(ctk.CTkToplevel):
         footer.pack_propagate(False)
 
         ctk.CTkLabel(
-            footer, text="Formatos: PDF, TXT, MD, CSV",
+            footer, text=t("supported_formats"),
             font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=16)
 
         ctk.CTkButton(
-            footer, text="Cerrar", width=70, height=28,
+            footer, text=t("close"), width=70, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=SURFACE, hover_color=BORDER,
             text_color=TEXT_SECONDARY, corner_radius=6,
@@ -143,11 +144,12 @@ class DocsModal(ctk.CTkToplevel):
 
         if not files:
             self._empty_label.pack(pady=40)
-            self._count_label.configure(text="0 documentos")
+            self._count_label.configure(text=t("n_documents", n=0))
             return
 
         self._empty_label.pack_forget()
-        self._count_label.configure(text=f"{len(files)} documento{'s' if len(files) != 1 else ''}")
+        key = "n_documents" if len(files) != 1 else "n_document"
+        self._count_label.configure(text=t(key, n=len(files)))
 
         for filename in files:
             self._create_doc_row(filename)
@@ -197,16 +199,16 @@ class DocsModal(ctk.CTkToplevel):
 
     def _add_documents(self):
         filetypes = [
-            ("Documentos soportados", "*.pdf *.txt *.md *.csv"),
+            (t("supported_docs"), "*.pdf *.txt *.md *.csv"),
             ("PDF", "*.pdf"),
-            ("Texto", "*.txt"),
+            (t("text"), "*.txt"),
             ("Markdown", "*.md"),
             ("CSV", "*.csv"),
         ]
 
         paths = filedialog.askopenfilenames(
             parent=self,
-            title="Seleccionar documentos",
+            title=t("select_documents"),
             filetypes=filetypes,
         )
 
