@@ -22,27 +22,12 @@ from ui.job_modal import JobDescriptionModal
 from ui.history_modal import HistoryModal
 from ui.docs_modal import DocsModal
 from ui.i18n import t, get_lang, set_lang, on_lang_change, remove_lang_callback
-
-# ─── Theme ───────────────────────────────────────────────────
-BG_PRIMARY = "#0c0c14"
-BG_HEADER = "#12121e"
-BG_PANEL = "#0e0e1a"
-BG_PANEL_HEADER = "#16162a"
-BG_TEXT = "#0a0a12"
-ACCENT = "#3b82f6"
-ACCENT_HOVER = "#2563eb"
-ACCENT_WARM = "#f59e0b"
-ACCENT_WARM_HOVER = "#d97706"
-TEXT_PRIMARY = "#e2e8f0"
-TEXT_SECONDARY = "#94a3b8"
-TEXT_MUTED = "#475569"
-TEXT_TRANSLATION = "#60a5fa"
-DANGER = "#ef4444"
-DANGER_HOVER = "#dc2626"
-SURFACE = "#1e1e2e"
-BORDER = "#1e293b"
-BTN_HOVER = "#1a1a2e"
-STATE_ACTIVE = "#22c55e"
+from ui.theme import (
+    BG_PRIMARY, BG_HEADER, BG_PANEL, BG_TEXT,
+    ACCENT, ACCENT_HOVER, ACCENT_WARM, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    TEXT_TRANSLATION, DANGER, DANGER_HOVER, SUCCESS,
+    SURFACE, BORDER, BTN_HOVER, STATE_ACTIVE,
+)
 
 
 class TranslatorApp(ctk.CTk):

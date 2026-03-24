@@ -5,22 +5,11 @@ import customtkinter as ctk
 
 from config import HISTORY_DIR
 from ui.i18n import t
-
-# ─── Theme (same as app.py) ──────────────────────────────────
-BG_PRIMARY = "#0c0c14"
-BG_HEADER = "#12121e"
-BG_TEXT = "#0a0a12"
-ACCENT = "#3b82f6"
-ACCENT_HOVER = "#2563eb"
-ACCENT_WARM = "#f59e0b"
-TEXT_PRIMARY = "#e2e8f0"
-TEXT_SECONDARY = "#94a3b8"
-TEXT_MUTED = "#475569"
-TEXT_TRANSLATION = "#60a5fa"
-SURFACE = "#1e1e2e"
-BORDER = "#1e293b"
-SUCCESS = "#22c55e"
-DANGER = "#ef4444"
+from ui.theme import (
+    BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT, ACCENT_WARM,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_TRANSLATION,
+    SURFACE, BORDER, BTN_HOVER,
+)
 
 
 class HistoryModal(ctk.CTkToplevel):
@@ -32,10 +21,8 @@ class HistoryModal(ctk.CTkToplevel):
         self._history_dir = HISTORY_DIR
         self._sessions: list[dict] = []
 
-        # Hide window while building UI to avoid white flash
         self.withdraw()
 
-        # Window config
         self.title(t("history_title"))
         self.geometry("900x600")
         self.configure(fg_color=BG_PRIMARY)
@@ -47,7 +34,6 @@ class HistoryModal(ctk.CTkToplevel):
         self._build_ui()
         self._load_sessions()
 
-        # Center and show after UI is fully built
         self._center_on(parent)
         self.deiconify()
 
@@ -68,29 +54,34 @@ class HistoryModal(ctk.CTkToplevel):
         header.pack(fill="x")
         header.pack_propagate(False)
 
+        # Accent bar + title
+        ctk.CTkFrame(
+            header, fg_color=ACCENT, width=3, corner_radius=2,
+        ).pack(side="left", fill="y", padx=(16, 10), pady=10)
+
         ctk.CTkLabel(
             header, text=t("history_header"),
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=20)
+        ).pack(side="left")
 
         self._session_count_label = ctk.CTkLabel(
             header, text="",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=TEXT_MUTED,
         )
-        self._session_count_label.pack(side="left", padx=(8, 0))
+        self._session_count_label.pack(side="left", padx=(10, 0))
 
-        # Close button
+        # Close button (ghost)
         ctk.CTkButton(
             header, text=t("close"), width=70, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=BORDER,
+            fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
             command=self.destroy,
         ).pack(side="right", padx=16)
 
-        # Separator
         ctk.CTkFrame(self, fg_color=BORDER, height=1).pack(fill="x")
 
     def _build_body(self):
@@ -119,7 +110,6 @@ class HistoryModal(ctk.CTkToplevel):
             text_color=TEXT_SECONDARY,
         ).pack(side="left")
 
-        # Separator
         ctk.CTkFrame(sidebar, fg_color=BORDER, height=1).pack(fill="x", padx=12)
 
         # Scrollable list
@@ -130,15 +120,13 @@ class HistoryModal(ctk.CTkToplevel):
         )
         self._session_list.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # Vertical separator between sidebar and viewer
-        sep = ctk.CTkFrame(parent, fg_color=BORDER, width=1)
-        sep.grid(row=0, column=0, sticky="nse")
+        # Vertical separator
+        ctk.CTkFrame(parent, fg_color=BORDER, width=1).grid(row=0, column=0, sticky="nse")
 
     def _build_viewer(self, parent):
         viewer = ctk.CTkFrame(parent, fg_color=BG_PRIMARY, corner_radius=0)
         viewer.grid(row=0, column=1, sticky="nsew")
 
-        # Empty state
         self._empty_label = ctk.CTkLabel(
             viewer, text=t("select_session"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
@@ -146,7 +134,6 @@ class HistoryModal(ctk.CTkToplevel):
         )
         self._empty_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Conversation viewer
         self._viewer_text = ctk.CTkTextbox(
             viewer, fg_color=BG_TEXT, text_color=TEXT_PRIMARY,
             font=ctk.CTkFont(family="Consolas", size=12),
@@ -154,16 +141,17 @@ class HistoryModal(ctk.CTkToplevel):
             border_width=0,
         )
 
-        # Configure tags for conversation styling
-        self._viewer_text._textbox.tag_configure("session_header", foreground=ACCENT, font=("Segoe UI", 13, "bold"))
-        self._viewer_text._textbox.tag_configure("separator", foreground=TEXT_MUTED)
-        self._viewer_text._textbox.tag_configure("timestamp", foreground=TEXT_MUTED)
-        self._viewer_text._textbox.tag_configure("interviewer_label", foreground=ACCENT)
-        self._viewer_text._textbox.tag_configure("interviewer_text", foreground=TEXT_PRIMARY)
-        self._viewer_text._textbox.tag_configure("ai_label", foreground=ACCENT_WARM)
-        self._viewer_text._textbox.tag_configure("ai_text", foreground=ACCENT_WARM)
-        self._viewer_text._textbox.tag_configure("translation_label", foreground=TEXT_TRANSLATION)
-        self._viewer_text._textbox.tag_configure("translation_text", foreground=TEXT_TRANSLATION)
+        # Configure tags
+        tb = self._viewer_text._textbox
+        tb.tag_configure("session_header", foreground=ACCENT, font=("Segoe UI", 13, "bold"))
+        tb.tag_configure("separator", foreground=TEXT_MUTED)
+        tb.tag_configure("timestamp", foreground=TEXT_MUTED)
+        tb.tag_configure("interviewer_label", foreground=ACCENT)
+        tb.tag_configure("interviewer_text", foreground=TEXT_PRIMARY)
+        tb.tag_configure("ai_label", foreground=ACCENT_WARM)
+        tb.tag_configure("ai_text", foreground=ACCENT_WARM)
+        tb.tag_configure("translation_label", foreground=TEXT_TRANSLATION)
+        tb.tag_configure("translation_text", foreground=TEXT_TRANSLATION)
 
     # ─── Data Loading ─────────────────────────────────────────
 
@@ -181,7 +169,6 @@ class HistoryModal(ctk.CTkToplevel):
             self._session_count_label.configure(text=t("no_history"))
             return
 
-        # Group by date
         grouped: dict[str, list[str]] = {}
         for f in files:
             match = re.match(r"session_(\d{4}-\d{2}-\d{2})_", f)
@@ -191,12 +178,10 @@ class HistoryModal(ctk.CTkToplevel):
 
         self._session_count_label.configure(text=t("n_sessions", n=len(files)))
 
-        # Build sidebar items
         for date, session_files in grouped.items():
             self._add_date_group(date, session_files)
 
     def _add_date_group(self, date: str, files: list[str]):
-        # Date label
         ctk.CTkLabel(
             self._session_list, text=f"  {date}",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
@@ -204,20 +189,18 @@ class HistoryModal(ctk.CTkToplevel):
         ).pack(fill="x", pady=(10, 2))
 
         for filename in files:
-            # Extract time from filename
             match = re.match(r"session_\d{4}-\d{2}-\d{2}_(\d{2})-(\d{2})-(\d{2})\.txt", filename)
             time_str = f"{match.group(1)}:{match.group(2)}:{match.group(3)}" if match else filename
 
-            btn = ctk.CTkButton(
+            ctk.CTkButton(
                 self._session_list,
                 text=f"    {time_str}",
                 width=190, height=30, anchor="w",
                 font=ctk.CTkFont(family="Segoe UI", size=11),
-                fg_color="transparent", hover_color=SURFACE,
+                fg_color="transparent", hover_color=BTN_HOVER,
                 text_color=TEXT_SECONDARY, corner_radius=6,
                 command=lambda f=filename: self._show_session(f),
-            )
-            btn.pack(fill="x", pady=1)
+            ).pack(fill="x", pady=1)
 
     # ─── Session Viewer ───────────────────────────────────────
 
@@ -230,11 +213,9 @@ class HistoryModal(ctk.CTkToplevel):
         except (OSError, UnicodeDecodeError):
             return
 
-        # Show viewer, hide empty state
         self._empty_label.place_forget()
         self._viewer_text.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-        # Clear and populate
         self._viewer_text.configure(state="normal")
         self._viewer_text._textbox.delete("1.0", "end")
 

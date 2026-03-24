@@ -6,22 +6,12 @@ import customtkinter as ctk
 
 from config import DOCS_FOLDER
 from ui.i18n import t
-
-# ─── Theme (same as app.py) ──────────────────────────────────
-BG_PRIMARY = "#0c0c14"
-BG_HEADER = "#12121e"
-BG_TEXT = "#0a0a12"
-ACCENT = "#3b82f6"
-ACCENT_HOVER = "#2563eb"
-TEXT_PRIMARY = "#e2e8f0"
-TEXT_SECONDARY = "#94a3b8"
-TEXT_MUTED = "#475569"
-SURFACE = "#1e1e2e"
-BORDER = "#1e293b"
-SUCCESS = "#22c55e"
-SUCCESS_HOVER = "#16a34a"
-DANGER = "#ef4444"
-DANGER_HOVER = "#dc2626"
+from ui.theme import (
+    BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    SURFACE, BORDER, BTN_HOVER, SUCCESS, SUCCESS_HOVER,
+    DANGER, DANGER_HOVER,
+)
 
 SUPPORTED_EXTENSIONS = (".pdf", ".txt", ".md", ".csv")
 
@@ -68,33 +58,36 @@ class DocsModal(ctk.CTkToplevel):
         header.pack(fill="x")
         header.pack_propagate(False)
 
+        # Accent bar + title
+        ctk.CTkFrame(
+            header, fg_color=ACCENT, width=3, corner_radius=2,
+        ).pack(side="left", fill="y", padx=(16, 10), pady=10)
+
         ctk.CTkLabel(
             header, text=t("documents"),
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=20)
+        ).pack(side="left")
 
         self._count_label = ctk.CTkLabel(
             header, text="",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=TEXT_MUTED,
         )
-        self._count_label.pack(side="left", padx=(8, 0))
+        self._count_label.pack(side="left", padx=(10, 0))
 
-        # Add button in header
+        # Add button (primary)
         ctk.CTkButton(
-            header, text=t("add"), width=90, height=28,
+            header, text=t("add"), width=80, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=SUCCESS, hover_color=SUCCESS_HOVER,
             text_color="#ffffff", corner_radius=6,
             command=self._add_documents,
         ).pack(side="right", padx=16)
 
-        # Separator
         ctk.CTkFrame(self, fg_color=BORDER, height=1).pack(fill="x")
 
     def _build_doc_list(self):
-        # Scrollable container for document items
         self._list_frame = ctk.CTkScrollableFrame(
             self, fg_color=BG_PRIMARY,
             scrollbar_button_color=SURFACE,
@@ -102,7 +95,6 @@ class DocsModal(ctk.CTkToplevel):
         )
         self._list_frame.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # Empty state
         self._empty_label = ctk.CTkLabel(
             self._list_frame,
             text=t("no_docs_loaded"),
@@ -111,7 +103,6 @@ class DocsModal(ctk.CTkToplevel):
         )
 
     def _build_footer(self):
-        # Separator
         ctk.CTkFrame(self, fg_color=BORDER, height=1).pack(fill="x")
 
         footer = ctk.CTkFrame(self, fg_color=BG_HEADER, height=44, corner_radius=0)
@@ -124,18 +115,19 @@ class DocsModal(ctk.CTkToplevel):
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=16)
 
+        # Close (ghost)
         ctk.CTkButton(
             footer, text=t("close"), width=70, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=BORDER,
+            fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
             command=self.destroy,
         ).pack(side="right", padx=16)
 
     # ─── Document List ────────────────────────────────────────
 
     def _refresh_list(self):
-        # Clear existing items
         for widget in self._list_frame.winfo_children():
             if widget != self._empty_label:
                 widget.destroy()
@@ -160,7 +152,10 @@ class DocsModal(ctk.CTkToplevel):
         size_str = self._format_size(size)
         ext = os.path.splitext(filename)[1].upper().replace(".", "")
 
-        row = ctk.CTkFrame(self._list_frame, fg_color=SURFACE, height=44, corner_radius=8)
+        row = ctk.CTkFrame(
+            self._list_frame, fg_color=SURFACE, height=44, corner_radius=8,
+            border_width=1, border_color=BORDER,
+        )
         row.pack(fill="x", padx=12, pady=3)
         row.pack_propagate(False)
 
@@ -186,12 +181,13 @@ class DocsModal(ctk.CTkToplevel):
             text_color=TEXT_MUTED,
         ).pack(side="right", padx=(0, 8))
 
-        # Delete button
+        # Delete button (ghost danger)
         ctk.CTkButton(
             row, text="X", width=28, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color=DANGER, hover_color=DANGER_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=DANGER_HOVER,
+            text_color=DANGER, corner_radius=6,
+            border_width=1, border_color=DANGER,
             command=lambda f=filename: self._delete_document(f),
         ).pack(side="right", padx=(0, 6))
 

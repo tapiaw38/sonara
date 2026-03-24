@@ -1,20 +1,11 @@
 import customtkinter as ctk
 
 from ui.i18n import t
-
-# ─── Theme (same as app.py) ──────────────────────────────────
-BG_PRIMARY = "#0c0c14"
-BG_HEADER = "#12121e"
-BG_TEXT = "#0a0a12"
-ACCENT = "#3b82f6"
-ACCENT_HOVER = "#2563eb"
-TEXT_PRIMARY = "#e2e8f0"
-TEXT_SECONDARY = "#94a3b8"
-TEXT_MUTED = "#475569"
-SURFACE = "#1e1e2e"
-BORDER = "#1e293b"
-SUCCESS = "#22c55e"
-SUCCESS_HOVER = "#16a34a"
+from ui.theme import (
+    BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT,
+    TEXT_PRIMARY, TEXT_MUTED, TEXT_SECONDARY,
+    SURFACE, BORDER, BTN_HOVER, SUCCESS, SUCCESS_HOVER,
+)
 
 
 class JobDescriptionModal(ctk.CTkToplevel):
@@ -25,10 +16,8 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
         self._on_save = on_save
 
-        # Hide window while building UI to avoid white flash
         self.withdraw()
 
-        # Window config
         self.title("Job Description")
         self.geometry("600x500")
         self.configure(fg_color=BG_PRIMARY)
@@ -39,7 +28,6 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
         self._build_ui(current_text)
 
-        # Center and show after UI is fully built
         self._center_on(parent)
         self.deiconify()
 
@@ -50,27 +38,35 @@ class JobDescriptionModal(ctk.CTkToplevel):
         self.geometry(f"600x500+{px}+{py}")
 
     def _build_ui(self, current_text: str):
-        # Header
+        self._build_header()
+        self._build_editor(current_text)
+        self._build_footer()
+
+    def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=BG_HEADER, height=50, corner_radius=0)
         header.pack(fill="x")
         header.pack_propagate(False)
 
+        # Accent bar + title
+        ctk.CTkFrame(
+            header, fg_color=ACCENT, width=3, corner_radius=2,
+        ).pack(side="left", fill="y", padx=(16, 10), pady=10)
+
         ctk.CTkLabel(
             header, text=t("jd_title"),
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
-        ).pack(side="left", padx=20)
+        ).pack(side="left")
 
         ctk.CTkLabel(
             header, text=t("jd_subtitle"),
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=TEXT_MUTED,
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(12, 0))
 
-        # Separator
         ctk.CTkFrame(self, fg_color=BORDER, height=1).pack(fill="x")
 
-        # Text area
+    def _build_editor(self, current_text: str):
         self._textbox = ctk.CTkTextbox(
             self, fg_color=BG_TEXT, text_color=TEXT_PRIMARY,
             font=ctk.CTkFont(family="Consolas", size=12),
@@ -81,26 +77,36 @@ class JobDescriptionModal(ctk.CTkToplevel):
         if current_text:
             self._textbox.insert("1.0", current_text)
 
-        # Footer
+    def _build_footer(self):
+        ctk.CTkFrame(self, fg_color=BORDER, height=1).pack(fill="x")
+
         footer = ctk.CTkFrame(self, fg_color=BG_HEADER, height=50, corner_radius=0)
         footer.pack(fill="x", side="bottom")
         footer.pack_propagate(False)
 
-        # Separator
-        ctk.CTkFrame(footer, fg_color=BORDER, height=1).place(relx=0, rely=0, relwidth=1)
+        # Character count (left)
+        self._char_label = ctk.CTkLabel(
+            footer, text=t("characters", n=0),
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
+        )
+        self._char_label.pack(side="left", padx=16)
 
-        # Buttons
+        # Buttons (right)
         btn_frame = ctk.CTkFrame(footer, fg_color="transparent")
         btn_frame.pack(side="right", padx=16)
 
+        # Cancel (ghost)
         ctk.CTkButton(
             btn_frame, text=t("cancel"), width=80, height=30,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=BORDER,
+            fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
             command=self.destroy,
         ).pack(side="left", padx=(0, 8))
 
+        # Save (primary)
         ctk.CTkButton(
             btn_frame, text=t("save"), width=80, height=30,
             font=ctk.CTkFont(family="Segoe UI", size=11),
@@ -108,14 +114,6 @@ class JobDescriptionModal(ctk.CTkToplevel):
             text_color="#ffffff", corner_radius=6,
             command=self._save,
         ).pack(side="left")
-
-        # Character count
-        self._char_label = ctk.CTkLabel(
-            footer, text=t("characters", n=0),
-            font=ctk.CTkFont(family="Segoe UI", size=10),
-            text_color=TEXT_MUTED,
-        )
-        self._char_label.pack(side="left", padx=16)
 
         self._textbox.bind("<KeyRelease>", self._update_count)
         self._update_count()
