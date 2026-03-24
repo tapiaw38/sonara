@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 
-from config import LANG_NAMES
+from config import LANG_NAMES, CHAT_HISTORY_LIMIT
+
+
+VISION_USER_PROMPT = "Analyze this coding problem and provide the solution."
 
 
 class AIProvider(ABC):
@@ -102,8 +105,7 @@ class AIProvider(ABC):
         """Construye la lista de mensajes con historial para APIs tipo chat."""
         messages = [{"role": "system", "content": self._build_system_prompt(detected_lang)}]
 
-        # Agregar historial (últimos 20 intercambios para no exceder tokens)
-        for entry in chat_history[-20:]:
+        for entry in chat_history[-CHAT_HISTORY_LIMIT:]:
             messages.append(entry)
 
         messages.append({"role": "user", "content": question})

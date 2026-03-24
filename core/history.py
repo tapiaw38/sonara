@@ -3,6 +3,11 @@ from datetime import datetime
 
 from config import HISTORY_DIR
 
+# Log format labels (shared with history_modal.py for parsing)
+LABEL_INTERVIEWER = "INTERVIEWER:"
+LABEL_AI_RESPONSE = "AI RESPONSE:"
+LABEL_TRANSLATION = "TRADUCCION:"
+
 
 class ConversationHistory:
     """Guarda el historial de conversaciones en archivos txt."""
@@ -21,14 +26,14 @@ class ConversationHistory:
 
     def log_interviewer(self, text: str, timestamp: str, translation: str | None = None):
         with open(self._filepath, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] INTERVIEWER: {text}\n")
+            f.write(f"[{timestamp}] {LABEL_INTERVIEWER} {text}\n")
             if translation:
-                f.write(f"           TRADUCCION: {translation}\n")
+                f.write(f"           {LABEL_TRANSLATION} {translation}\n")
             f.write("\n")
 
     def log_ai_response(self, text: str, timestamp: str, translation: str | None = None):
         with open(self._filepath, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] AI RESPONSE: {text}\n")
+            f.write(f"[{timestamp}] {LABEL_AI_RESPONSE} {text}\n")
             if translation:
-                f.write(f"           TRADUCCION: {translation}\n")
+                f.write(f"           {LABEL_TRANSLATION} {translation}\n")
             f.write("\n")

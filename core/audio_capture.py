@@ -3,7 +3,7 @@ import queue
 import numpy as np
 import pyaudiowpatch as pyaudio
 
-from config import SEGMENT_SECONDS
+from config import SEGMENT_SECONDS, AUDIO_FRAMES_BUFFER
 
 
 class AudioCapture:
@@ -47,7 +47,7 @@ class AudioCapture:
             rate=rate,
             input=True,
             input_device_index=self._loopback["index"],
-            frames_per_buffer=512,
+            frames_per_buffer=AUDIO_FRAMES_BUFFER,
         )
 
         self._running = True
@@ -68,10 +68,10 @@ class AudioCapture:
 
     def _record_segment(self, stream, frames_count: int) -> list[np.ndarray]:
         frames = []
-        for _ in range(0, frames_count, 512):
+        for _ in range(0, frames_count, AUDIO_FRAMES_BUFFER):
             if not self._running:
                 break
-            data = stream.read(512, exception_on_overflow=False)
+            data = stream.read(AUDIO_FRAMES_BUFFER, exception_on_overflow=False)
             frames.append(np.frombuffer(data, dtype=np.float32))
         return frames
 

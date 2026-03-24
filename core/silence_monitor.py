@@ -31,6 +31,10 @@ class SilenceMonitor:
         # Historial de chat para mantener contexto
         self._chat_history: list[dict] = []
 
+    @property
+    def chat_history(self) -> list[dict]:
+        return self._chat_history
+
     def record_speech(self, text: str, language: str):
         with self._lock:
             self._buffer.append(ConversationEntry(text, language))

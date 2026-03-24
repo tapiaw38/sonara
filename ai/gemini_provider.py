@@ -2,7 +2,8 @@ import base64
 
 import google.generativeai as genai
 
-from ai.base import AIProvider
+from ai.base import AIProvider, VISION_USER_PROMPT
+from config import CHAT_HISTORY_LIMIT, VISION_HISTORY_LIMIT
 
 
 class GeminiProvider(AIProvider):
@@ -15,9 +16,8 @@ class GeminiProvider(AIProvider):
             system_instruction=self._build_system_prompt(detected_lang),
         )
 
-        # Convertir historial al formato de Gemini
         gemini_history = []
-        for entry in chat_history[-20:]:
+        for entry in chat_history[-CHAT_HISTORY_LIMIT:]:
             role = "user" if entry["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [entry["content"]]})
 
@@ -36,10 +36,10 @@ class GeminiProvider(AIProvider):
         parts = []
         for img_b64 in images:
             parts.append({"mime_type": "image/png", "data": base64.b64decode(img_b64)})
-        parts.append("Analyze this coding problem and provide the solution.")
+        parts.append(VISION_USER_PROMPT)
 
         gemini_history = []
-        for entry in chat_history[-10:]:
+        for entry in chat_history[-VISION_HISTORY_LIMIT:]:
             role = "user" if entry["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [entry["content"]]})
 

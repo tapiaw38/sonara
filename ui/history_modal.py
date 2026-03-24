@@ -4,8 +4,10 @@ import re
 import customtkinter as ctk
 
 from config import HISTORY_DIR
+from core.history import LABEL_INTERVIEWER, LABEL_AI_RESPONSE, LABEL_TRANSLATION
 from ui.i18n import t
 from ui.theme import (
+    FONT_FAMILY, FONT_MONO,
     BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT, ACCENT_WARM,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_TRANSLATION,
     SURFACE, BORDER, BTN_HOVER,
@@ -61,13 +63,13 @@ class HistoryModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             header, text=t("history_header"),
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
 
         self._session_count_label = ctk.CTkLabel(
             header, text="",
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         )
         self._session_count_label.pack(side="left", padx=(10, 0))
@@ -75,7 +77,7 @@ class HistoryModal(ctk.CTkToplevel):
         # Close button (ghost)
         ctk.CTkButton(
             header, text=t("close"), width=70, height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
             border_width=1, border_color=BORDER,
@@ -106,7 +108,7 @@ class HistoryModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sidebar_header, text=t("sessions"),
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
             text_color=TEXT_SECONDARY,
         ).pack(side="left")
 
@@ -129,21 +131,21 @@ class HistoryModal(ctk.CTkToplevel):
 
         self._empty_label = ctk.CTkLabel(
             viewer, text=t("select_session"),
-            font=ctk.CTkFont(family="Segoe UI", size=13),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
             text_color=TEXT_MUTED,
         )
         self._empty_label.place(relx=0.5, rely=0.5, anchor="center")
 
         self._viewer_text = ctk.CTkTextbox(
             viewer, fg_color=BG_TEXT, text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(family="Consolas", size=12),
+            font=ctk.CTkFont(family=FONT_MONO, size=12),
             corner_radius=0, wrap="word", state="disabled",
             border_width=0,
         )
 
         # Configure tags
         tb = self._viewer_text._textbox
-        tb.tag_configure("session_header", foreground=ACCENT, font=("Segoe UI", 13, "bold"))
+        tb.tag_configure("session_header", foreground=ACCENT, font=(FONT_FAMILY, 13, "bold"))
         tb.tag_configure("separator", foreground=TEXT_MUTED)
         tb.tag_configure("timestamp", foreground=TEXT_MUTED)
         tb.tag_configure("interviewer_label", foreground=ACCENT)
@@ -184,7 +186,7 @@ class HistoryModal(ctk.CTkToplevel):
     def _add_date_group(self, date: str, files: list[str]):
         ctk.CTkLabel(
             self._session_list, text=f"  {date}",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             text_color=TEXT_MUTED, anchor="w",
         ).pack(fill="x", pady=(10, 2))
 
@@ -196,7 +198,7 @@ class HistoryModal(ctk.CTkToplevel):
                 self._session_list,
                 text=f"    {time_str}",
                 width=190, height=30, anchor="w",
-                font=ctk.CTkFont(family="Segoe UI", size=11),
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                 fg_color="transparent", hover_color=BTN_HOVER,
                 text_color=TEXT_SECONDARY, corner_radius=6,
                 command=lambda f=filename: self._show_session(f),
@@ -232,20 +234,20 @@ class HistoryModal(ctk.CTkToplevel):
                 tb.insert("end", f"{line}\n", "session_header")
             elif line.startswith("=" * 10):
                 tb.insert("end", f"{line}\n\n", "separator")
-            elif "] INTERVIEWER:" in line:
-                ts, text = self._parse_log_line(line, "INTERVIEWER:")
+            elif f"] {LABEL_INTERVIEWER}" in line:
+                ts, text = self._parse_log_line(line, LABEL_INTERVIEWER)
                 if ts:
                     tb.insert("end", f"{ts}  ", "timestamp")
                 tb.insert("end", "INTERVIEWER  ", "interviewer_label")
                 tb.insert("end", f"{text}\n", "interviewer_text")
-            elif "] AI RESPONSE:" in line:
-                ts, text = self._parse_log_line(line, "AI RESPONSE:")
+            elif f"] {LABEL_AI_RESPONSE}" in line:
+                ts, text = self._parse_log_line(line, LABEL_AI_RESPONSE)
                 if ts:
                     tb.insert("end", f"{ts}  ", "timestamp")
                 tb.insert("end", "AI  ", "ai_label")
                 tb.insert("end", f"{text}\n", "ai_text")
-            elif "TRADUCCION:" in line:
-                text = line.split("TRADUCCION:", 1)[1].strip()
+            elif LABEL_TRANSLATION in line:
+                text = line.split(LABEL_TRANSLATION, 1)[1].strip()
                 tb.insert("end", "           ", "timestamp")
                 tb.insert("end", f"↳ {text}\n", "translation_text")
             elif line.strip():

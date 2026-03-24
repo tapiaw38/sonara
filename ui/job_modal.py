@@ -2,8 +2,9 @@ import customtkinter as ctk
 
 from ui.i18n import t
 from ui.theme import (
+    FONT_FAMILY, FONT_MONO,
     BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT,
-    TEXT_PRIMARY, TEXT_MUTED, TEXT_SECONDARY,
+    TEXT_WHITE, TEXT_PRIMARY, TEXT_MUTED, TEXT_SECONDARY,
     SURFACE, BORDER, BTN_HOVER, SUCCESS, SUCCESS_HOVER,
 )
 
@@ -54,13 +55,13 @@ class JobDescriptionModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             header, text=t("jd_title"),
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
 
         ctk.CTkLabel(
             header, text=t("jd_subtitle"),
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=(12, 0))
 
@@ -69,7 +70,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
     def _build_editor(self, current_text: str):
         self._textbox = ctk.CTkTextbox(
             self, fg_color=BG_TEXT, text_color=TEXT_PRIMARY,
-            font=ctk.CTkFont(family="Consolas", size=12),
+            font=ctk.CTkFont(family=FONT_MONO, size=12),
             corner_radius=0, wrap="word", border_width=0,
         )
         self._textbox.pack(fill="both", expand=True, padx=0, pady=0)
@@ -87,7 +88,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
         # Character count (left)
         self._char_label = ctk.CTkLabel(
             footer, text=t("characters", n=0),
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         )
         self._char_label.pack(side="left", padx=16)
@@ -99,7 +100,7 @@ class JobDescriptionModal(ctk.CTkToplevel):
         # Cancel (ghost)
         ctk.CTkButton(
             btn_frame, text=t("cancel"), width=80, height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
             border_width=1, border_color=BORDER,
@@ -109,9 +110,9 @@ class JobDescriptionModal(ctk.CTkToplevel):
         # Save (primary)
         ctk.CTkButton(
             btn_frame, text=t("save"), width=80, height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=SUCCESS, hover_color=SUCCESS_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            text_color=TEXT_WHITE, corner_radius=6,
             command=self._save,
         ).pack(side="left")
 

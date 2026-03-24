@@ -30,6 +30,13 @@ AI_MODELS = {
     "groq": "llama-3.3-70b-versatile",
 }
 
+# ─── AI Limits ───────────────────────────────────────────────
+MAX_TOKENS_TEXT = 256
+MAX_TOKENS_VISION = 2048
+CHAT_HISTORY_LIMIT = 20
+VISION_HISTORY_LIMIT = 10
+MAX_VISION_FRAMES = 5
+
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,6 +48,11 @@ HISTORY_DIR = os.path.join(APP_DATA_DIR, "history")
 # Create folders on startup
 os.makedirs(DOCS_FOLDER, exist_ok=True)
 os.makedirs(HISTORY_DIR, exist_ok=True)
+
+# ─── Timing ──────────────────────────────────────────────────
+UI_POLL_INTERVAL_MS = 100
+CAPTURE_DELAY_MS = 500
+AUDIO_FRAMES_BUFFER = 512
 
 # ─── UI ──────────────────────────────────────────────────────
 WINDOW_TITLE = "InterviewPilot"

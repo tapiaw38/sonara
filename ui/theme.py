@@ -1,6 +1,10 @@
 """Centralized theme constants for the entire UI."""
 
-# ─── Backgrounds ──────────────────────────────────────────────
+# ─── Typography ──────────────────────────────────────────────
+FONT_FAMILY = "Segoe UI"
+FONT_MONO = "Consolas"
+
+# ─── Backgrounds ─────────────────────────────────────────────
 BG_PRIMARY = "#0c0c14"
 BG_HEADER = "#12121e"
 BG_PANEL = "#0e0e1a"
@@ -13,7 +17,8 @@ ACCENT_HOVER = "#2563eb"
 ACCENT_WARM = "#f59e0b"
 ACCENT_WARM_HOVER = "#d97706"
 
-# ─── Text ─────────────────────────────────────────────────────
+# ─── Text ────────────────────────────────────────────────────
+TEXT_WHITE = "#ffffff"
 TEXT_PRIMARY = "#e2e8f0"
 TEXT_SECONDARY = "#94a3b8"
 TEXT_MUTED = "#475569"

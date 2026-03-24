@@ -7,8 +7,9 @@ import customtkinter as ctk
 from config import DOCS_FOLDER
 from ui.i18n import t
 from ui.theme import (
+    FONT_FAMILY,
     BG_PRIMARY, BG_HEADER, BG_TEXT, ACCENT,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    TEXT_WHITE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     SURFACE, BORDER, BTN_HOVER, SUCCESS, SUCCESS_HOVER,
     DANGER, DANGER_HOVER,
 )
@@ -65,13 +66,13 @@ class DocsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             header, text=t("documents"),
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
 
         self._count_label = ctk.CTkLabel(
             header, text="",
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         )
         self._count_label.pack(side="left", padx=(10, 0))
@@ -79,9 +80,9 @@ class DocsModal(ctk.CTkToplevel):
         # Add button (primary)
         ctk.CTkButton(
             header, text=t("add"), width=80, height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=SUCCESS, hover_color=SUCCESS_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            text_color=TEXT_WHITE, corner_radius=6,
             command=self._add_documents,
         ).pack(side="right", padx=16)
 
@@ -98,7 +99,7 @@ class DocsModal(ctk.CTkToplevel):
         self._empty_label = ctk.CTkLabel(
             self._list_frame,
             text=t("no_docs_loaded"),
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=TEXT_MUTED, justify="center",
         )
 
@@ -111,14 +112,14 @@ class DocsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             footer, text=t("supported_formats"),
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=16)
 
         # Close (ghost)
         ctk.CTkButton(
             footer, text=t("close"), width=70, height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color="transparent", hover_color=BTN_HOVER,
             text_color=TEXT_SECONDARY, corner_radius=6,
             border_width=1, border_color=BORDER,
@@ -162,7 +163,7 @@ class DocsModal(ctk.CTkToplevel):
         # File type badge
         ctk.CTkLabel(
             row, text=ext, width=40,
-            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9, weight="bold"),
             text_color=ACCENT, fg_color=BG_TEXT,
             corner_radius=4,
         ).pack(side="left", padx=(10, 8), pady=8)
@@ -170,21 +171,21 @@ class DocsModal(ctk.CTkToplevel):
         # Filename
         ctk.CTkLabel(
             row, text=filename,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=TEXT_PRIMARY, anchor="w",
         ).pack(side="left", fill="x", expand=True)
 
         # Size
         ctk.CTkLabel(
             row, text=size_str,
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=TEXT_MUTED,
         ).pack(side="right", padx=(0, 8))
 
         # Delete button (ghost danger)
         ctk.CTkButton(
             row, text="X", width=28, height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color="transparent", hover_color=DANGER_HOVER,
             text_color=DANGER, corner_radius=6,
             border_width=1, border_color=DANGER,
