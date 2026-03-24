@@ -10,7 +10,7 @@ WHISPER_MODEL = "base"
 WHISPER_COMPUTE = "int8"
 SEGMENT_SECONDS = 5
 SILENCE_THRESHOLD = 0.01
-SILENCE_TIMEOUT = 8
+SILENCE_TIMEOUT = 5
 
 # ─── AI Provider ─────────────────────────────────────────────
 # Opciones: "gemini", "claude", "openai", "groq"
