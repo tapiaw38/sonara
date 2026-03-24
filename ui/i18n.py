@@ -1,5 +1,12 @@
 """Internationalization module for UI labels."""
 
+import os
+
+_LANG_CACHE = os.path.join(
+    os.getenv("APPDATA", os.path.dirname(os.path.abspath(__file__))),
+    "InterviewPilot", "ui_lang.txt",
+)
+
 _TRANSLATIONS = {
     "es": {
         # Toolbar
@@ -23,7 +30,7 @@ _TRANSLATIONS = {
         "analyzing_frames": "Analizando {n} frames...",
         "ai_not_ready": "AI provider no inicializado",
         "loading_docs": "Cargando documentos...",
-        "loading_whisper": "Cargando Whisper...",
+        "loading_whisper": "Cargando...",
         "searching_audio": "Buscando audio...",
         "listening": "Escuchando: {device}...",
         "no_docs": "Sin documentos",
@@ -80,7 +87,7 @@ _TRANSLATIONS = {
         "analyzing_frames": "Analyzing {n} frames...",
         "ai_not_ready": "AI provider not initialized",
         "loading_docs": "Loading documents...",
-        "loading_whisper": "Loading Whisper...",
+        "loading_whisper": "Loading...",
         "searching_audio": "Searching audio...",
         "listening": "Listening: {device}...",
         "no_docs": "No documents",
@@ -119,7 +126,27 @@ _TRANSLATIONS = {
 
 # ─── Language Manager ─────────────────────────────────────────
 
-_current_lang = "es"
+def _load_cached_lang() -> str:
+    try:
+        with open(_LANG_CACHE, "r") as f:
+            lang = f.read().strip()
+            if lang in _TRANSLATIONS:
+                return lang
+    except (OSError, ValueError):
+        pass
+    return "es"
+
+
+def _save_cached_lang(lang: str):
+    try:
+        os.makedirs(os.path.dirname(_LANG_CACHE), exist_ok=True)
+        with open(_LANG_CACHE, "w") as f:
+            f.write(lang)
+    except OSError:
+        pass
+
+
+_current_lang = _load_cached_lang()
 _on_change_callbacks: list = []
 
 
@@ -131,6 +158,7 @@ def set_lang(lang: str):
     global _current_lang
     if lang in _TRANSLATIONS:
         _current_lang = lang
+        _save_cached_lang(lang)
         for cb in _on_change_callbacks:
             cb(lang)
 

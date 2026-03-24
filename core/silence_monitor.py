@@ -67,7 +67,7 @@ class SilenceMonitor:
         detected_lang = entries[-1].language
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        self._on_event("ai_thinking", "Analizando con documentos...", "")
+        self._on_event("ai_thinking", "", "")
 
         # Enviar pregunta con historial
         answer = self._ai.ask(full_text, detected_lang, self._chat_history)
@@ -82,3 +82,5 @@ class SilenceMonitor:
             translated = self._translator.translate(answer)
             if translated:
                 self._on_event("ai_translation", translated, timestamp)
+
+        self._on_event("status_restore", "", "")

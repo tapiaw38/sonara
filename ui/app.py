@@ -54,6 +54,7 @@ class TranslatorApp(ctk.CTk):
         self._ai_provider = None
         self._screen_capture = ScreenCapture()
         self._history = ConversationHistory()
+        self._listening_status: str = ""
 
         self._configure_window()
         self._build_ui()
@@ -413,12 +414,14 @@ class TranslatorApp(ctk.CTk):
         def capture():
             img_b64 = self._screen_capture.screenshot()
             self.after(0, self.deiconify)
-            self._emit("ai_thinking", t("analyzing_screenshot"), "")
+            self._emit("ai_thinking", "", "")
             answer = self._ai_provider.ask_with_images(
                 [img_b64], "es", self._get_chat_history(),
             )
             timestamp = datetime.now().strftime("%H:%M:%S")
             self._emit("ai", answer, timestamp)
+            if self._listening_status:
+                self._emit("status", self._listening_status)
         threading.Thread(target=capture, daemon=True).start()
 
     def _record_screen(self):
@@ -435,12 +438,14 @@ class TranslatorApp(ctk.CTk):
             frames = self._screen_capture.record_frames(duration=5, fps=2)
             self.after(0, self.deiconify)
             self.after(0, lambda: self._rec_btn.configure(fg_color=SURFACE, text=t("record_5s")))
-            self._emit("ai_thinking", t("analyzing_frames", n=len(frames)), "")
+            self._emit("ai_thinking", "", "")
             answer = self._ai_provider.ask_with_images(
                 frames, "es", self._get_chat_history(),
             )
             timestamp = datetime.now().strftime("%H:%M:%S")
             self._emit("ai", answer, timestamp)
+            if self._listening_status:
+                self._emit("status", self._listening_status)
         threading.Thread(target=capture, daemon=True).start()
 
     def _get_chat_history(self) -> list[dict]:
@@ -498,12 +503,13 @@ class TranslatorApp(ctk.CTk):
             "interviewer_translation": lambda: self._append_to(
                 self._interviewer_text, f"  ↳ {text}", timestamp, "translation"),
             "ai_thinking": lambda: self._append_to(
-                self._ai_text, "⏳ " + text, "", "thinking"),
+                self._ai_text, "⏳", "", "thinking"),
             "ai": lambda: self._append_to(
                 self._ai_text, text + "\n", timestamp, "answer"),
             "ai_translation": lambda: self._append_to(
                 self._ai_text, f"↳ {text}\n", timestamp, "translation"),
             "status": lambda: self._set_status(text),
+            "status_restore": lambda: self._set_status(self._listening_status) if self._listening_status else None,
             "docs_loaded": lambda: self._docs_btn.configure(
                 fg_color="#22c55e" if int(text) > 0 else SURFACE),
         }
@@ -558,7 +564,8 @@ class TranslatorApp(ctk.CTk):
         audio_capture = AudioCapture(self._audio_queue)
         try:
             device_name = audio_capture.initialize()
-            self._emit("status", t("listening", device=device_name[:30]))
+            self._listening_status = t("listening", device=device_name[:30])
+            self._emit("status", self._listening_status)
         except RuntimeError as e:
             self._emit("status", f"ERROR: {e}")
             return
