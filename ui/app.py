@@ -38,8 +38,11 @@ TEXT_SECONDARY = "#94a3b8"
 TEXT_MUTED = "#475569"
 TEXT_TRANSLATION = "#60a5fa"
 DANGER = "#ef4444"
+DANGER_HOVER = "#dc2626"
 SURFACE = "#1e1e2e"
 BORDER = "#1e293b"
+BTN_HOVER = "#1a1a2e"
+STATE_ACTIVE = "#22c55e"
 
 
 class TranslatorApp(ctk.CTk):
@@ -132,51 +135,55 @@ class TranslatorApp(ctk.CTk):
             text_color=DANGER,
         ).pack(side="left")
 
-        # Language selector
-        lang_frame = ctk.CTkFrame(header, fg_color="transparent")
+        # Language toggle
+        lang_frame = ctk.CTkFrame(header, fg_color=SURFACE, corner_radius=6)
         lang_frame.pack(side="right", padx=16)
 
-        self._lang_var = ctk.StringVar(value=get_lang())
-        lang_options = {"es": "\U0001f1ea\U0001f1f8  ES", "en": "\U0001f1fa\U0001f1f8  EN"}
-        self._lang_menu = ctk.CTkOptionMenu(
-            lang_frame,
-            values=list(lang_options.values()),
-            variable=ctk.StringVar(value=lang_options[get_lang()]),
-            command=self._on_lang_select,
-            width=90, height=26,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, button_color=SURFACE,
-            button_hover_color=ACCENT_HOVER,
-            dropdown_fg_color=SURFACE,
-            dropdown_hover_color=ACCENT_HOVER,
-            text_color=TEXT_PRIMARY,
-            corner_radius=6,
+        cur = get_lang()
+        self._lang_es_btn = ctk.CTkButton(
+            lang_frame, text="ES", width=34, height=24,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color=ACCENT if cur == "es" else "transparent",
+            hover_color=BTN_HOVER,
+            text_color="#ffffff" if cur == "es" else TEXT_MUTED,
+            corner_radius=4,
+            command=lambda: self._set_ui_lang("es"),
         )
-        self._lang_menu.pack(side="right")
+        self._lang_es_btn.pack(side="left", padx=(2, 0), pady=2)
+
+        self._lang_en_btn = ctk.CTkButton(
+            lang_frame, text="EN", width=34, height=24,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color=ACCENT if cur == "en" else "transparent",
+            hover_color=BTN_HOVER,
+            text_color="#ffffff" if cur == "en" else TEXT_MUTED,
+            corner_radius=4,
+            command=lambda: self._set_ui_lang("en"),
+        )
+        self._lang_en_btn.pack(side="left", padx=(0, 2), pady=2)
 
     def _build_toolbar(self):
-        toolbar = ctk.CTkFrame(self, fg_color=BG_HEADER, height=36, corner_radius=0)
+        toolbar = ctk.CTkFrame(self, fg_color=BG_HEADER, height=40, corner_radius=0)
         toolbar.pack(fill="x")
         toolbar.pack_propagate(False)
 
         # Separator line
-        sep = ctk.CTkFrame(toolbar, fg_color=BORDER, height=1)
-        sep.place(relx=0, rely=0, relwidth=1)
+        ctk.CTkFrame(toolbar, fg_color=BORDER, height=1).place(relx=0, rely=0, relwidth=1)
 
-        # ─── Left: Opacity control ──────────────────
+        # ─── Left: Capture tools ─────────────────────
         left = ctk.CTkFrame(toolbar, fg_color="transparent")
-        left.pack(side="left", padx=16)
+        left.pack(side="left", padx=(16, 0))
 
         self._opacity_label = ctk.CTkLabel(
             left, text=t("opacity"),
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
         )
-        self._opacity_label.pack(side="left", padx=(0, 8))
+        self._opacity_label.pack(side="left", padx=(0, 6))
 
         self._opacity_slider = ctk.CTkSlider(
             left, from_=0.3, to=1.0, number_of_steps=14,
-            width=100, height=14,
+            width=90, height=14,
             progress_color=ACCENT, button_color=TEXT_PRIMARY,
             button_hover_color="#ffffff", fg_color=SURFACE,
             corner_radius=7, button_corner_radius=7,
@@ -185,60 +192,60 @@ class TranslatorApp(ctk.CTk):
         self._opacity_slider.set(WINDOW_OPACITY)
         self._opacity_slider.pack(side="left")
 
-        # Separator
-        ctk.CTkFrame(left, fg_color=BORDER, width=1, height=20).pack(side="left", padx=12)
+        ctk.CTkFrame(left, fg_color=BORDER, width=1, height=20).pack(side="left", padx=10)
 
-        # Screenshot button
+        # Screenshot button (ghost)
         self._screenshot_btn = ctk.CTkButton(
-            left, text=t("screenshot"), width=80, height=26,
+            left, text=t("screenshot"), width=78, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=ACCENT_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
             command=self._take_screenshot,
         )
         self._screenshot_btn.pack(side="left", padx=(0, 4))
 
-        # Record button
+        # Record button (ghost)
         self._rec_btn = ctk.CTkButton(
-            left, text=t("record_5s"), width=80, height=26,
+            left, text=t("record_5s"), width=78, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=ACCENT_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
             command=self._record_screen,
         )
         self._rec_btn.pack(side="left")
 
-        # ─── Right: Controls ────────────────────────
+        # ─── Right: Window controls ──────────────────
         right = ctk.CTkFrame(toolbar, fg_color="transparent")
-        right.pack(side="right", padx=16)
+        right.pack(side="right", padx=(0, 16))
 
         # Screen capture switch
         self._hide_var = ctk.BooleanVar(value=True)
         self._hide_switch = ctk.CTkSwitch(
             right, text=t("hidden"), variable=self._hide_var,
             command=self._toggle_capture,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
             progress_color=ACCENT, button_color=TEXT_PRIMARY,
             button_hover_color="#ffffff", fg_color=SURFACE,
-            width=36, height=18,
+            width=36, height=16,
         )
-        self._hide_switch.pack(side="right", padx=(12, 0))
+        self._hide_switch.pack(side="right", padx=(10, 0))
 
         self._screen_label = ctk.CTkLabel(
             right, text=t("screen"),
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=TEXT_MUTED,
         )
         self._screen_label.pack(side="right")
 
-        # Separator
-        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=10)
 
-        # Pin button
+        # Pin button (filled when active, ghost when inactive)
         self._pinned = True
         self._pin_btn = ctk.CTkButton(
-            right, text=t("pin"), width=50, height=26,
+            right, text=t("pin"), width=46, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=ACCENT, hover_color=ACCENT_HOVER,
             text_color="#ffffff", corner_radius=6,
@@ -246,42 +253,46 @@ class TranslatorApp(ctk.CTk):
         )
         self._pin_btn.pack(side="right")
 
-        # Separator
-        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=10)
 
-        # History button
+        # ─── Center-right: Navigation ────────────────
+        nav = ctk.CTkFrame(toolbar, fg_color="transparent")
+        nav.pack(side="right", padx=(0, 6))
+
+        # History button (ghost)
         self._history_btn = ctk.CTkButton(
-            right, text=t("history"), width=70, height=26,
+            nav, text=t("history"), width=68, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=ACCENT_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_SECONDARY, corner_radius=6,
             command=self._open_history_modal,
         )
-        self._history_btn.pack(side="right")
+        self._history_btn.pack(side="right", padx=(4, 0))
 
-        # Separator
-        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
+        ctk.CTkFrame(nav, fg_color=BORDER, width=1, height=20).pack(side="right", padx=6)
 
-        # Docs button
+        # Docs button (ghost, border indicator when loaded)
+        has_docs = DocumentLoader(DOCS_FOLDER).has_documents()
         self._docs_btn = ctk.CTkButton(
-            right, text=t("docs"), width=55, height=26,
+            nav, text=t("docs"), width=52, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=SURFACE, hover_color=ACCENT_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_PRIMARY if has_docs else TEXT_SECONDARY,
+            corner_radius=6,
+            border_width=1, border_color=STATE_ACTIVE if has_docs else BORDER,
             command=self._open_docs_modal,
         )
-        self._docs_btn.pack(side="right")
+        self._docs_btn.pack(side="right", padx=(4, 0))
 
-        # Separator
-        ctk.CTkFrame(right, fg_color=BORDER, width=1, height=20).pack(side="right", padx=12)
-
-        # Job Description button
-        jd_color = "#22c55e" if JobDescription.exists() else SURFACE
+        # Job Description button (ghost, border indicator when loaded)
+        has_jd = JobDescription.exists()
         self._jd_btn = ctk.CTkButton(
-            right, text=t("job_desc"), width=70, height=26,
+            nav, text=t("job_desc"), width=68, height=28,
             font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=jd_color, hover_color=ACCENT_HOVER,
-            text_color="#ffffff", corner_radius=6,
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_PRIMARY if has_jd else TEXT_SECONDARY,
+            corner_radius=6,
+            border_width=1, border_color=STATE_ACTIVE if has_jd else BORDER,
             command=self._open_job_modal,
         )
         self._jd_btn.pack(side="right")
@@ -305,16 +316,21 @@ class TranslatorApp(ctk.CTk):
         padx = (0, 4) if column == 0 else (4, 0)
         frame.grid(row=0, column=column, sticky="nsew", padx=padx)
 
-        # Panel header
-        panel_header = ctk.CTkFrame(frame, fg_color=BG_PANEL_HEADER, height=38, corner_radius=12)
-        panel_header.pack(fill="x", padx=6, pady=(6, 0))
+        # Panel header with accent bar
+        panel_header = ctk.CTkFrame(frame, fg_color="transparent", height=36)
+        panel_header.pack(fill="x", padx=8, pady=(8, 0))
         panel_header.pack_propagate(False)
 
+        # Left accent bar
+        ctk.CTkFrame(
+            panel_header, fg_color=icon_color, width=3, corner_radius=2,
+        ).pack(side="left", fill="y", padx=(0, 10))
+
         ctk.CTkLabel(
-            panel_header, text=f"  {icon}  {title}",
+            panel_header, text=title,
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=icon_color,
-        ).pack(side="left", padx=8, anchor="w")
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", anchor="w")
 
         # Text area
         textbox = ctk.CTkTextbox(
@@ -377,18 +393,27 @@ class TranslatorApp(ctk.CTk):
         self._pinned = not self._pinned
         self.attributes("-topmost", self._pinned)
         if self._pinned:
-            self._pin_btn.configure(fg_color=ACCENT, text=t("pin"))
+            self._pin_btn.configure(fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#ffffff")
         else:
-            self._pin_btn.configure(fg_color=SURFACE, text=t("pin"))
+            self._pin_btn.configure(fg_color="transparent", hover_color=BTN_HOVER, text_color=TEXT_SECONDARY)
 
     def _change_opacity(self, value):
         self.attributes("-alpha", value)
 
     # ─── Language ─────────────────────────────────────────────
 
-    def _on_lang_select(self, selection: str):
-        lang = "en" if "EN" in selection else "es"
+    def _set_ui_lang(self, lang: str):
         set_lang(lang)
+        # Update toggle visuals
+        is_es = lang == "es"
+        self._lang_es_btn.configure(
+            fg_color=ACCENT if is_es else "transparent",
+            text_color="#ffffff" if is_es else TEXT_MUTED,
+        )
+        self._lang_en_btn.configure(
+            fg_color=ACCENT if not is_es else "transparent",
+            text_color="#ffffff" if not is_es else TEXT_MUTED,
+        )
 
     def _on_language_changed(self, lang: str):
         self._opacity_label.configure(text=t("opacity"))
@@ -432,7 +457,7 @@ class TranslatorApp(ctk.CTk):
         if not self._ai_provider:
             self._set_status(t("ai_not_ready"))
             return
-        self._rec_btn.configure(fg_color=DANGER, text=t("recording"))
+        self._rec_btn.configure(fg_color=DANGER, hover_color=DANGER_HOVER, text_color="#ffffff", border_color=DANGER, text=t("recording"))
         self._set_status(t("recording_screen"))
         self.iconify()
         self.after(500, self._do_record)
@@ -441,7 +466,7 @@ class TranslatorApp(ctk.CTk):
         def capture():
             frames = self._screen_capture.record_frames(duration=5, fps=2)
             self.after(0, self.deiconify)
-            self.after(0, lambda: self._rec_btn.configure(fg_color=SURFACE, text=t("record_5s")))
+            self.after(0, lambda: self._rec_btn.configure(fg_color="transparent", hover_color=BTN_HOVER, text_color=TEXT_SECONDARY, border_color=BORDER, text=t("record_5s")))
             self._emit("ai_thinking", "", "")
             answer = self._ai_provider.ask_with_images(
                 frames, "es", self._get_chat_history(),
@@ -470,7 +495,10 @@ class TranslatorApp(ctk.CTk):
         if self._ai_provider:
             self._ai_provider.set_context(docs_context)
         has_docs = len(files) > 0
-        self._docs_btn.configure(fg_color="#22c55e" if has_docs else SURFACE)
+        self._docs_btn.configure(
+            border_color=STATE_ACTIVE if has_docs else BORDER,
+            text_color=TEXT_PRIMARY if has_docs else TEXT_SECONDARY,
+        )
         self._set_status(f"Docs: {', '.join(files)}" if files else t("no_docs"))
 
     def _open_history_modal(self):
@@ -481,7 +509,10 @@ class TranslatorApp(ctk.CTk):
         if self._ai_provider:
             self._ai_provider.set_job_description(text)
         has_jd = bool(text.strip())
-        self._jd_btn.configure(fg_color="#22c55e" if has_jd else SURFACE)
+        self._jd_btn.configure(
+            border_color=STATE_ACTIVE if has_jd else BORDER,
+            text_color=TEXT_PRIMARY if has_jd else TEXT_SECONDARY,
+        )
         self._set_status(t("jd_saved") if has_jd else t("jd_deleted"))
 
     # ─── Event Queue ─────────────────────────────────────────
@@ -515,7 +546,8 @@ class TranslatorApp(ctk.CTk):
             "status": lambda: self._set_status(text),
             "status_restore": lambda: self._set_status(self._listening_status) if self._listening_status else None,
             "docs_loaded": lambda: self._docs_btn.configure(
-                fg_color="#22c55e" if int(text) > 0 else SURFACE),
+                border_color=STATE_ACTIVE if int(text) > 0 else BORDER,
+                text_color=TEXT_PRIMARY if int(text) > 0 else TEXT_SECONDARY),
         }
 
         handler = handlers.get(event_type)

@@ -16,6 +16,16 @@ class DocumentLoader:
         if not os.path.exists(self._docs_folder):
             os.makedirs(self._docs_folder)
 
+    def has_documents(self) -> bool:
+        """Verifica si hay documentos soportados en la carpeta."""
+        if not os.path.isdir(self._docs_folder):
+            return False
+        supported = self.SUPPORTED_TEXT + self.SUPPORTED_PDF
+        return any(
+            os.path.splitext(f)[1].lower() in supported
+            for f in os.listdir(self._docs_folder)
+        )
+
     def load_all(self) -> tuple[str, list[str]]:
         """Carga todos los documentos. Retorna (contexto, lista_de_archivos)."""
         texts = []
