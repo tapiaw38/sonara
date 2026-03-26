@@ -3,7 +3,7 @@ import base64
 import google.generativeai as genai
 
 from ai.base import AIProvider, VISION_USER_PROMPT
-from config import CHAT_HISTORY_LIMIT, VISION_HISTORY_LIMIT
+from config import CHAT_HISTORY_LIMIT, VISION_HISTORY_LIMIT, MODE_DAILY
 
 
 class GeminiProvider(AIProvider):
@@ -13,7 +13,8 @@ class GeminiProvider(AIProvider):
 
         model = genai.GenerativeModel(
             model_name=self._model,
-            system_instruction=self._build_system_prompt(detected_lang),
+            system_instruction=(self._build_daily_prompt(detected_lang) if self._mode == MODE_DAILY
+                                else self._build_system_prompt(detected_lang)),
         )
 
         gemini_history = []

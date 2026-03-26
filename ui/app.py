@@ -1,3 +1,4 @@
+import os
 import queue
 import threading
 from datetime import datetime
@@ -6,8 +7,9 @@ import customtkinter as ctk
 
 from config import (
     WINDOW_TITLE, WINDOW_SIZE, WINDOW_MIN_SIZE, WINDOW_OPACITY,
-    TARGET_LANG, AI_PROVIDER, DOCS_FOLDER,
+    TARGET_LANG, AI_PROVIDER, DOCS_FOLDER, DOCS_DAILY_FOLDER,
     UI_POLL_INTERVAL_MS, CAPTURE_DELAY_MS,
+    MODE_INTERVIEW, MODE_DAILY, DEFAULT_MODE, PROJECT_PATH_FILE,
 )
 from ai import create_ai_provider
 from core.audio_capture import AudioCapture
@@ -18,6 +20,7 @@ from core.screen_capture import ScreenCapture
 from core.history import ConversationHistory
 from core.job_description import JobDescription
 from documents.loader import DocumentLoader
+from core.project_scanner import scan_project
 from ui.capture_guard import CaptureGuard
 from ui.job_modal import JobDescriptionModal
 from ui.history_modal import HistoryModal
@@ -47,6 +50,8 @@ class TranslatorApp(ctk.CTk):
         self._history = ConversationHistory()
         self._listening_status: str = ""
         self._device_name: str = ""
+        self._current_mode: str = DEFAULT_MODE
+        self._project_path: str = self._load_project_path()
 
         self._configure_window()
         self._build_ui()
@@ -84,6 +89,7 @@ class TranslatorApp(ctk.CTk):
         self._build_header()
         self._build_toolbar()
         self._build_panels()
+        self._build_project_bar()
         self._build_statusbar()
 
     def _build_header(self):
@@ -123,9 +129,49 @@ class TranslatorApp(ctk.CTk):
             text_color=DANGER,
         ).pack(side="left")
 
-        # Language toggle
+        # ─── Header right: Nav buttons + Language toggle ───
+        # Language toggle (rightmost)
         lang_frame = ctk.CTkFrame(header, fg_color=SURFACE, corner_radius=6)
-        lang_frame.pack(side="right", padx=16)
+        lang_frame.pack(side="right", padx=(8, 16))
+
+        # Job Description button — Interview mode
+        has_jd = JobDescription.exists()
+        self._jd_btn = ctk.CTkButton(
+            header, text=t("job_desc"), width=62, height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_PRIMARY if has_jd else TEXT_MUTED,
+            corner_radius=4,
+            border_width=1, border_color=STATE_ACTIVE if has_jd else BORDER,
+            command=self._open_job_modal,
+        )
+        self._jd_btn.pack(side="right", padx=(4, 0))
+
+        # Docs button — Interview mode
+        has_docs = DocumentLoader(DOCS_FOLDER).has_documents()
+        self._docs_btn = ctk.CTkButton(
+            header, text=t("docs"), width=46, height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_PRIMARY if has_docs else TEXT_MUTED,
+            corner_radius=4,
+            border_width=1, border_color=STATE_ACTIVE if has_docs else BORDER,
+            command=self._open_docs_modal,
+        )
+        self._docs_btn.pack(side="right", padx=(4, 0))
+
+        # Docs Daily button — Daily mode (hidden by default)
+        has_daily_docs = DocumentLoader(DOCS_DAILY_FOLDER).has_documents()
+        self._docs_daily_btn = ctk.CTkButton(
+            header, text=t("docs_daily"), width=68, height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_PRIMARY if has_daily_docs else TEXT_MUTED,
+            corner_radius=4,
+            border_width=1, border_color=STATE_ACTIVE if has_daily_docs else BORDER,
+            command=self._open_docs_daily_modal,
+        )
+        # Hidden by default (interview mode)
 
         cur = get_lang()
         self._lang_es_btn = ctk.CTkButton(
@@ -204,6 +250,30 @@ class TranslatorApp(ctk.CTk):
         )
         self._rec_btn.pack(side="left")
 
+        ctk.CTkFrame(left, fg_color=BORDER, width=1, height=20).pack(side="left", padx=10)
+
+        # Mode switch (Interview / Daily)
+        self._mode_interview_btn = ctk.CTkButton(
+            left, text=t("mode_interview"), width=68, height=28,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=TEXT_WHITE, corner_radius=6,
+            command=lambda: self._switch_mode(MODE_INTERVIEW),
+        )
+        self._mode_interview_btn.pack(side="left", padx=(0, 4))
+
+        self._mode_daily_btn = ctk.CTkButton(
+            left, text=t("mode_daily"), width=52, height=28,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
+            command=lambda: self._switch_mode(MODE_DAILY),
+        )
+        self._mode_daily_btn.pack(side="left")
+
+        ctk.CTkFrame(left, fg_color=BORDER, width=1, height=20).pack(side="left", padx=10)
+
         # ─── Right: Window controls ──────────────────
         right = ctk.CTkFrame(toolbar, fg_color="transparent")
         right.pack(side="right", padx=(0, 16))
@@ -257,36 +327,47 @@ class TranslatorApp(ctk.CTk):
         )
         self._history_btn.pack(side="right", padx=(4, 0))
 
-        ctk.CTkFrame(nav, fg_color=BORDER, width=1, height=20).pack(side="right", padx=6)
+    def _build_project_bar(self):
+        self._project_bar = ctk.CTkFrame(self, fg_color=BG_HEADER, height=36, corner_radius=0)
+        # Only show in daily mode
+        if self._current_mode == MODE_DAILY:
+            self._project_bar.pack(fill="x", before=self._content_frame)
+        self._project_bar.pack_propagate(False)
 
-        # Docs button (ghost, border indicator when loaded)
-        has_docs = DocumentLoader(DOCS_FOLDER).has_documents()
-        self._docs_btn = ctk.CTkButton(
-            nav, text=t("docs"), width=52, height=28,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
-            fg_color="transparent", hover_color=BTN_HOVER,
-            text_color=TEXT_PRIMARY if has_docs else TEXT_SECONDARY,
-            corner_radius=6,
-            border_width=1, border_color=STATE_ACTIVE if has_docs else BORDER,
-            command=self._open_docs_modal,
-        )
-        self._docs_btn.pack(side="right", padx=(4, 0))
+        ctk.CTkFrame(self._project_bar, fg_color=BORDER, height=1).place(relx=0, rely=0, relwidth=1)
 
-        # Job Description button (ghost, border indicator when loaded)
-        has_jd = JobDescription.exists()
-        self._jd_btn = ctk.CTkButton(
-            nav, text=t("job_desc"), width=68, height=28,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
-            fg_color="transparent", hover_color=BTN_HOVER,
-            text_color=TEXT_PRIMARY if has_jd else TEXT_SECONDARY,
-            corner_radius=6,
-            border_width=1, border_color=STATE_ACTIVE if has_jd else BORDER,
-            command=self._open_job_modal,
+        self._project_path_display = ctk.CTkLabel(
+            self._project_bar,
+            text=self._project_path if self._project_path else t("select_project"),
+            font=ctk.CTkFont(family=FONT_MONO, size=10),
+            text_color=TEXT_PRIMARY if self._project_path else TEXT_MUTED,
+            anchor="w",
         )
-        self._jd_btn.pack(side="right")
+        self._project_path_display.pack(side="left", fill="x", expand=True, padx=(16, 6))
+
+        if self._project_path:
+            self._project_clear_btn = ctk.CTkButton(
+                self._project_bar, text="X", width=28, height=24,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                fg_color="transparent", hover_color=BTN_HOVER,
+                text_color=TEXT_MUTED, corner_radius=4,
+                command=self._clear_project,
+            )
+            self._project_clear_btn.pack(side="right", padx=(0, 4))
+
+        self._project_select_btn = ctk.CTkButton(
+            self._project_bar, text=t("select_folder"), width=78, height=24,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            fg_color="transparent", hover_color=BTN_HOVER,
+            text_color=TEXT_SECONDARY, corner_radius=6,
+            border_width=1, border_color=BORDER,
+            command=self._select_project_folder,
+        )
+        self._project_select_btn.pack(side="right", padx=(0, 12))
 
     def _build_panels(self):
         content = ctk.CTkFrame(self, fg_color=BG_PRIMARY)
+        self._content_frame = content
         content.pack(fill="both", expand=True, padx=12, pady=(8, 4))
         content.grid_columnconfigure(0, weight=1)
         content.grid_columnconfigure(1, weight=1)
@@ -412,10 +493,116 @@ class TranslatorApp(ctk.CTk):
         self._pin_btn.configure(text=t("pin"))
         self._history_btn.configure(text=t("history"))
         self._docs_btn.configure(text=t("docs"))
+        self._docs_daily_btn.configure(text=t("docs_daily"))
         self._jd_btn.configure(text=t("job_desc"))
+        self._mode_interview_btn.configure(text=t("mode_interview"))
+        self._mode_daily_btn.configure(text=t("mode_daily"))
+        self._project_select_btn.configure(text=t("select_folder"))
+        if not self._project_path:
+            self._project_path_display.configure(text=t("select_project"))
         if self._device_name:
             self._listening_status = t("listening", device=self._device_name)
             self._set_status(self._listening_status)
+
+    # ─── Mode & Project ─────────────────────────────────────────
+
+    def _switch_mode(self, mode: str):
+        if mode == self._current_mode:
+            return
+        self._current_mode = mode
+
+        if mode == MODE_INTERVIEW:
+            self._mode_interview_btn.configure(
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=TEXT_WHITE, border_width=0,
+            )
+            self._mode_daily_btn.configure(
+                fg_color="transparent", hover_color=BTN_HOVER,
+                text_color=TEXT_SECONDARY, border_width=1, border_color=BORDER,
+            )
+            self._project_bar.pack_forget()
+            # Show interview nav, hide daily nav
+            self._jd_btn.pack(side="right", padx=(4, 0))
+            self._docs_btn.pack(side="right", padx=(4, 0))
+            self._docs_daily_btn.pack_forget()
+        else:
+            self._mode_daily_btn.configure(
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=TEXT_WHITE, border_width=0,
+            )
+            self._mode_interview_btn.configure(
+                fg_color="transparent", hover_color=BTN_HOVER,
+                text_color=TEXT_SECONDARY, border_width=1, border_color=BORDER,
+            )
+            self._project_bar.pack(fill="x", before=self._content_frame)
+            # Show daily nav, hide interview nav
+            self._jd_btn.pack_forget()
+            self._docs_btn.pack_forget()
+            self._docs_daily_btn.pack(side="right", padx=(4, 0))
+
+        if self._ai_provider:
+            self._ai_provider.set_mode(mode)
+
+    def _select_project_folder(self):
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(title=t("select_folder"))
+        if folder:
+            self._project_path = folder
+            self._save_project_path(folder)
+            self._project_path_display.configure(
+                text=folder, text_color=TEXT_PRIMARY,
+            )
+            self._load_project_context()
+            name = os.path.basename(folder)
+            self._set_status(t("project_loaded", name=name))
+            # Add clear button if not present
+            if not hasattr(self, "_project_clear_btn"):
+                self._project_clear_btn = ctk.CTkButton(
+                    self._project_bar, text="X", width=28, height=24,
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                    fg_color="transparent", hover_color=BTN_HOVER,
+                    text_color=TEXT_MUTED, corner_radius=4,
+                    command=self._clear_project,
+                )
+                self._project_clear_btn.pack(side="right", padx=(0, 4), before=self._project_select_btn)
+
+    def _clear_project(self):
+        self._project_path = ""
+        self._save_project_path("")
+        self._project_path_display.configure(
+            text=t("select_project"), text_color=TEXT_MUTED,
+        )
+        if self._ai_provider:
+            self._ai_provider.set_project_context("")
+        if hasattr(self, "_project_clear_btn"):
+            self._project_clear_btn.destroy()
+            del self._project_clear_btn
+        self._set_status(t("project_cleared"))
+
+    def _load_project_context(self):
+        if self._project_path and self._ai_provider:
+            context = scan_project(self._project_path)
+            self._ai_provider.set_project_context(context)
+
+    @staticmethod
+    def _load_project_path() -> str:
+        try:
+            with open(PROJECT_PATH_FILE, "r", encoding="utf-8") as f:
+                path = f.read().strip()
+                if path and os.path.isdir(path):
+                    return path
+        except (OSError, ValueError):
+            pass
+        return ""
+
+    @staticmethod
+    def _save_project_path(path: str):
+        try:
+            os.makedirs(os.path.dirname(PROJECT_PATH_FILE), exist_ok=True)
+            with open(PROJECT_PATH_FILE, "w", encoding="utf-8") as f:
+                f.write(path)
+        except OSError:
+            pass
 
     # ─── Screen Capture ───────────────────────────────────────
 
@@ -475,7 +662,10 @@ class TranslatorApp(ctk.CTk):
         JobDescriptionModal(self, current, self._save_job_description)
 
     def _open_docs_modal(self):
-        DocsModal(self, self._reload_docs)
+        DocsModal(self, self._reload_docs, DOCS_FOLDER)
+
+    def _open_docs_daily_modal(self):
+        DocsModal(self, self._reload_daily_docs, DOCS_DAILY_FOLDER)
 
     def _reload_docs(self):
         """Recarga documentos y actualiza el contexto del AI provider."""
@@ -489,6 +679,19 @@ class TranslatorApp(ctk.CTk):
             text_color=TEXT_PRIMARY if has_docs else TEXT_SECONDARY,
         )
         self._set_status(f"Docs: {', '.join(files)}" if files else t("no_docs"))
+
+    def _reload_daily_docs(self):
+        """Recarga documentos daily y actualiza el contexto del AI provider."""
+        loader = DocumentLoader(DOCS_DAILY_FOLDER)
+        docs_context, files = loader.load_all()
+        if self._ai_provider:
+            self._ai_provider.set_daily_context(docs_context)
+        has_docs = len(files) > 0
+        self._docs_daily_btn.configure(
+            border_color=STATE_ACTIVE if has_docs else BORDER,
+            text_color=TEXT_PRIMARY if has_docs else TEXT_SECONDARY,
+        )
+        self._set_status(f"Docs Daily: {', '.join(files)}" if files else t("no_docs"))
 
     def _open_history_modal(self):
         HistoryModal(self)
@@ -571,7 +774,19 @@ class TranslatorApp(ctk.CTk):
         ai_provider = create_ai_provider(AI_PROVIDER)
         ai_provider.set_context(docs_context)
         ai_provider.set_job_description(JobDescription.load())
+        ai_provider.set_mode(self._current_mode)
+
+        # Load daily docs context
+        daily_loader = DocumentLoader(DOCS_DAILY_FOLDER)
+        daily_context, _ = daily_loader.load_all()
+        ai_provider.set_daily_context(daily_context)
+
         self._ai_provider = ai_provider
+
+        # Load project context if path is saved
+        if self._project_path:
+            context = scan_project(self._project_path)
+            ai_provider.set_project_context(context)
 
         # Whisper
         self._emit("status", t("loading_whisper"))

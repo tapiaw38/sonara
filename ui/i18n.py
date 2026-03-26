@@ -20,6 +20,7 @@ _TRANSLATIONS = {
         "pin": "Pin",
         "history": "Historial",
         "docs": "Docs",
+        "docs_daily": "Docs Daily",
         "job_desc": "Job Desc",
 
         # Status messages
@@ -57,6 +58,14 @@ _TRANSLATIONS = {
         "supported_docs": "Documentos soportados",
         "text": "Texto",
 
+        # Mode switch
+        "mode_interview": "Entrevista",
+        "mode_daily": "Daily",
+        "select_project": "Seleccionar proyecto",
+        "select_folder": "Seleccionar",
+        "project_loaded": "Proyecto cargado: {name}",
+        "project_cleared": "Proyecto removido",
+
         # History modal
         "history_title": "Historial de Conversaciones",
         "history_header": "Historial",
@@ -77,6 +86,7 @@ _TRANSLATIONS = {
         "pin": "Pin",
         "history": "History",
         "docs": "Docs",
+        "docs_daily": "Docs Daily",
         "job_desc": "Job Desc",
 
         # Status messages
@@ -113,6 +123,14 @@ _TRANSLATIONS = {
         "select_documents": "Select documents",
         "supported_docs": "Supported documents",
         "text": "Text",
+
+        # Mode switch
+        "mode_interview": "Interview",
+        "mode_daily": "Daily",
+        "select_project": "Select project",
+        "select_folder": "Select",
+        "project_loaded": "Project loaded: {name}",
+        "project_cleared": "Project removed",
 
         # History modal
         "history_title": "Conversation History",

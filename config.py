@@ -30,6 +30,11 @@ AI_MODELS = {
     "groq": "llama-3.3-70b-versatile",
 }
 
+# ─── App Mode ───────────────────────────────────────────────
+MODE_INTERVIEW = "interview"
+MODE_DAILY = "daily"
+DEFAULT_MODE = MODE_INTERVIEW
+
 # ─── AI Limits ───────────────────────────────────────────────
 MAX_TOKENS_TEXT = 256
 MAX_TOKENS_VISION = 2048
@@ -43,10 +48,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # User data lives in AppData (persists across updates, works with .exe)
 APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "InterviewPilot")
 DOCS_FOLDER = os.path.join(APP_DATA_DIR, "docs")
+DOCS_DAILY_FOLDER = os.path.join(APP_DATA_DIR, "docs_daily")
 HISTORY_DIR = os.path.join(APP_DATA_DIR, "history")
+PROJECT_PATH_FILE = os.path.join(APP_DATA_DIR, "project_path.txt")
 
 # Create folders on startup
 os.makedirs(DOCS_FOLDER, exist_ok=True)
+os.makedirs(DOCS_DAILY_FOLDER, exist_ok=True)
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # ─── Timing ──────────────────────────────────────────────────

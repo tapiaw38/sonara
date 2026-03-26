@@ -4,6 +4,7 @@ from ai.base import AIProvider, VISION_USER_PROMPT
 from config import (
     MAX_TOKENS_TEXT, MAX_TOKENS_VISION,
     CHAT_HISTORY_LIMIT, VISION_HISTORY_LIMIT,
+    MODE_DAILY,
 )
 
 
@@ -21,7 +22,8 @@ class ClaudeProvider(AIProvider):
         response = client.messages.create(
             model=self._model,
             max_tokens=MAX_TOKENS_TEXT,
-            system=self._build_system_prompt(detected_lang),
+            system=(self._build_daily_prompt(detected_lang) if self._mode == MODE_DAILY
+                    else self._build_system_prompt(detected_lang)),
             messages=messages,
         )
         return response.content[0].text

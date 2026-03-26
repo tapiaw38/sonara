@@ -20,9 +20,10 @@ SUPPORTED_EXTENSIONS = (".pdf", ".txt", ".md", ".csv")
 class DocsModal(ctk.CTkToplevel):
     """Modal para gestionar documentos de contexto."""
 
-    def __init__(self, parent, on_docs_changed):
+    def __init__(self, parent, on_docs_changed, docs_folder=None):
         super().__init__(parent)
 
+        self._docs_folder = docs_folder or DOCS_FOLDER
         self._on_docs_changed = on_docs_changed
 
         self.withdraw()
@@ -148,7 +149,7 @@ class DocsModal(ctk.CTkToplevel):
             self._create_doc_row(filename)
 
     def _create_doc_row(self, filename: str):
-        filepath = os.path.join(DOCS_FOLDER, filename)
+        filepath = os.path.join(self._docs_folder, filename)
         size = os.path.getsize(filepath)
         size_str = self._format_size(size)
         ext = os.path.splitext(filename)[1].upper().replace(".", "")
@@ -214,14 +215,14 @@ class DocsModal(ctk.CTkToplevel):
 
         for src_path in paths:
             filename = os.path.basename(src_path)
-            dst_path = os.path.join(DOCS_FOLDER, filename)
+            dst_path = os.path.join(self._docs_folder, filename)
             shutil.copy2(src_path, dst_path)
 
         self._refresh_list()
         self._on_docs_changed()
 
     def _delete_document(self, filename: str):
-        filepath = os.path.join(DOCS_FOLDER, filename)
+        filepath = os.path.join(self._docs_folder, filename)
         if os.path.exists(filepath):
             os.remove(filepath)
         self._refresh_list()
@@ -229,12 +230,11 @@ class DocsModal(ctk.CTkToplevel):
 
     # ─── Helpers ──────────────────────────────────────────────
 
-    @staticmethod
-    def _get_doc_files() -> list[str]:
-        if not os.path.isdir(DOCS_FOLDER):
+    def _get_doc_files(self) -> list[str]:
+        if not os.path.isdir(self._docs_folder):
             return []
         return sorted(
-            f for f in os.listdir(DOCS_FOLDER)
+            f for f in os.listdir(self._docs_folder)
             if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS
         )
 

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from config import LANG_NAMES, CHAT_HISTORY_LIMIT
+from config import LANG_NAMES, CHAT_HISTORY_LIMIT, MODE_INTERVIEW, MODE_DAILY
 
 
 VISION_USER_PROMPT = "Analyze this coding problem and provide the solution."
@@ -13,7 +13,10 @@ class AIProvider(ABC):
         self._api_key = api_key
         self._model = model
         self._docs_context = ""
+        self._docs_daily_context = ""
         self._job_description = ""
+        self._project_context = ""
+        self._mode = MODE_INTERVIEW
 
     @property
     def name(self) -> str:
@@ -22,8 +25,17 @@ class AIProvider(ABC):
     def set_context(self, docs_context: str):
         self._docs_context = docs_context
 
+    def set_daily_context(self, docs_context: str):
+        self._docs_daily_context = docs_context
+
     def set_job_description(self, jd: str):
         self._job_description = jd
+
+    def set_project_context(self, context: str):
+        self._project_context = context
+
+    def set_mode(self, mode: str):
+        self._mode = mode
 
     def ask(self, question: str, detected_lang: str, chat_history: list[dict] | None = None) -> str:
         try:
@@ -106,6 +118,57 @@ class AIProvider(ABC):
 
         return prompt
 
+    def _build_daily_prompt(self, detected_lang: str) -> str:
+        lang_name = LANG_NAMES.get(detected_lang, detected_lang)
+        context = self._docs_daily_context or "(No documents loaded)"
+
+        prompt = (
+            f"You are me — the person described in the documents below. "
+            f"I am already working at this company and need help communicating "
+            f"in daily meetings, standups, and team conversations.\n\n"
+
+            f"COMMUNICATION STYLE:\n"
+            f"- Speak in FIRST PERSON. You ARE this person.\n"
+            f"- Sound like a natural team member — collaborative, clear, concise.\n"
+            f"- Use PLAIN TEXT only. No bullet points, no headers, no markdown, no lists. "
+            f"Just natural flowing speech as if speaking out loud.\n"
+            f"- Keep it SHORT. 1-3 sentences for status updates. A short paragraph max "
+            f"for technical discussions.\n"
+            f"- Match the tone of the conversation. Standup → brief and structured. "
+            f"Discussion → detailed and thoughtful. Casual → friendly and relaxed.\n\n"
+
+            f"DAILY COMMUNICATION GUIDELINES:\n"
+            f"- STATUS UPDATES: What I did, what I'm doing, any blockers. "
+            f"Be specific with task names and progress.\n"
+            f"- TECHNICAL DISCUSSIONS: Explain clearly, use the right terminology, "
+            f"suggest solutions when discussing problems.\n"
+            f"- QUESTIONS: Help me formulate clear questions that show I understand "
+            f"the context and have thought about possible solutions.\n"
+            f"- COLLABORATION: Frame suggestions constructively. "
+            f"'What if we...' or 'One approach could be...' — team-oriented language.\n"
+            f"- BLOCKERS: Be honest about blockers but always pair them with "
+            f"what I've tried or what I think the next step is.\n\n"
+
+            f"RULES:\n"
+            f"- Use the documents and project context as your PRIMARY source.\n"
+            f"- If asked about the project, use the project structure and files "
+            f"to give accurate, specific answers.\n"
+            f"- NEVER refuse to answer. Use general knowledge as fallback.\n"
+            f"- This is an ongoing conversation. Use chat history to maintain context. "
+            f"Never repeat yourself.\n"
+            f"- You MUST respond in {lang_name} ({detected_lang}).\n\n"
+
+            f"MY PROFILE:\n{context}"
+        )
+
+        if self._project_context:
+            prompt += f"\n\nCURRENT PROJECT I'M WORKING ON:\n{self._project_context}"
+
+        if self._job_description:
+            prompt += f"\n\nMY ROLE/JOB DESCRIPTION:\n{self._job_description}"
+
+        return prompt
+
     def _build_vision_prompt(self, detected_lang: str) -> str:
         lang_name = LANG_NAMES.get(detected_lang, detected_lang)
         return (
@@ -122,7 +185,11 @@ class AIProvider(ABC):
 
     def _build_messages(self, question: str, detected_lang: str, chat_history: list[dict]) -> list[dict]:
         """Construye la lista de mensajes con historial para APIs tipo chat."""
-        messages = [{"role": "system", "content": self._build_system_prompt(detected_lang)}]
+        if self._mode == MODE_DAILY:
+            system = self._build_daily_prompt(detected_lang)
+        else:
+            system = self._build_system_prompt(detected_lang)
+        messages = [{"role": "system", "content": system}]
 
         for entry in chat_history[-CHAT_HISTORY_LIMIT:]:
             messages.append(entry)
