@@ -4,6 +4,8 @@ import os
 # Asegurar que el directorio del proyecto esté en el path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+
 import customtkinter as ctk
 from ui.app import TranslatorApp
 

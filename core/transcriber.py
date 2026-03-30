@@ -22,7 +22,7 @@ class Transcriber:
         self._model: WhisperModel | None = None
 
     def load_model(self):
-        self._model = WhisperModel(WHISPER_MODEL, compute_type=WHISPER_COMPUTE)
+        self._model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type=WHISPER_COMPUTE)
 
     def transcribe(self, audio: np.ndarray) -> TranscriptionResult | None:
         """Transcribe audio. Retorna None si es silencio o no hay texto."""

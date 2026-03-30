@@ -1,6 +1,8 @@
 import io
 import base64
 import time
+import subprocess
+import shutil
 
 import mss
 from PIL import Image
@@ -13,9 +15,10 @@ class ScreenCapture:
 
     def screenshot(self) -> str:
         """Captura un screenshot y retorna base64 PNG."""
-        with mss.mss() as sct:
-            img = sct.grab(sct.monitors[1])
-            return self._to_base64(Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX"))
+        img = self._grab_frame()
+        if img is None:
+            raise RuntimeError("No se pudo capturar la pantalla")
+        return self._to_base64(img)
 
     def record_frames(self, duration: int = 5, fps: int = 2) -> list[str]:
         """Graba frames por N segundos y retorna lista de base64 PNG."""
@@ -23,18 +26,51 @@ class ScreenCapture:
         interval = 1.0 / fps
         end_time = time.time() + duration
 
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]
-            while time.time() < end_time:
-                start = time.time()
-                img = sct.grab(monitor)
-                pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
-                frames.append(self._to_base64(pil_img))
-                elapsed = time.time() - start
-                if elapsed < interval:
-                    time.sleep(interval - elapsed)
+        while time.time() < end_time:
+            start = time.time()
+            img = self._grab_frame()
+            if img:
+                frames.append(self._to_base64(img))
+            elapsed = time.time() - start
+            if elapsed < interval:
+                time.sleep(interval - elapsed)
 
         return self._deduplicate(frames)
+
+    def _grab_frame(self) -> Image.Image | None:
+        """Intenta capturar con mss, si falla usa grim (Wayland) o scrot (X11)."""
+        try:
+            with mss.mss() as sct:
+                img = sct.grab(sct.monitors[1])
+                return Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+        except Exception:
+            pass
+
+        if shutil.which("grim"):
+            try:
+                result = subprocess.run(
+                    ["grim", "-"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return Image.open(io.BytesIO(result.stdout)).convert("RGB")
+            except Exception:
+                pass
+
+        if shutil.which("scrot"):
+            try:
+                result = subprocess.run(
+                    ["scrot", "-"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return Image.open(io.BytesIO(result.stdout)).convert("RGB")
+            except Exception:
+                pass
+
+        return None
 
     def _to_base64(self, img: Image.Image) -> str:
         """Redimensiona si es muy grande y convierte a base64."""
