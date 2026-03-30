@@ -2,10 +2,9 @@
 
 import os
 
-_LANG_CACHE = os.path.join(
-    os.getenv("APPDATA", os.path.dirname(os.path.abspath(__file__))),
-    "InterviewPilot", "ui_lang.txt",
-)
+from config import APP_DATA_DIR
+
+_LANG_CACHE = os.path.join(APP_DATA_DIR, "ui_lang.txt")
 
 _TRANSLATIONS = {
     "es": {

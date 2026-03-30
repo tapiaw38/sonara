@@ -1,8 +1,15 @@
 import os
+import sys
 
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+# ─── OS Platform ─────────────────────────────────────────────
+_detected = "windows" if sys.platform == "win32" else "linux"
+OS_PLATFORM = os.getenv("OS_PLATFORM", _detected).lower()
+IS_WINDOWS = OS_PLATFORM == "windows"
+IS_LINUX = OS_PLATFORM == "linux"
 
 # ─── Audio ───────────────────────────────────────────────────
 TARGET_LANG = "es"
@@ -45,8 +52,11 @@ MAX_VISION_FRAMES = 5
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# User data lives in AppData (persists across updates, works with .exe)
-APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "InterviewPilot")
+# User data directory — platform dependent
+if IS_WINDOWS:
+    APP_DATA_DIR = os.path.join(os.getenv("APPDATA", BASE_DIR), "InterviewPilot")
+else:
+    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "InterviewPilot")
 DOCS_FOLDER = os.path.join(APP_DATA_DIR, "docs")
 DOCS_DAILY_FOLDER = os.path.join(APP_DATA_DIR, "docs_daily")
 HISTORY_DIR = os.path.join(APP_DATA_DIR, "history")

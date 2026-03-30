@@ -1,4 +1,3 @@
-pyaudiowpatch
 faster-whisper
 deep-translator
 numpy

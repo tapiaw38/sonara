@@ -1,5 +1,7 @@
 import ctypes
 
+from config import IS_WINDOWS
+
 
 class CaptureGuard:
     """Controla la visibilidad de la ventana ante screen capture."""
@@ -9,7 +11,7 @@ class CaptureGuard:
 
     def __init__(self, window):
         self._window = window
-        self._hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        self._hwnd = ctypes.windll.user32.GetParent(window.winfo_id()) if IS_WINDOWS else None
         self._hidden = False
 
     @property
@@ -18,9 +20,10 @@ class CaptureGuard:
 
     def set_hidden(self, hidden: bool) -> bool:
         """Activa/desactiva ocultación. Retorna True si tuvo éxito."""
+        if not IS_WINDOWS:
+            return False
         flag = self._WDA_EXCLUDE if hidden else self._WDA_NONE
         result = ctypes.windll.user32.SetWindowDisplayAffinity(self._hwnd, flag)
-
         if result:
             self._hidden = hidden
         return bool(result)
