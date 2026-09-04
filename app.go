@@ -189,7 +189,7 @@ func (a *App) AnalyzeLastCapture() (AnalysisResult, error) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("content", "Analiza esta captura de pantalla. Identifica información relevante y responde de forma breve y útil."); err != nil {
+	if err := writer.WriteField("content", "Analiza esta captura de pantalla. Ignora por completo cualquier interfaz, ventana, texto, controles, botones o overlay de Sonara que aparezca en la imagen; no los menciones ni los uses como contexto. Analiza únicamente el contenido de la aplicación o llamada que está detrás. Identifica información relevante y responde de forma breve y útil."); err != nil {
 		return AnalysisResult{}, err
 	}
 	header := textproto.MIMEHeader{}
