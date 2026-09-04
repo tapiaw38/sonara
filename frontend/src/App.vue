@@ -21,9 +21,11 @@ const analyzingCapture = ref(false)
 const sendingMessage = ref(false)
 const lastAnalyzedCapture = ref(localStorage.getItem('sonara-last-analyzed-capture') || '')
 const lastVoiceSequence = ref(0)
+const listenStatus = ref('')
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
+const agentWorking = computed(() => analyzingCapture.value || sendingMessage.value || /transcribiendo|analizando/i.test(listenStatus.value))
 
 async function toggleListening() {
   if (busy.value) return
@@ -127,6 +129,7 @@ async function refreshListening() {
   try {
     const state = await ListeningStatus()
     listening.value = state.listening
+    listenStatus.value = state.status
     if (state.transcript) transcript.value = state.transcript
     if (state.sequence > lastVoiceSequence.value && state.response) {
       messages.value.push({
@@ -168,7 +171,7 @@ async function sendMessage() {
 </script>
 
 <template>
-  <main class="shell" :class="{ compact, ghost }" :style="{ '--surface-opacity': ghost ? opacityPercent / 100 : 1 }">
+  <main class="shell" :class="{ compact, ghost, 'is-analyzing': analyzingCapture }" :style="{ '--surface-opacity': ghost ? opacityPercent / 100 : 1 }">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">S</span><span>SONARA</span></div>
       <div class="meeting-state"><span class="status-dot" :class="statusClass"></span>{{ statusLabel }}</div>
@@ -197,19 +200,19 @@ async function sendMessage() {
       <div class="content">
         <div class="content-header">
           <div><p class="eyebrow">ENTREVISTA ACTUAL</p><h1>Asistente de reunión</h1></div>
-          <button class="ghost-button" @click="captureScreen">⌘ Capturar</button>
+          <button class="ghost-button" :class="{ scanning: analyzingCapture }" @click="captureScreen">{{ analyzingCapture ? '◌ Analizando' : '⌘ Capturar' }}</button>
         </div>
 
         <div class="panels">
           <section class="panel transcript-panel" :class="{ expanded: listening }">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
-            <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><div v-if="listening" class="wave"><i v-for="n in 18" :key="n" :style="{ height: `${12 + (n * 17) % 30}px` }"></i></div></div>
+            <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><div v-if="listening" class="audio-pulse"><span></span><span></span><span></span><small>{{ listenStatus || 'Escuchando audio de Meet' }}</small></div><div v-if="listening" class="wave"><i v-for="n in 18" :key="n" :style="{ height: `${12 + (n * 17) % 30}px` }"></i></div></div>
             <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
           </section>
 
           <section class="panel response-panel">
             <div class="panel-heading"><span>Respuesta sugerida</span><span class="kbd">⌘ ↵</span></div>
-            <div v-if="messages.length" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
+            <div v-if="messages.length || agentWorking" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div><div v-if="agentWorking" class="typing-indicator"><span></span><span></span><span></span><small>{{ analyzingCapture ? 'Gillie leyendo imagen' : listenStatus || 'Gillie preparando respuesta' }}</small></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
             <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
           </section>
         </div>
