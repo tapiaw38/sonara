@@ -3,13 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,11 +22,16 @@ import (
 
 // App struct
 type App struct {
-	ctx       context.Context
-	mu        sync.RWMutex
-	listening bool
-	conversationID string
+	ctx                 context.Context
+	mu                  sync.RWMutex
+	listening           bool
+	conversationID      string
 	latestVisualContext string
+	listenerCancel      context.CancelFunc
+	transcript          string
+	listenStatus        string
+	voiceReply          string
+	voiceSequence       uint64
 }
 
 type CaptureStatus struct {
@@ -37,6 +44,14 @@ type CaptureStatus struct {
 type AnalysisResult struct {
 	Response       string `json:"response"`
 	ConversationID string `json:"conversationId"`
+}
+
+type ListeningState struct {
+	Listening  bool   `json:"listening"`
+	Transcript string `json:"transcript"`
+	Status     string `json:"status"`
+	Response   string `json:"response"`
+	Sequence   uint64 `json:"sequence"`
 }
 
 // NewApp creates a new App application struct
@@ -53,16 +68,39 @@ func (a *App) startup(ctx context.Context) {
 // Greet returns a greeting for the given name
 func (a *App) StartListening() bool {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	if a.listening {
+		a.mu.Unlock()
+		return true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	a.listening = true
-	return a.listening
+	a.listenerCancel = cancel
+	a.listenStatus = "Conectando audio de Meet…"
+	a.transcript = "Esperando intervención en Meet…"
+	a.mu.Unlock()
+	go a.listenMeetAudio(ctx)
+	return true
 }
 
 func (a *App) StopListening() bool {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	if a.listenerCancel != nil {
+		a.listenerCancel()
+		a.listenerCancel = nil
+	}
 	a.listening = false
-	return a.listening
+	a.listenStatus = "Escucha pausada"
+	a.mu.Unlock()
+	return false
+}
+
+func (a *App) ListeningStatus() ListeningState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return ListeningState{
+		Listening: a.listening, Transcript: a.transcript, Status: a.listenStatus,
+		Response: a.voiceReply, Sequence: a.voiceSequence,
+	}
 }
 
 func (a *App) IsListening() bool {
@@ -304,4 +342,217 @@ func truncateContext(value string, limit int) string {
 		return value
 	}
 	return value[:limit] + "\n[truncated]"
+}
+
+const (
+	meetSampleRate     = 16000
+	meetFrameBytes     = 3200 // 100ms mono s16 PCM
+	meetSilenceFrames  = 10
+	meetMinimumFrames  = 6
+	meetVoiceThreshold = 0.012
+)
+
+// listenMeetAudio captures only Chrome/Chromium PipeWire output. It never falls
+// back to the default system monitor, so unrelated desktop audio is excluded.
+func (a *App) listenMeetAudio(ctx context.Context) {
+	serial, err := chromeAudioSerial(ctx)
+	if err != nil {
+		a.setListeningFailure("No se detectó audio de Chrome/Meet. Abre la llamada y reproduce audio.")
+		return
+	}
+	command := exec.CommandContext(ctx, "pw-record", "--target", serial, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
+	stdout, err := command.StdoutPipe()
+	if err != nil || command.Start() != nil {
+		a.setListeningFailure("No se pudo conectar a audio de Chrome/Meet")
+		return
+	}
+	defer command.Wait()
+	a.setListenStatus("Escuchando audio de Meet")
+
+	frame := make([]byte, meetFrameBytes)
+	segment := make([]byte, 0, meetSampleRate*2*12)
+	recording, voiceFrames, silenceFrames := false, 0, 0
+	for {
+		if _, err := io.ReadFull(stdout, frame); err != nil {
+			if ctx.Err() == nil {
+				a.setListeningFailure("Audio de Chrome/Meet finalizó")
+			}
+			return
+		}
+		voice := pcmRMS(frame) >= meetVoiceThreshold
+		if !recording {
+			if voice {
+				voiceFrames++
+				segment = append(segment, frame...)
+				if voiceFrames >= 3 {
+					recording, silenceFrames = true, 0
+					a.setListenStatus("Intervención detectada…")
+				}
+			} else {
+				voiceFrames, segment = 0, segment[:0]
+			}
+			continue
+		}
+		segment = append(segment, frame...)
+		if voice {
+			silenceFrames = 0
+		} else {
+			silenceFrames++
+		}
+		if silenceFrames < meetSilenceFrames {
+			continue
+		}
+		if len(segment)/meetFrameBytes >= meetMinimumFrames {
+			a.processMeetSegment(segment)
+		}
+		recording, voiceFrames, silenceFrames = false, 0, 0
+		segment = segment[:0]
+		if ctx.Err() != nil {
+			return
+		}
+		a.setListenStatus("Escuchando audio de Meet")
+	}
+}
+
+func chromeAudioSerial(ctx context.Context) (string, error) {
+	output, err := exec.CommandContext(ctx, "pw-dump").Output()
+	if err != nil {
+		return "", err
+	}
+	var nodes []struct {
+		Type string `json:"type"`
+		ID   any    `json:"id"`
+		Info struct {
+			State string         `json:"state"`
+			Props map[string]any `json:"props"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(output, &nodes); err != nil {
+		return "", err
+	}
+	for _, node := range nodes {
+		if node.Type != "PipeWire:Interface:Node" || node.Info.Props["media.class"] != "Stream/Output/Audio" {
+			continue
+		}
+		identity := strings.ToLower(fmt.Sprintf("%v %v %v", node.Info.Props["application.name"], node.Info.Props["application.process.binary"], node.Info.Props["node.name"]))
+		if !strings.Contains(identity, "chrome") && !strings.Contains(identity, "chromium") && !strings.Contains(identity, "google-chrome") {
+			continue
+		}
+		if serial, ok := node.Info.Props["object.serial"]; ok {
+			return fmt.Sprint(serial), nil
+		}
+		return fmt.Sprint(node.ID), nil
+	}
+	return "", fmt.Errorf("Chrome no tiene stream de salida")
+}
+
+func pcmRMS(frame []byte) float64 {
+	var sum float64
+	for i := 0; i+1 < len(frame); i += 2 {
+		sample := float64(int16(binary.LittleEndian.Uint16(frame[i:i+2]))) / 32768
+		sum += sample * sample
+	}
+	return math.Sqrt(sum / float64(len(frame)/2))
+}
+
+func (a *App) processMeetSegment(pcm []byte) {
+	a.setListenStatus("Gillie transcribiendo…")
+	result, transcript, err := a.sendMeetAudio(wavFromPCM(pcm))
+	if err != nil {
+		a.setListenStatus("Error de transcripción: " + err.Error())
+		return
+	}
+	a.mu.Lock()
+	a.transcript, a.voiceReply = transcript, result.Response
+	a.voiceSequence++
+	a.listenStatus = "Respuesta sugerida lista"
+	a.mu.Unlock()
+}
+
+func (a *App) sendMeetAudio(audio []byte) (AnalysisResult, string, error) {
+	conversationID, err := a.ensureGillieConversation()
+	if err != nil {
+		return AnalysisResult{}, "", err
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("content", "Audio de Google Meet. Transcribe la intervención y responde breve, directo y útil."); err != nil {
+		return AnalysisResult{}, "", err
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="voice_content"; filename="meet-segment.wav"`)
+	header.Set("Content-Type", "audio/wav")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return AnalysisResult{}, "", err
+	}
+	if _, err := part.Write(audio); err != nil {
+		return AnalysisResult{}, "", err
+	}
+	if err := writer.Close(); err != nil {
+		return AnalysisResult{}, "", err
+	}
+	request, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/conversation/%s/message", gillieEndpoint(), conversationID), &body)
+	if err != nil {
+		return AnalysisResult{}, "", err
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(request)
+	if err != nil {
+		return AnalysisResult{}, "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return AnalysisResult{}, "", fmt.Errorf("Gillie audio respondió %s", response.Status)
+	}
+	var payload struct {
+		Data []struct {
+			Content string `json:"content"`
+			Sender  string `json:"sender"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return AnalysisResult{}, "", err
+	}
+	transcript := "Intervención detectada."
+	for _, message := range payload.Data {
+		if message.Sender == "user" && strings.Contains(message.Content, "[Contexto de voz]:") {
+			transcript = strings.TrimSpace(strings.SplitN(message.Content, "[Contexto de voz]:", 2)[1])
+		}
+	}
+	for i := len(payload.Data) - 1; i >= 0; i-- {
+		if payload.Data[i].Sender == "assistant" && payload.Data[i].Content != "" {
+			return AnalysisResult{Response: payload.Data[i].Content, ConversationID: conversationID}, transcript, nil
+		}
+	}
+	return AnalysisResult{}, "", fmt.Errorf("Gillie returned no assistant response")
+}
+
+func wavFromPCM(pcm []byte) []byte {
+	dataSize := uint32(len(pcm))
+	wav := make([]byte, 44+len(pcm))
+	copy(wav[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(wav[4:8], 36+dataSize)
+	copy(wav[8:12], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(wav[16:20], 16)
+	binary.LittleEndian.PutUint16(wav[20:22], 1)
+	binary.LittleEndian.PutUint16(wav[22:24], 1)
+	binary.LittleEndian.PutUint32(wav[24:28], meetSampleRate)
+	binary.LittleEndian.PutUint32(wav[28:32], meetSampleRate*2)
+	binary.LittleEndian.PutUint16(wav[32:34], 2)
+	binary.LittleEndian.PutUint16(wav[34:36], 16)
+	copy(wav[36:40], "data")
+	binary.LittleEndian.PutUint32(wav[40:44], dataSize)
+	copy(wav[44:], pcm)
+	return wav
+}
+
+func (a *App) setListenStatus(status string) { a.mu.Lock(); a.listenStatus = status; a.mu.Unlock() }
+func (a *App) setListeningFailure(status string) {
+	a.mu.Lock()
+	a.listening = false
+	a.listenerCancel = nil
+	a.listenStatus = status
+	a.transcript = status
+	a.mu.Unlock()
 }

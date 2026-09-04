@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, SendMessage, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, ListeningStatus, SendMessage, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -20,6 +20,7 @@ const captureStatus = ref('Sin captura pendiente')
 const analyzingCapture = ref(false)
 const sendingMessage = ref(false)
 const lastAnalyzedCapture = ref(localStorage.getItem('sonara-last-analyzed-capture') || '')
+const lastVoiceSequence = ref(0)
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
@@ -33,7 +34,7 @@ async function toggleListening() {
     ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '—'
   transcript.value = listening.value
-    ? 'Escucha activa. La transcripción aparecerá aquí.'
+    ? 'Conectando audio de Chrome/Meet…'
     : 'Escucha pausada.'
 }
 
@@ -120,6 +121,25 @@ async function analyzeCapture(capturedAt: string) {
 }
 
 window.setInterval(() => { void refreshCapture() }, 1500)
+window.setInterval(() => { void refreshListening() }, 800)
+
+async function refreshListening() {
+  try {
+    const state = await ListeningStatus()
+    listening.value = state.listening
+    if (state.transcript) transcript.value = state.transcript
+    if (state.sequence > lastVoiceSequence.value && state.response) {
+      messages.value.push({
+        role: 'assistant',
+        text: state.response,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })
+      lastVoiceSequence.value = state.sequence
+    }
+  } catch {
+    // Gillie/UI remains usable while an audio poll fails.
+  }
+}
 
 async function sendMessage() {
   const text = draft.value.trim()

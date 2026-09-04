@@ -12,6 +12,8 @@ export function IsListening():Promise<boolean>;
 
 export function LastCapture():Promise<main.CaptureStatus>;
 
+export function ListeningStatus():Promise<main.ListeningState>;
+
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 
 export function StartListening():Promise<boolean>;
