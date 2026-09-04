@@ -349,7 +349,8 @@ const (
 	meetFrameBytes     = 3200 // 100ms mono s16 PCM
 	meetSilenceFrames  = 10
 	meetMinimumFrames  = 6
-	meetVoiceThreshold = 0.012
+	meetMaximumFrames  = 150 // send after 15s of continuous speech
+	meetVoiceThreshold = 0.004
 )
 
 // listenMeetAudio captures only Chrome/Chromium PipeWire output. It never falls
@@ -357,7 +358,10 @@ const (
 func (a *App) listenMeetAudio(ctx context.Context) {
 	serial, err := chromeAudioSerial(ctx)
 	if err != nil {
-		a.setListeningFailure("No se detectó audio de Chrome/Meet. Abre la llamada y reproduce audio.")
+		a.setListenStatus("Esperando audio de Chrome/Meet…")
+		if waitForRetry(ctx) {
+			go a.listenMeetAudio(ctx)
+		}
 		return
 	}
 	command := exec.CommandContext(ctx, "pw-record", "--target", serial, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
@@ -375,7 +379,10 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	for {
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			if ctx.Err() == nil {
-				a.setListeningFailure("Audio de Chrome/Meet finalizó")
+				a.setListenStatus("Stream de Chrome cambió; reconectando…")
+				if waitForRetry(ctx) {
+					go a.listenMeetAudio(ctx)
+				}
 			}
 			return
 		}
@@ -399,7 +406,7 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 		} else {
 			silenceFrames++
 		}
-		if silenceFrames < meetSilenceFrames {
+		if silenceFrames < meetSilenceFrames && len(segment)/meetFrameBytes < meetMaximumFrames {
 			continue
 		}
 		if len(segment)/meetFrameBytes >= meetMinimumFrames {
@@ -555,4 +562,13 @@ func (a *App) setListeningFailure(status string) {
 	a.listenStatus = status
 	a.transcript = status
 	a.mu.Unlock()
+}
+
+func waitForRetry(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(2 * time.Second):
+		return true
+	}
 }
