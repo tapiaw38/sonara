@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, SendMessage, SendPendingSegment, SetManualSend, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, CaptureScreen, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, SendMessage, SendPendingSegment, SetAudioLanguage, SetManualSend, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -24,10 +24,15 @@ const lastVoiceSequence = ref(0)
 const listenStatus = ref('')
 const manualSend = ref(localStorage.getItem('sonara-manual-send') === '1')
 const pendingSeconds = ref(0)
+const audioLanguage = ref(localStorage.getItem('sonara-audio-language') === 'en' ? 'en' : 'es')
+const translation = ref('')
+const streamingIndex = ref<number | null>(null)
+const WAVE_BARS = 18
+const levels = ref<number[]>(Array(WAVE_BARS).fill(0))
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
-const agentWorking = computed(() => analyzingCapture.value || sendingMessage.value || /transcribiendo|analizando/i.test(listenStatus.value))
+const agentWorking = computed(() => analyzingCapture.value || sendingMessage.value || /transcribiendo|analizando|respondiendo/i.test(listenStatus.value))
 
 async function toggleListening() {
   if (busy.value) return
@@ -56,11 +61,17 @@ async function discardPending() {
   pendingSeconds.value = 0
 }
 
+async function setAudioLanguage(language: string) {
+  audioLanguage.value = await SetAudioLanguage(language)
+  localStorage.setItem('sonara-audio-language', audioLanguage.value)
+}
+
 async function loadState() {
   try {
     listening.value = await IsListening()
     endpoint.value = await AIEndpoint()
     await SetManualSend(manualSend.value)
+    await setAudioLanguage(audioLanguage.value)
     await refreshCapture()
   } catch {
     endpoint.value = 'Servicio local no disponible'
@@ -85,6 +96,9 @@ function formatMessage(text: string) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/^[-*] (.+)$/gm, '<span class="message-bullet">•</span> $1')
+    // The Spanish version of a suggested English answer is there to read, not
+    // to say out loud, so it must not look like part of the answer.
+    .replace(/^ES: (.+)$/gm, '<span class="reply-translation"><i>ES</i>$1</span>')
     .replace(/\n/g, '<br>')
 
   return text.split(/```([\w+-]*)\n?([\s\S]*?)```/g).map((part, index, parts) => {
@@ -140,7 +154,23 @@ async function analyzeCapture(capturedAt: string) {
 }
 
 window.setInterval(() => { void refreshCapture() }, 1500)
-window.setInterval(() => { void refreshListening() }, 800)
+// Fast enough that a streamed reply reads as it is written.
+window.setInterval(() => { void refreshListening() }, 300)
+// The backend measures one RMS frame every 100ms, so the wave scrolls at the
+// same rate the audio is actually sampled.
+window.setInterval(() => { void refreshLevel() }, 100)
+
+async function refreshLevel() {
+  if (!listening.value) {
+    if (levels.value.some(Boolean)) levels.value = Array(WAVE_BARS).fill(0)
+    return
+  }
+  try {
+    levels.value = [...levels.value.slice(1), await AudioLevel()]
+  } catch {
+    // A dropped poll just leaves the previous frame on screen.
+  }
+}
 
 async function refreshListening() {
   try {
@@ -150,13 +180,19 @@ async function refreshListening() {
     manualSend.value = state.manualSend
     pendingSeconds.value = state.pendingSeconds
     if (state.transcript) transcript.value = state.transcript
-    if (state.sequence > lastVoiceSequence.value && state.response) {
+    translation.value = state.translation
+    if (state.sequence > lastVoiceSequence.value) {
       messages.value.push({
         role: 'assistant',
         text: state.response,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       })
       lastVoiceSequence.value = state.sequence
+      streamingIndex.value = messages.value.length - 1
+    } else if (streamingIndex.value !== null) {
+      // The reply keeps growing in place while Gillie streams its tokens.
+      messages.value[streamingIndex.value].text = state.response
+      if (!state.streaming) streamingIndex.value = null
     }
   } catch {
     // Gillie/UI remains usable while an audio poll fails.
@@ -209,6 +245,11 @@ async function sendMessage() {
         <button class="session-card"><span class="session-icon muted">＋</span><span><strong>Nueva sesión</strong><small>Preparar otra conversación</small></span></button>
 
         <div class="sidebar-bottom">
+          <div class="section-label">IDIOMA DEL AUDIO</div>
+          <div class="language-switch" title="Idioma hablado en la reunión. Las respuestas siempre son en español.">
+            <button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button>
+            <button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button>
+          </div>
           <div class="section-label">MODO</div>
           <button class="mode-button active">Entrevista</button>
           <button class="mode-button">Comunicación diaria</button>
@@ -225,7 +266,7 @@ async function sendMessage() {
         <div class="panels">
           <section class="panel transcript-panel" :class="{ expanded: listening }">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
-            <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><div v-if="listening" class="audio-pulse"><span></span><span></span><span></span><small>{{ listenStatus || 'Escuchando audio de Meet' }}</small></div><div v-if="listening" class="wave"><i v-for="n in 18" :key="n" :style="{ height: `${12 + (n * 17) % 30}px` }"></i></div></div>
+            <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p><div v-if="listening" class="audio-pulse"><span></span><span></span><span></span><small>{{ listenStatus || 'Escuchando audio de Meet' }}</small></div><div v-if="listening" class="wave"><i v-for="(level, index) in levels" :key="index" :class="{ active: level > 0.05 }" :style="{ height: `${3 + level * 42}px` }"></i></div></div>
             <div v-if="pendingSeconds > 0" class="pending-bar"><span>Fragmento de {{ pendingSeconds.toFixed(1) }}s en espera</span><button class="pending-send" @click="sendPending">Enviar</button><button class="pending-discard" @click="discardPending">Descartar</button></div>
             <div class="listen-row">
               <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
@@ -236,7 +277,7 @@ async function sendMessage() {
           <section class="panel response-panel">
             <div class="panel-heading"><span>Respuesta sugerida</span><span class="kbd">⌘ ↵</span></div>
             <div v-if="messages.length || agentWorking" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div><div v-if="agentWorking" class="typing-indicator"><span></span><span></span><span></span><small>{{ analyzingCapture ? 'Gillie leyendo imagen' : listenStatus || 'Gillie preparando respuesta' }}</small></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
-            <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
+            <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.enter.exact.prevent="sendMessage" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
           </section>
         </div>
 

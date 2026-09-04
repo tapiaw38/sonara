@@ -40,6 +40,9 @@ export namespace main {
 	    sequence: number;
 	    manualSend: boolean;
 	    pendingSeconds: number;
+	    streaming: boolean;
+	    language: string;
+	    translation: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ListeningState(source);
@@ -54,6 +57,9 @@ export namespace main {
 	        this.sequence = source["sequence"];
 	        this.manualSend = source["manualSend"];
 	        this.pendingSeconds = source["pendingSeconds"];
+	        this.streaming = source["streaming"];
+	        this.language = source["language"];
+	        this.translation = source["translation"];
 	    }
 	}
 

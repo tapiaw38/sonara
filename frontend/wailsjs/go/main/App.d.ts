@@ -6,6 +6,8 @@ export function AIEndpoint():Promise<string>;
 
 export function AnalyzeLastCapture():Promise<main.AnalysisResult>;
 
+export function AudioLevel():Promise<number>;
+
 export function CaptureScreen():Promise<main.CaptureStatus>;
 
 export function DiscardPendingSegment():Promise<boolean>;
@@ -19,6 +21,8 @@ export function ListeningStatus():Promise<main.ListeningState>;
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 
 export function SendPendingSegment():Promise<boolean>;
+
+export function SetAudioLanguage(arg1:string):Promise<string>;
 
 export function SetManualSend(arg1:boolean):Promise<boolean>;
 

@@ -10,6 +10,10 @@ export function AnalyzeLastCapture() {
   return window['go']['main']['App']['AnalyzeLastCapture']();
 }
 
+export function AudioLevel() {
+  return window['go']['main']['App']['AudioLevel']();
+}
+
 export function CaptureScreen() {
   return window['go']['main']['App']['CaptureScreen']();
 }
@@ -36,6 +40,10 @@ export function SendMessage(arg1) {
 
 export function SendPendingSegment() {
   return window['go']['main']['App']['SendPendingSegment']();
+}
+
+export function SetAudioLanguage(arg1) {
+  return window['go']['main']['App']['SetAudioLanguage'](arg1);
 }
 
 export function SetManualSend(arg1) {
