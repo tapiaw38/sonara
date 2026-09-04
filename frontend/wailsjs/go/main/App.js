@@ -6,8 +6,20 @@ export function AIEndpoint() {
   return window['go']['main']['App']['AIEndpoint']();
 }
 
+export function AnalyzeLastCapture() {
+  return window['go']['main']['App']['AnalyzeLastCapture']();
+}
+
+export function CaptureScreen() {
+  return window['go']['main']['App']['CaptureScreen']();
+}
+
 export function IsListening() {
   return window['go']['main']['App']['IsListening']();
+}
+
+export function LastCapture() {
+  return window['go']['main']['App']['LastCapture']();
 }
 
 export function StartListening() {

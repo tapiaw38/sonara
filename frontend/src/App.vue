@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, CaptureScreen, IsListening, LastCapture, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -17,6 +17,8 @@ const ghost = ref(false)
 const alwaysOnTop = ref(true)
 const opacityPercent = ref(Number(localStorage.getItem('sonara-opacity') || 22))
 const captureStatus = ref('Sin captura pendiente')
+const analyzingCapture = ref(false)
+const lastAnalyzedCapture = ref(localStorage.getItem('sonara-last-analyzed-capture') || '')
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
@@ -59,6 +61,9 @@ async function refreshCapture() {
   captureStatus.value = capture.agentReady
     ? `Captura ${time} · lista para agente`
     : `Captura ${time} · pendiente de conectar IA`
+  if (capture.agentReady && capture.capturedAt !== lastAnalyzedCapture.value) {
+    await analyzeCapture(capture.capturedAt)
+  }
 }
 
 async function captureScreen() {
@@ -68,6 +73,26 @@ async function captureScreen() {
     await refreshCapture()
   } catch {
     captureStatus.value = 'No se pudo capturar. Verifica grim.'
+  }
+}
+
+async function analyzeCapture(capturedAt: string) {
+  if (analyzingCapture.value) return
+  analyzingCapture.value = true
+  captureStatus.value = 'Gillie analizando captura…'
+  try {
+    const result = await AnalyzeLastCapture()
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    messages.value.push({ role: 'assistant', text: result.response, time })
+    lastAnalyzedCapture.value = capturedAt
+    localStorage.setItem('sonara-last-analyzed-capture', capturedAt)
+    captureStatus.value = `Captura analizada · Gillie respondió`
+  } catch {
+    captureStatus.value = 'Gillie no pudo analizar captura. Reintentará al capturar otra.'
+    lastAnalyzedCapture.value = capturedAt
+    localStorage.setItem('sonara-last-analyzed-capture', capturedAt)
+  } finally {
+    analyzingCapture.value = false
   }
 }
 
