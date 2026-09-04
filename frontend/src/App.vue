@@ -55,6 +55,28 @@ function setOpacity(value: string | number) {
   localStorage.setItem('sonara-opacity', String(opacityPercent.value))
 }
 
+function formatMessage(text: string) {
+  const escape = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  const formatPlain = (value: string) => escape(value)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^[-*] (.+)$/gm, '<span class="message-bullet">•</span> $1')
+    .replace(/\n/g, '<br>')
+
+  return text.split(/```([\w+-]*)\n?([\s\S]*?)```/g).map((part, index, parts) => {
+    if (index % 3 === 1) return ''
+    if (index % 3 === 2) {
+      const language = parts[index - 1] || 'text'
+      return `<pre><code class="language-${escape(language)}">${escape(part.trim())}</code></pre>`
+    }
+    return formatPlain(part)
+  }).join('')
+}
+
 async function refreshCapture() {
   const capture = await LastCapture()
   if (!capture.queued) return
@@ -167,7 +189,7 @@ async function sendMessage() {
 
           <section class="panel response-panel">
             <div class="panel-heading"><span>Respuesta sugerida</span><span class="kbd">⌘ ↵</span></div>
-            <div v-if="messages.length" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><p>{{ message.text }}</p></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
+            <div v-if="messages.length" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
             <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
           </section>
         </div>

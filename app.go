@@ -24,6 +24,7 @@ type App struct {
 	mu        sync.RWMutex
 	listening bool
 	conversationID string
+	latestVisualContext string
 }
 
 type CaptureStatus struct {
@@ -233,7 +234,11 @@ func (a *App) AnalyzeLastCapture() (AnalysisResult, error) {
 	}
 	for i := len(payload.Data) - 1; i >= 0; i-- {
 		if payload.Data[i].Sender == "assistant" && payload.Data[i].Content != "" {
-			return AnalysisResult{Response: payload.Data[i].Content, ConversationID: conversationID}, nil
+			responseText := payload.Data[i].Content
+			a.mu.Lock()
+			a.latestVisualContext = truncateContext(responseText, 6000)
+			a.mu.Unlock()
+			return AnalysisResult{Response: responseText, ConversationID: conversationID}, nil
 		}
 	}
 	return AnalysisResult{}, fmt.Errorf("Gillie returned no assistant response")
@@ -250,10 +255,17 @@ func (a *App) SendMessage(content string) (AnalysisResult, error) {
 		return AnalysisResult{}, err
 	}
 
+	a.mu.RLock()
+	visualContext := a.latestVisualContext
+	a.mu.RUnlock()
+	form := url.Values{"content": {content}}
+	if visualContext != "" {
+		form.Set("context", "Latest screenshot analysis from this Sonara session. Use it to answer follow-up questions directly when relevant:\n"+visualContext)
+	}
 	request, err := http.NewRequest(
 		http.MethodPost,
 		fmt.Sprintf("%s/conversation/%s/message", gillieEndpoint(), conversationID),
-		strings.NewReader(url.Values{"content": {content}}.Encode()),
+		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
 		return AnalysisResult{}, err
@@ -284,4 +296,12 @@ func (a *App) SendMessage(content string) (AnalysisResult, error) {
 		}
 	}
 	return AnalysisResult{}, fmt.Errorf("Gillie returned no assistant response")
+}
+
+func truncateContext(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "\n[truncated]"
 }
