@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, IsListening, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, CaptureScreen, IsListening, LastCapture, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -16,6 +16,7 @@ const compact = ref(false)
 const ghost = ref(false)
 const alwaysOnTop = ref(true)
 const opacityPercent = ref(Number(localStorage.getItem('sonara-opacity') || 22))
+const captureStatus = ref('Sin captura pendiente')
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
@@ -37,6 +38,7 @@ async function loadState() {
   try {
     listening.value = await IsListening()
     endpoint.value = await AIEndpoint()
+    await refreshCapture()
   } catch {
     endpoint.value = 'Servicio local no disponible'
   }
@@ -49,6 +51,27 @@ function setOpacity(value: string | number) {
   opacityPercent.value = Number(value)
   localStorage.setItem('sonara-opacity', String(opacityPercent.value))
 }
+
+async function refreshCapture() {
+  const capture = await LastCapture()
+  if (!capture.queued) return
+  const time = new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  captureStatus.value = capture.agentReady
+    ? `Captura ${time} · lista para agente`
+    : `Captura ${time} · pendiente de conectar IA`
+}
+
+async function captureScreen() {
+  captureStatus.value = 'Capturando pantalla…'
+  try {
+    await CaptureScreen()
+    await refreshCapture()
+  } catch {
+    captureStatus.value = 'No se pudo capturar. Verifica grim.'
+  }
+}
+
+window.setInterval(() => { void refreshCapture() }, 1500)
 
 function sendMessage() {
   const text = draft.value.trim()
@@ -96,7 +119,7 @@ function sendMessage() {
       <div class="content">
         <div class="content-header">
           <div><p class="eyebrow">ENTREVISTA ACTUAL</p><h1>Asistente de reunión</h1></div>
-          <button class="ghost-button">＋ Documento</button>
+          <button class="ghost-button" @click="captureScreen">⌘ Capturar</button>
         </div>
 
         <div class="panels">
@@ -113,7 +136,7 @@ function sendMessage() {
           </section>
         </div>
 
-        <footer class="footer"><span>IA: {{ endpoint || 'conectando…' }}</span><span class="footer-right"><span class="status-dot is-live"></span> Privado · protegido</span></footer>
+        <footer class="footer"><span>{{ captureStatus }} · Ctrl+Alt+C</span><span class="footer-right"><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span></footer>
       </div>
     </section>
   </main>
