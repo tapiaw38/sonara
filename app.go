@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"net/textproto"
 	"os"
 	"os/exec"
@@ -221,6 +222,53 @@ func (a *App) AnalyzeLastCapture() (AnalysisResult, error) {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return AnalysisResult{}, fmt.Errorf("Gillie analysis: %s", strings.TrimSpace(string(message)))
 	}
+	var payload struct {
+		Data []struct {
+			Content string `json:"content"`
+			Sender  string `json:"sender"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return AnalysisResult{}, err
+	}
+	for i := len(payload.Data) - 1; i >= 0; i-- {
+		if payload.Data[i].Sender == "assistant" && payload.Data[i].Content != "" {
+			return AnalysisResult{Response: payload.Data[i].Content, ConversationID: conversationID}, nil
+		}
+	}
+	return AnalysisResult{}, fmt.Errorf("Gillie returned no assistant response")
+}
+
+// SendMessage sends a text message through the same Gillie conversation used by vision.
+func (a *App) SendMessage(content string) (AnalysisResult, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return AnalysisResult{}, fmt.Errorf("message is empty")
+	}
+	conversationID, err := a.ensureGillieConversation()
+	if err != nil {
+		return AnalysisResult{}, err
+	}
+
+	request, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("%s/conversation/%s/message", gillieEndpoint(), conversationID),
+		strings.NewReader(url.Values{"content": {content}}.Encode()),
+	)
+	if err != nil {
+		return AnalysisResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(request)
+	if err != nil {
+		return AnalysisResult{}, fmt.Errorf("Gillie chat: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return AnalysisResult{}, fmt.Errorf("Gillie chat: %s", strings.TrimSpace(string(message)))
+	}
+
 	var payload struct {
 		Data []struct {
 			Content string `json:"content"`

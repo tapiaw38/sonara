@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, SendMessage, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -18,6 +18,7 @@ const alwaysOnTop = ref(true)
 const opacityPercent = ref(Number(localStorage.getItem('sonara-opacity') || 22))
 const captureStatus = ref('Sin captura pendiente')
 const analyzingCapture = ref(false)
+const sendingMessage = ref(false)
 const lastAnalyzedCapture = ref(localStorage.getItem('sonara-last-analyzed-capture') || '')
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
@@ -98,19 +99,29 @@ async function analyzeCapture(capturedAt: string) {
 
 window.setInterval(() => { void refreshCapture() }, 1500)
 
-function sendMessage() {
+async function sendMessage() {
   const text = draft.value.trim()
-  if (!text) return
+  if (!text || sendingMessage.value) return
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   messages.value.push({ role: 'user', text, time })
   draft.value = ''
-  window.setTimeout(() => {
+  sendingMessage.value = true
+  try {
+    const result = await SendMessage(text)
     messages.value.push({
       role: 'assistant',
-      text: 'Respuesta del servicio IA aparecerá aquí.',
+      text: result.response,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     })
-  }, 250)
+  } catch {
+    messages.value.push({
+      role: 'assistant',
+      text: 'Gillie no pudo responder. Verifica que servicio local esté activo.',
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    })
+  } finally {
+    sendingMessage.value = false
+  }
 }
 </script>
 
@@ -157,7 +168,7 @@ function sendMessage() {
           <section class="panel response-panel">
             <div class="panel-heading"><span>Respuesta sugerida</span><span class="kbd">⌘ ↵</span></div>
             <div v-if="messages.length" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><p>{{ message.text }}</p></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>Escribe una pregunta o espera la próxima intervención.</p></div>
-            <div class="composer"><textarea v-model="draft" placeholder="Escribe una pregunta…" rows="2" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" aria-label="Enviar" @click="sendMessage">↑</button></div>
+            <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
           </section>
         </div>
 

@@ -22,6 +22,10 @@ export function LastCapture() {
   return window['go']['main']['App']['LastCapture']();
 }
 
+export function SendMessage(arg1) {
+  return window['go']['main']['App']['SendMessage'](arg1);
+}
+
 export function StartListening() {
   return window['go']['main']['App']['StartListening']();
 }
