@@ -8,6 +8,8 @@ export function AnalyzeLastCapture():Promise<main.AnalysisResult>;
 
 export function CaptureScreen():Promise<main.CaptureStatus>;
 
+export function DiscardPendingSegment():Promise<boolean>;
+
 export function IsListening():Promise<boolean>;
 
 export function LastCapture():Promise<main.CaptureStatus>;
@@ -15,6 +17,10 @@ export function LastCapture():Promise<main.CaptureStatus>;
 export function ListeningStatus():Promise<main.ListeningState>;
 
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
+
+export function SendPendingSegment():Promise<boolean>;
+
+export function SetManualSend(arg1:boolean):Promise<boolean>;
 
 export function StartListening():Promise<boolean>;
 

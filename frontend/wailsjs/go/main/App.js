@@ -14,6 +14,10 @@ export function CaptureScreen() {
   return window['go']['main']['App']['CaptureScreen']();
 }
 
+export function DiscardPendingSegment() {
+  return window['go']['main']['App']['DiscardPendingSegment']();
+}
+
 export function IsListening() {
   return window['go']['main']['App']['IsListening']();
 }
@@ -28,6 +32,14 @@ export function ListeningStatus() {
 
 export function SendMessage(arg1) {
   return window['go']['main']['App']['SendMessage'](arg1);
+}
+
+export function SendPendingSegment() {
+  return window['go']['main']['App']['SendPendingSegment']();
+}
+
+export function SetManualSend(arg1) {
+  return window['go']['main']['App']['SetManualSend'](arg1);
 }
 
 export function StartListening() {

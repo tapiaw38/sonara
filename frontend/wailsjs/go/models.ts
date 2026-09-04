@@ -1,13 +1,13 @@
 export namespace main {
-
+	
 	export class AnalysisResult {
 	    response: string;
 	    conversationId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AnalysisResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.response = source["response"];
@@ -19,11 +19,11 @@ export namespace main {
 	    capturedAt: string;
 	    queued: boolean;
 	    agentReady: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CaptureStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -38,11 +38,13 @@ export namespace main {
 	    status: string;
 	    response: string;
 	    sequence: number;
-
+	    manualSend: boolean;
+	    pendingSeconds: number;
+	
 	    static createFrom(source: any = {}) {
 	        return new ListeningState(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.listening = source["listening"];
@@ -50,7 +52,10 @@ export namespace main {
 	        this.status = source["status"];
 	        this.response = source["response"];
 	        this.sequence = source["sequence"];
+	        this.manualSend = source["manualSend"];
+	        this.pendingSeconds = source["pendingSeconds"];
 	    }
 	}
 
 }
+

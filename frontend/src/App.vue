@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, IsListening, LastCapture, ListeningStatus, SendMessage, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, CaptureScreen, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, SendMessage, SendPendingSegment, SetManualSend, StartListening, StopListening } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -22,6 +22,8 @@ const sendingMessage = ref(false)
 const lastAnalyzedCapture = ref(localStorage.getItem('sonara-last-analyzed-capture') || '')
 const lastVoiceSequence = ref(0)
 const listenStatus = ref('')
+const manualSend = ref(localStorage.getItem('sonara-manual-send') === '1')
+const pendingSeconds = ref(0)
 
 const statusLabel = computed(() => listening.value ? 'Escuchando' : 'En pausa')
 const statusClass = computed(() => listening.value ? 'is-live' : 'is-idle')
@@ -40,10 +42,25 @@ async function toggleListening() {
     : 'Escucha pausada.'
 }
 
+async function toggleSendMode() {
+  manualSend.value = await SetManualSend(!manualSend.value)
+  localStorage.setItem('sonara-manual-send', manualSend.value ? '1' : '0')
+}
+
+async function sendPending() {
+  if (await SendPendingSegment()) pendingSeconds.value = 0
+}
+
+async function discardPending() {
+  await DiscardPendingSegment()
+  pendingSeconds.value = 0
+}
+
 async function loadState() {
   try {
     listening.value = await IsListening()
     endpoint.value = await AIEndpoint()
+    await SetManualSend(manualSend.value)
     await refreshCapture()
   } catch {
     endpoint.value = 'Servicio local no disponible'
@@ -130,6 +147,8 @@ async function refreshListening() {
     const state = await ListeningStatus()
     listening.value = state.listening
     listenStatus.value = state.status
+    manualSend.value = state.manualSend
+    pendingSeconds.value = state.pendingSeconds
     if (state.transcript) transcript.value = state.transcript
     if (state.sequence > lastVoiceSequence.value && state.response) {
       messages.value.push({
@@ -207,7 +226,11 @@ async function sendMessage() {
           <section class="panel transcript-panel" :class="{ expanded: listening }">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
             <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><div v-if="listening" class="audio-pulse"><span></span><span></span><span></span><small>{{ listenStatus || 'Escuchando audio de Meet' }}</small></div><div v-if="listening" class="wave"><i v-for="n in 18" :key="n" :style="{ height: `${12 + (n * 17) % 30}px` }"></i></div></div>
-            <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
+            <div v-if="pendingSeconds > 0" class="pending-bar"><span>Fragmento de {{ pendingSeconds.toFixed(1) }}s en espera</span><button class="pending-send" @click="sendPending">Enviar</button><button class="pending-discard" @click="discardPending">Descartar</button></div>
+            <div class="listen-row">
+              <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
+              <button class="mode-toggle" :class="{ manual: manualSend }" :title="manualSend ? 'Los fragmentos esperan tu confirmación' : 'Se envía solo al detectar silencio'" @click="toggleSendMode">{{ manualSend ? 'Manual' : 'Auto' }}</button>
+            </div>
           </section>
 
           <section class="panel response-panel">

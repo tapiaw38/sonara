@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,6 +33,8 @@ type App struct {
 	listenStatus        string
 	voiceReply          string
 	voiceSequence       uint64
+	manualSend          bool
+	pendingAudio        []byte
 }
 
 type CaptureStatus struct {
@@ -47,11 +50,13 @@ type AnalysisResult struct {
 }
 
 type ListeningState struct {
-	Listening  bool   `json:"listening"`
-	Transcript string `json:"transcript"`
-	Status     string `json:"status"`
-	Response   string `json:"response"`
-	Sequence   uint64 `json:"sequence"`
+	Listening      bool    `json:"listening"`
+	Transcript     string  `json:"transcript"`
+	Status         string  `json:"status"`
+	Response       string  `json:"response"`
+	Sequence       uint64  `json:"sequence"`
+	ManualSend     bool    `json:"manualSend"`
+	PendingSeconds float64 `json:"pendingSeconds"`
 }
 
 // NewApp creates a new App application struct
@@ -100,7 +105,45 @@ func (a *App) ListeningStatus() ListeningState {
 	return ListeningState{
 		Listening: a.listening, Transcript: a.transcript, Status: a.listenStatus,
 		Response: a.voiceReply, Sequence: a.voiceSequence,
+		ManualSend:     a.manualSend,
+		PendingSeconds: float64(len(a.pendingAudio)) / float64(meetSampleRate*2),
 	}
+}
+
+// SetManualSend switches between sending every detected segment automatically
+// and holding the last one until the user presses send.
+func (a *App) SetManualSend(manual bool) bool {
+	a.mu.Lock()
+	a.manualSend = manual
+	if manual {
+		a.listenStatus = "Modo manual: los fragmentos quedan en espera"
+	} else {
+		a.listenStatus = "Modo automático: se envía al detectar silencio"
+		a.pendingAudio = nil
+	}
+	a.mu.Unlock()
+	return manual
+}
+
+// SendPendingSegment sends the segment held in manual mode.
+func (a *App) SendPendingSegment() bool {
+	a.mu.Lock()
+	pending := a.pendingAudio
+	a.pendingAudio = nil
+	a.mu.Unlock()
+	if len(pending) == 0 {
+		return false
+	}
+	go a.deliverMeetSegment(pending)
+	return true
+}
+
+func (a *App) DiscardPendingSegment() bool {
+	a.mu.Lock()
+	a.pendingAudio = nil
+	a.listenStatus = "Fragmento descartado"
+	a.mu.Unlock()
+	return true
 }
 
 func (a *App) IsListening() bool {
@@ -364,7 +407,9 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 		}
 		return
 	}
-	command := exec.CommandContext(ctx, "pw-record", "--target", serial, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	defer stopCapture()
+	command := exec.CommandContext(captureCtx, "pw-record", "--target", serial, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
 	stdout, err := command.StdoutPipe()
 	if err != nil || command.Start() != nil {
 		a.setListeningFailure("No se pudo conectar a audio de Chrome/Meet")
@@ -372,6 +417,12 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	}
 	defer command.Wait()
 	a.setListenStatus("Escuchando audio de Meet")
+
+	// Chrome opens a new PipeWire node when a call starts playing, so the node
+	// picked at connect time can stay silent forever. Watch for a better one and
+	// drop the current recorder so the reconnect path retargets.
+	var speaking atomic.Bool
+	go watchChromeStream(captureCtx, serial, &speaking, stopCapture)
 
 	frame := make([]byte, meetFrameBytes)
 	segment := make([]byte, 0, meetSampleRate*2*12)
@@ -393,6 +444,7 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 				segment = append(segment, frame...)
 				if voiceFrames >= 3 {
 					recording, silenceFrames = true, 0
+					speaking.Store(true)
 					a.setListenStatus("Intervención detectada…")
 				}
 			} else {
@@ -413,6 +465,7 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 			a.processMeetSegment(segment)
 		}
 		recording, voiceFrames, silenceFrames = false, 0, 0
+		speaking.Store(false)
 		segment = segment[:0]
 		if ctx.Err() != nil {
 			return
@@ -421,11 +474,37 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	}
 }
 
+// watchChromeStream drops the current recorder when Chrome exposes a different
+// output node, so a call that starts after the app connected is still captured.
+func watchChromeStream(ctx context.Context, serial string, speaking *atomic.Bool, stopCapture context.CancelFunc) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+		// Never cut a segment that is mid-sentence.
+		if speaking.Load() {
+			continue
+		}
+		current, err := chromeAudioSerial(ctx)
+		if err != nil || current == serial {
+			continue
+		}
+		stopCapture()
+		return
+	}
+}
+
 func chromeAudioSerial(ctx context.Context) (string, error) {
 	output, err := exec.CommandContext(ctx, "pw-dump").Output()
 	if err != nil {
 		return "", err
 	}
+	return pickChromeSerial(output)
+}
+
+func pickChromeSerial(output []byte) (string, error) {
 	var nodes []struct {
 		Type string `json:"type"`
 		ID   any    `json:"id"`
@@ -437,6 +516,9 @@ func chromeAudioSerial(ctx context.Context) (string, error) {
 	if err := json.Unmarshal(output, &nodes); err != nil {
 		return "", err
 	}
+	// Chrome keeps idle output nodes around, so prefer a running one and, among
+	// equals, the newest: that is the node a call just opened.
+	best, bestRank, bestSerial := "", -1, float64(-1)
 	for _, node := range nodes {
 		if node.Type != "PipeWire:Interface:Node" || node.Info.Props["media.class"] != "Stream/Output/Audio" {
 			continue
@@ -445,12 +527,22 @@ func chromeAudioSerial(ctx context.Context) (string, error) {
 		if !strings.Contains(identity, "chrome") && !strings.Contains(identity, "chromium") && !strings.Contains(identity, "google-chrome") {
 			continue
 		}
-		if serial, ok := node.Info.Props["object.serial"]; ok {
-			return fmt.Sprint(serial), nil
+		serial, target := float64(-1), fmt.Sprint(node.ID)
+		if value, ok := node.Info.Props["object.serial"].(float64); ok {
+			serial, target = value, fmt.Sprint(int64(value))
 		}
-		return fmt.Sprint(node.ID), nil
+		rank := 0
+		if node.Info.State == "running" {
+			rank = 1
+		}
+		if rank > bestRank || (rank == bestRank && serial > bestSerial) {
+			best, bestRank, bestSerial = target, rank, serial
+		}
 	}
-	return "", fmt.Errorf("Chrome no tiene stream de salida")
+	if best == "" {
+		return "", fmt.Errorf("Chrome no tiene stream de salida")
+	}
+	return best, nil
 }
 
 func pcmRMS(frame []byte) float64 {
@@ -463,6 +555,21 @@ func pcmRMS(frame []byte) float64 {
 }
 
 func (a *App) processMeetSegment(pcm []byte) {
+	audio := append([]byte(nil), pcm...) // the caller reuses its segment buffer
+	a.mu.Lock()
+	manual := a.manualSend
+	if manual {
+		a.pendingAudio = audio
+		a.listenStatus = fmt.Sprintf("Fragmento de %.1fs listo para enviar", float64(len(audio))/float64(meetSampleRate*2))
+	}
+	a.mu.Unlock()
+	if manual {
+		return
+	}
+	a.deliverMeetSegment(audio)
+}
+
+func (a *App) deliverMeetSegment(pcm []byte) {
 	a.setListenStatus("Gillie transcribiendo…")
 	result, transcript, err := a.sendMeetAudio(wavFromPCM(pcm))
 	if err != nil {
@@ -540,7 +647,7 @@ func wavFromPCM(pcm []byte) []byte {
 	wav := make([]byte, 44+len(pcm))
 	copy(wav[0:4], "RIFF")
 	binary.LittleEndian.PutUint32(wav[4:8], 36+dataSize)
-	copy(wav[8:12], "WAVEfmt ")
+	copy(wav[8:16], "WAVEfmt ")
 	binary.LittleEndian.PutUint32(wav[16:20], 16)
 	binary.LittleEndian.PutUint16(wav[20:22], 1)
 	binary.LittleEndian.PutUint16(wav[22:24], 1)
