@@ -181,7 +181,7 @@ async function sendMessage() {
         </div>
 
         <div class="panels">
-          <section class="panel transcript-panel">
+          <section class="panel transcript-panel" :class="{ expanded: listening }">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
             <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><div v-if="listening" class="wave"><i v-for="n in 18" :key="n" :style="{ height: `${12 + (n * 17) % 30}px` }"></i></div></div>
             <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
