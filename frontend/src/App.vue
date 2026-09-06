@@ -253,7 +253,6 @@ async function sendMessage() {
           <div class="section-label">MODO</div>
           <button class="mode-button active">Entrevista</button>
           <button class="mode-button">Comunicación diaria</button>
-          <div class="privacy-note"><span>◌</span><span><strong>Protección activa</strong><small>Ventana excluida de captura</small></span></div>
         </div>
       </aside>
 
