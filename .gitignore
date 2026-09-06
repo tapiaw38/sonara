@@ -1,5 +1,7 @@
-# Wails build output
-build/
+# Wails build output. The app icon lives here by convention and is source, not
+# output: without it Wails regenerates its own default logo on a fresh clone.
+build/*
+!build/appicon.png
 
 # JavaScript dependencies and generated frontend
 node_modules/
