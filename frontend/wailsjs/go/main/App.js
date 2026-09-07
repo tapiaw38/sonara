@@ -57,3 +57,7 @@ export function StartListening() {
 export function StopListening() {
   return window['go']['main']['App']['StopListening']();
 }
+
+export function ToggleAlwaysOnTop() {
+  return window['go']['main']['App']['ToggleAlwaysOnTop']();
+}

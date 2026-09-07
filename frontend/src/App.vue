@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, CaptureScreen, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, SendMessage, SendPendingSegment, SetAudioLanguage, SetManualSend, StartListening, StopListening } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, CaptureScreen, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, SendMessage, SendPendingSegment, SetAudioLanguage, SetManualSend, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -14,7 +14,7 @@ const endpoint = ref('')
 const busy = ref(false)
 const compact = ref(false)
 const ghost = ref(false)
-const alwaysOnTop = ref(true)
+const alwaysOnTop = ref(false)
 const opacityPercent = ref(Number(localStorage.getItem('sonara-opacity') || 22))
 const captureStatus = ref('Sin captura pendiente')
 const analyzingCapture = ref(false)
@@ -79,7 +79,14 @@ async function loadState() {
 }
 
 loadState()
-WindowSetAlwaysOnTop(true)
+
+async function toggleAlwaysOnTop() {
+  const target = !alwaysOnTop.value
+  WindowSetAlwaysOnTop(target)
+  if (await ToggleAlwaysOnTop()) {
+    alwaysOnTop.value = target
+  }
+}
 
 function setOpacity(value: string | number) {
   opacityPercent.value = Number(value)
@@ -234,7 +241,7 @@ async function sendMessage() {
         <button class="overlay-button" :class="{ active: compact }" title="Modo compacto" @click="compact = !compact">▣</button>
         <button class="overlay-button" :class="{ active: ghost }" title="Modo casi invisible" @click="ghost = !ghost">◌</button>
         <label v-if="ghost" class="opacity-control" title="Opacidad"><input type="range" min="5" max="100" :value="opacityPercent" @input="setOpacity(($event.target as HTMLInputElement).value)" /><span>{{ opacityPercent }}%</span></label>
-        <button class="overlay-button" :class="{ active: alwaysOnTop }" title="Siempre encima" @click="alwaysOnTop = !alwaysOnTop; WindowSetAlwaysOnTop(alwaysOnTop)">↥</button>
+        <button class="overlay-button" :class="{ active: alwaysOnTop }" title="Siempre encima" @click="toggleAlwaysOnTop()">↥</button>
       </div>
     </header>
 

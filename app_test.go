@@ -266,3 +266,38 @@ func TestWavFromPCMHeader(t *testing.T) {
 		t.Errorf("length = %d", len(wav))
 	}
 }
+
+func TestOverlayPlanFloatsTiledWindowBeforeOverlay(t *testing.T) {
+	cmds, floated := overlayPlan(false, false, false)
+	if len(cmds) != 2 || cmds[0] != "togglefloating" || cmds[1] != "toggleoverlay" {
+		t.Fatalf("una ventana tileada debe flotarse antes del overlay, dio %v", cmds)
+	}
+	if !floated {
+		t.Fatal("debe recordar que la flotamos nosotros")
+	}
+}
+
+func TestOverlayPlanKeepsUserFloatingWindowFloating(t *testing.T) {
+	cmds, floated := overlayPlan(false, true, false)
+	if len(cmds) != 1 || cmds[0] != "toggleoverlay" {
+		t.Fatalf("una ventana ya flotante no debe re-flotarse, dio %v", cmds)
+	}
+	if floated {
+		t.Fatal("no la flotamos nosotros, no hay que devolverla a tiled")
+	}
+}
+
+func TestOverlayPlanRestoresTilingOnlyIfWeFloated(t *testing.T) {
+	cmds, floated := overlayPlan(true, true, true)
+	if len(cmds) != 2 || cmds[1] != "togglefloating" {
+		t.Fatalf("debe devolver a tiled lo que flotamos, dio %v", cmds)
+	}
+	if floated {
+		t.Fatal("tras apagar ya no queda nada flotado por nosotros")
+	}
+
+	cmds, _ = overlayPlan(true, true, false)
+	if len(cmds) != 1 || cmds[0] != "toggleoverlay" {
+		t.Fatalf("no debe des-flotar una ventana que el usuario floto, dio %v", cmds)
+	}
+}

@@ -29,3 +29,5 @@ export function SetManualSend(arg1:boolean):Promise<boolean>;
 export function StartListening():Promise<boolean>;
 
 export function StopListening():Promise<boolean>;
+
+export function ToggleAlwaysOnTop():Promise<boolean>;

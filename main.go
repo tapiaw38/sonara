@@ -21,7 +21,7 @@ func main() {
 		Title:  "Sonara",
 		Width:  1024,
 		Height: 768,
-		AlwaysOnTop: true,
+		AlwaysOnTop: false,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
