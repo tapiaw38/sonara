@@ -335,8 +335,20 @@ func (a *App) CaptureScreen() (CaptureStatus, error) {
 	if err != nil {
 		return CaptureStatus{}, err
 	}
-	if output, err := exec.Command("grim", path).CombinedOutput(); err != nil {
+	// grim creates the file and then fills it, taking a few hundred
+	// milliseconds for a 1080p frame. The UI polls for a new capture on a
+	// timer, so writing in place lets it pick the file up at zero bytes and
+	// upload that: Gillie then answers that the image arrived empty. Writing
+	// beside it and renaming is atomic, so only the finished frame is ever
+	// visible under the real name.
+	pending := path + ".pending"
+	if output, err := exec.Command("grim", pending).CombinedOutput(); err != nil {
+		os.Remove(pending)
 		return CaptureStatus{}, fmt.Errorf("grim failed: %w: %s", err, output)
+	}
+	if err := os.Rename(pending, path); err != nil {
+		os.Remove(pending)
+		return CaptureStatus{}, err
 	}
 	return a.LastCapture()
 }
@@ -352,6 +364,11 @@ func (a *App) LastCapture() (CaptureStatus, error) {
 	}
 	if err != nil {
 		return CaptureStatus{}, err
+	}
+	// A capture left half written by an interrupted grim is worse than none:
+	// it would be uploaded and analysed as an empty image.
+	if info.Size() == 0 {
+		return CaptureStatus{AgentReady: true}, nil
 	}
 	return CaptureStatus{
 		Path:       path,
