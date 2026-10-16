@@ -349,6 +349,28 @@ func (a *App) GetSessionProfile(sessionID string) (SessionProfile, error) {
 	return database.sessionProfile(sessionID)
 }
 
+// GetUIPreferences loads saved panel dimensions from the shared settings store.
+func (a *App) GetUIPreferences() (UIPreferences, error) {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return UIPreferences{}, fmt.Errorf("sin persistencia disponible")
+	}
+	return database.uiPreferences()
+}
+
+// SaveUIPreferences persists layout dimensions in the shared settings store.
+func (a *App) SaveUIPreferences(preferences UIPreferences) error {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return fmt.Errorf("sin persistencia disponible")
+	}
+	return database.saveUIPreferences(preferences)
+}
+
 func (a *App) NewSession() bool {
 	a.mu.Lock()
 	a.voiceCancel()

@@ -18,6 +18,8 @@ export function DiscardPendingSegment():Promise<boolean>;
 
 export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
 
+export function GetUIPreferences():Promise<main.UIPreferences>;
+
 export function IsListening():Promise<boolean>;
 
 export function LastCapture():Promise<main.CaptureStatus>;
@@ -29,6 +31,8 @@ export function NewSession():Promise<boolean>;
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
 
 export function SaveSessionProfile(arg1:string,arg2:main.SessionProfile):Promise<void>;
+
+export function SaveUIPreferences(arg1:main.UIPreferences):Promise<void>;
 
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 

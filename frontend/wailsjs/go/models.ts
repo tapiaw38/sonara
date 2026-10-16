@@ -184,4 +184,19 @@ export namespace main {
 	}
 
 
+	export class UIPreferences {
+	    responsePanelHeight: number;
+	    transcriptPanelHeight: number;
+
+	    static createFrom(source: any = {}) {
+	        return new UIPreferences(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.responsePanelHeight = source["responsePanelHeight"];
+	        this.transcriptPanelHeight = source["transcriptPanelHeight"];
+	    }
+	}
+
 }

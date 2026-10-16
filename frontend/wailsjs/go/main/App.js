@@ -34,6 +34,10 @@ export function GetSessionProfile(arg1) {
   return window['go']['main']['App']['GetSessionProfile'](arg1);
 }
 
+export function GetUIPreferences() {
+  return window['go']['main']['App']['GetUIPreferences']();
+}
+
 export function IsListening() {
   return window['go']['main']['App']['IsListening']();
 }
@@ -56,6 +60,10 @@ export function OpenSession(arg1) {
 
 export function SaveSessionProfile(arg1, arg2) {
   return window['go']['main']['App']['SaveSessionProfile'](arg1, arg2);
+}
+
+export function SaveUIPreferences(arg1) {
+  return window['go']['main']['App']['SaveUIPreferences'](arg1);
 }
 
 export function SendMessage(arg1) {

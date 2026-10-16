@@ -31,7 +31,8 @@ const (
 	// settingAudioApp remembers which application owns the meeting audio. The
 	// PipeWire serial is useless across restarts because the node is recreated,
 	// but the application is stable, so this is what makes the choice stick.
-	settingAudioApp = "preferred_audio_app"
+	settingAudioApp      = "preferred_audio_app"
+	settingUIPreferences = "ui_preferences"
 )
 
 func storePath() (string, error) {
@@ -100,6 +101,51 @@ func (s *store) setSetting(key, value string) error {
 		"INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		key, value)
 	return err
+}
+
+// UIPreferences stores persistent layout choices in the settings table.
+type UIPreferences struct {
+	ResponsePanelHeight   int `json:"responsePanelHeight"`
+	TranscriptPanelHeight int `json:"transcriptPanelHeight"`
+}
+
+func normalizeUIPreferences(preferences UIPreferences) UIPreferences {
+	preferences.ResponsePanelHeight = clampPreference(preferences.ResponsePanelHeight, 280, 2400)
+	preferences.TranscriptPanelHeight = clampPreference(preferences.TranscriptPanelHeight, 180, 2400)
+	return preferences
+}
+
+func clampPreference(value, minValue, maxValue int) int {
+	if value == 0 {
+		return 0
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (s *store) uiPreferences() (UIPreferences, error) {
+	encoded := s.setting(settingUIPreferences)
+	if encoded == "" {
+		return UIPreferences{}, nil
+	}
+	var preferences UIPreferences
+	if err := json.Unmarshal([]byte(encoded), &preferences); err != nil {
+		return UIPreferences{}, fmt.Errorf("preferencias de interfaz inválidas: %w", err)
+	}
+	return normalizeUIPreferences(preferences), nil
+}
+
+func (s *store) saveUIPreferences(preferences UIPreferences) error {
+	encoded, err := json.Marshal(normalizeUIPreferences(preferences))
+	if err != nil {
+		return err
+	}
+	return s.setSetting(settingUIPreferences, string(encoded))
 }
 
 // saveSession records a session before its first message, so a session that

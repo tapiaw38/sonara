@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -50,6 +50,12 @@ const savedSidebarWidth = Number(localStorage.getItem('sonara-sidebar-width'))
 const sidebarWidth = ref(Number.isFinite(savedSidebarWidth) && savedSidebarWidth >= 160 ? Math.min(savedSidebarWidth, 420) : 225)
 const sidebar = ref<HTMLElement | null>(null)
 const sidebarDrag = ref<{ pointerId: number; startX: number; startWidth: number } | null>(null)
+const responsePanelHeight = ref(0)
+const transcriptPanelHeight = ref(0)
+const panelMaxHeight = Math.max(280, window.innerHeight - 100)
+const responsePanelEl = ref<HTMLElement | null>(null)
+const transcriptPanelEl = ref<HTMLElement | null>(null)
+const panelResize = ref<{ panel: 'response' | 'transcript'; pointerId: number; startY: number; startHeight: number } | null>(null)
 const showMobileSessions = ref(false)
 const captureStatus = ref('Sin captura pendiente')
 const analyzingCapture = ref(false)
@@ -113,6 +119,103 @@ function stopSidebarResize(event: PointerEvent) {
 function nudgeSidebar(delta: number) {
   setSidebarWidth((sidebar.value?.getBoundingClientRect().width ?? sidebarWidth.value) + delta)
   localStorage.setItem('sonara-sidebar-width', String(sidebarWidth.value))
+}
+
+function panelHeightStyle(height: number) {
+  return height > 0 ? { height: `${height}px`, minHeight: `${height}px` } : undefined
+}
+
+function legacyPanelHeight(key: string) {
+  const value = Number(localStorage.getItem(key))
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function clearLegacyPanelHeights() {
+  localStorage.removeItem('sonara-response-height')
+  localStorage.removeItem('sonara-transcript-height')
+}
+
+async function loadPanelPreferences() {
+  try {
+    const preferences = await GetUIPreferences()
+    const migrated = {
+      responsePanelHeight: preferences.responsePanelHeight || legacyPanelHeight('sonara-response-height'),
+      transcriptPanelHeight: preferences.transcriptPanelHeight || legacyPanelHeight('sonara-transcript-height'),
+    }
+    const hasLegacyValues = (!preferences.responsePanelHeight && migrated.responsePanelHeight > 0)
+      || (!preferences.transcriptPanelHeight && migrated.transcriptPanelHeight > 0)
+    responsePanelHeight.value = migrated.responsePanelHeight
+    transcriptPanelHeight.value = migrated.transcriptPanelHeight
+    if (hasLegacyValues) {
+      try {
+        await SaveUIPreferencesToDB(migrated)
+        clearLegacyPanelHeights()
+      } catch (error) {
+        console.warn('No se pudieron migrar preferencias locales a SQLite; se conserva copia local.', error)
+      }
+    } else {
+      clearLegacyPanelHeights()
+    }
+  } catch (error) {
+    responsePanelHeight.value = legacyPanelHeight('sonara-response-height')
+    transcriptPanelHeight.value = legacyPanelHeight('sonara-transcript-height')
+    console.warn('No se pudieron cargar preferencias de panel desde SQLite; se conservan los valores locales.', error)
+  }
+}
+
+async function savePanelPreferences() {
+  const preferences = {
+    responsePanelHeight: responsePanelHeight.value,
+    transcriptPanelHeight: transcriptPanelHeight.value,
+  }
+  try {
+    await SaveUIPreferencesToDB(preferences)
+    clearLegacyPanelHeights()
+  } catch (error) {
+    if (preferences.responsePanelHeight) localStorage.setItem('sonara-response-height', String(preferences.responsePanelHeight))
+    else localStorage.removeItem('sonara-response-height')
+    if (preferences.transcriptPanelHeight) localStorage.setItem('sonara-transcript-height', String(preferences.transcriptPanelHeight))
+    else localStorage.removeItem('sonara-transcript-height')
+    console.warn('No se pudieron guardar preferencias de panel en SQLite; se conserva copia local.', error)
+  }
+}
+
+function startPanelResize(event: PointerEvent, panel: 'response' | 'transcript') {
+  if (event.button !== 0) return
+  event.preventDefault()
+  const element = panel === 'response' ? responsePanelEl.value : transcriptPanelEl.value
+  const startHeight = element?.getBoundingClientRect().height ?? 360
+  panelResize.value = { panel, pointerId: event.pointerId, startY: event.clientY, startHeight }
+  const handle = event.currentTarget as HTMLElement
+  handle.setPointerCapture(event.pointerId)
+}
+
+function resizePanel(event: PointerEvent) {
+  const drag = panelResize.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+  const minHeight = drag.panel === 'response' ? 280 : 180
+  const maxHeight = Math.max(minHeight, window.innerHeight - 100)
+  const height = Math.max(minHeight, Math.min(maxHeight, Math.round(drag.startHeight + event.clientY - drag.startY)))
+  if (drag.panel === 'response') responsePanelHeight.value = height
+  else transcriptPanelHeight.value = height
+}
+
+function stopPanelResize(event: PointerEvent) {
+  const drag = panelResize.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+  panelResize.value = null
+  void savePanelPreferences()
+}
+
+function nudgePanel(panel: 'response' | 'transcript', delta: number) {
+  const element = panel === 'response' ? responsePanelEl.value : transcriptPanelEl.value
+  const currentHeight = panel === 'response' ? responsePanelHeight.value : transcriptPanelHeight.value
+  const minHeight = panel === 'response' ? 280 : 180
+  const maxHeight = Math.max(minHeight, window.innerHeight - 100)
+  const height = Math.max(minHeight, Math.min(maxHeight, Math.round((currentHeight || element?.getBoundingClientRect().height || 360) + delta)))
+  if (panel === 'response') responsePanelHeight.value = height
+  else transcriptPanelHeight.value = height
+  void savePanelPreferences()
 }
 
 async function toggleListening() {
@@ -355,6 +458,7 @@ async function newSession() {
 
 async function loadState() {
   try {
+    await loadPanelPreferences()
     listening.value = await IsListening()
     endpoint.value = await AIEndpoint()
     await SetManualSend(manualSend.value)
@@ -591,7 +695,7 @@ async function sendMessage() {
       </div>
     </header>
 
-    <section class="workspace" :class="{ 'resizing-sidebar': sidebarDrag }" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
+    <section class="workspace" :class="{ 'resizing-sidebar': sidebarDrag, 'resizing-panels': panelResize }" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
       <aside ref="sidebar" class="sidebar">
         <div class="section-label">SESIÓN</div>
         <div class="session-card active" aria-label="Sesión actual"><span class="session-icon">◉</span><span><strong>{{ assistantModeLabel }} actual</strong><small>Hoy · {{ startedAt }}</small></span></div>
@@ -622,7 +726,7 @@ async function sendMessage() {
         </div>
 
         <div class="panels">
-          <section class="panel transcript-panel" :class="{ expanded: listening || droppedSegments > 0 }">
+          <section ref="transcriptPanelEl" class="panel transcript-panel" :class="{ expanded: listening || droppedSegments > 0, resizing: panelResize?.panel === 'transcript' }" :style="panelHeightStyle(transcriptPanelHeight)">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
             <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p><div v-if="listening" class="audio-pulse" :class="{ active: audioDetected }"><span></span><span></span><span></span><small>{{ audioDetected ? listenStatus || 'Sonido detectado' : 'Esperando sonido…' }}</small></div><div v-if="audioDetected" class="wave"><i v-for="(level, index) in levels" :key="index" :class="{ active: level > 0.05 }" :style="{ height: `${3 + level * 42}px` }"></i></div></div>
             <div v-if="pendingSeconds > 0" class="pending-bar"><span>Fragmento de {{ pendingSeconds.toFixed(1) }}s en espera</span><button class="pending-send" @click="sendPending">Enviar</button><button class="pending-discard" @click="discardPending">Descartar</button></div>
@@ -631,12 +735,14 @@ async function sendMessage() {
               <button class="listen-button" :class="{ stop: listening }" :disabled="busy" @click="toggleListening"><span>{{ listening ? '■' : '●' }}</span>{{ busy ? 'Conectando…' : listening ? 'Pausar escucha' : 'Comenzar escucha' }}</button>
               <button class="mode-toggle" :class="{ manual: manualSend }" :title="manualSend ? 'Los fragmentos esperan tu confirmación' : 'Se envía solo al detectar silencio'" @click="toggleSendMode">{{ manualSend ? 'Manual' : 'Auto' }}</button>
             </div>
+            <div class="panel-resizer" role="separator" aria-label="Cambiar alto de transcripción" aria-orientation="horizontal" tabindex="0" :aria-valuenow="transcriptPanelHeight || undefined" aria-valuemin="180" :aria-valuemax="panelMaxHeight" @pointerdown="startPanelResize($event, 'transcript')" @pointermove="resizePanel" @pointerup="stopPanelResize" @pointercancel="stopPanelResize" @lostpointercapture="stopPanelResize" @keydown.up.prevent="nudgePanel('transcript', -16)" @keydown.down.prevent="nudgePanel('transcript', 16)"></div>
           </section>
 
-          <section class="panel response-panel">
+          <section ref="responsePanelEl" class="panel response-panel" :class="{ resizing: panelResize?.panel === 'response' }" :style="panelHeightStyle(responsePanelHeight)">
             <div class="panel-heading"><span>Respuesta sugerida</span><div class="response-tools"><div v-if="assistantMode === 'coding'" class="font-tools" aria-label="Tamaño de código"><button title="Reducir letra" :disabled="codeFontSize <= 10" @click="adjustCodeFont(-1)">A−</button><span>{{ codeFontSize }}px</span><button title="Aumentar letra" :disabled="codeFontSize >= 18" @click="adjustCodeFont(1)">A+</button></div><span class="kbd">⌘ ↵</span></div></div>
             <div v-if="messages.length || agentWorking" ref="messagesPanel" class="messages" @click="handleMessageClick"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div><div v-if="agentWorking" class="typing-indicator"><span></span><span></span><span></span><small>{{ analyzingCapture ? 'Sonara leyendo imagen' : listenStatus || 'Sonara preparando respuesta' }}</small></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>{{ emptyConversationLabel }}</p></div>
             <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.enter.exact.prevent="sendMessage" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
+            <div class="panel-resizer" role="separator" aria-label="Cambiar alto de respuesta sugerida" aria-orientation="horizontal" tabindex="0" :aria-valuenow="responsePanelHeight || undefined" aria-valuemin="280" :aria-valuemax="panelMaxHeight" @pointerdown="startPanelResize($event, 'response')" @pointermove="resizePanel" @pointerup="stopPanelResize" @pointercancel="stopPanelResize" @lostpointercapture="stopPanelResize" @keydown.up.prevent="nudgePanel('response', -16)" @keydown.down.prevent="nudgePanel('response', 16)"></div>
           </section>
         </div>
 

@@ -130,6 +130,12 @@ button { color: inherit; border: 0; cursor: pointer; }
 .sidebar { background: rgb(12 14 18 / calc(.82 * var(--surface-opacity))); }
 .api-settings-toggle, .audio-source-controls button { color: #a6e9d3; }
 .sidebar-resizer::after { background: #55d6b0; }
+.panel { position: relative; }
+.panel-resizer { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; height: 12px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; touch-action: none; }
+.panel-resizer::after { width: 38px; height: 3px; content: ''; border-radius: 3px; background: #55d6b0; opacity: .38; transition: opacity .15s ease, width .15s ease; }
+.panel-resizer:hover::after, .panel-resizer:focus-visible::after, .panel.resizing .panel-resizer::after { width: 52px; opacity: .95; }
+.panel.resizing { transition: none !important; }
+.resizing-panels { user-select: none; cursor: ns-resize; }
 @media (max-width: 980px) {
   .topbar { gap: 10px; padding-inline: 13px; }
   .product-nav button { padding-inline: 9px; font-size: 10px; }
