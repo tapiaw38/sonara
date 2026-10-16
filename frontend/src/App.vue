@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, SetSessionBrief, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -176,7 +176,8 @@ async function setMode(mode: string) {
   localStorage.setItem('sonara-mode', assistantMode.value)
 }
 
-function sessionProfileKey(id: string) { return `sonara-session-profile:${id}` }
+const legacySessionProfilePrefix = 'sonara-session-profile:'
+function legacySessionProfileKey(id: string) { return `${legacySessionProfilePrefix}${id}` }
 
 async function activateSessionProfile(id: string) {
   sessionCompany.value = ''
@@ -186,23 +187,31 @@ async function activateSessionProfile(id: string) {
   sessionScenario.value = 'General'
   if (id) {
     try {
-      const saved = JSON.parse(localStorage.getItem(sessionProfileKey(id)) || '{}') as Record<string, string>
+      const saved = await GetSessionProfile(id)
       sessionScenario.value = saved.scenario || 'General'
       sessionCompany.value = saved.company || ''
       sessionRole.value = saved.role || ''
       sessionObjective.value = saved.objective || ''
       sessionNotes.value = saved.notes || ''
     } catch {
-      localStorage.removeItem(sessionProfileKey(id))
+      // A session can be created before its first database write during startup.
     }
   }
-  await SetSessionBrief([
-    `Scenario: ${sessionScenario.value}`,
-    sessionCompany.value && `Company: ${sessionCompany.value}`,
-    sessionRole.value && `Role: ${sessionRole.value}`,
-    sessionObjective.value && `Interview goal: ${sessionObjective.value}`,
-    sessionNotes.value && `Candidate background and instructions: ${sessionNotes.value}`,
-  ].filter(Boolean).join('\n'))
+}
+
+async function migrateLegacySessionProfiles() {
+  const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+    .filter((key): key is string => Boolean(key?.startsWith(legacySessionProfilePrefix)))
+  for (const key of keys) {
+    const id = key.slice(legacySessionProfilePrefix.length)
+    try {
+      const profile = JSON.parse(localStorage.getItem(key) || '{}')
+      await SaveSessionProfile(id, profile)
+      localStorage.removeItem(key)
+    } catch (error) {
+      console.warn(`No se pudo migrar contexto de sesión ${id}; se conserva en localStorage para reintentar.`, error)
+    }
+  }
 }
 
 async function saveSessionSetup() {
@@ -214,14 +223,8 @@ async function saveSessionSetup() {
     notes: sessionNotes.value.trim(),
   }
   try {
-    await SetSessionBrief([
-      `Scenario: ${profile.scenario}`,
-      profile.company && `Company: ${profile.company}`,
-      profile.role && `Role: ${profile.role}`,
-      profile.objective && `Interview goal: ${profile.objective}`,
-      profile.notes && `Candidate background and instructions: ${profile.notes}`,
-    ].filter(Boolean).join('\n'))
-    if (currentSessionID.value) localStorage.setItem(sessionProfileKey(currentSessionID.value), JSON.stringify(profile))
+    if (!currentSessionID.value) throw new Error('No hay sesión activa')
+    await SaveSessionProfile(currentSessionID.value, profile)
     sessionSetupMessage.value = 'Contexto aplicado a esta sesión.'
   } catch {
     sessionSetupMessage.value = 'No se pudo aplicar el contexto.'
@@ -321,7 +324,7 @@ async function openSession(id: string) {
 async function removeSession(id: string) {
   try {
     sessions.value = await DeleteSession(id)
-    localStorage.removeItem(sessionProfileKey(id))
+    localStorage.removeItem(legacySessionProfileKey(id))
     sessionMessage.value = 'Sesión borrada.'
   } catch (error) {
     sessionMessage.value = String(error || 'No se pudo borrar la sesión')
@@ -360,6 +363,7 @@ async function loadState() {
     const state = await ListeningStatus()
     selectedAudioSource.value = state.audioSource || ''
     currentSessionID.value = state.sessionId
+    await migrateLegacySessionProfiles()
     await activateSessionProfile(currentSessionID.value)
     await refreshAudioSources()
     await refreshSessions()

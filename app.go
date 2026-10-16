@@ -47,7 +47,7 @@ type App struct {
 	store               *store
 	listening           bool
 	sessionHistory      []sessionMessage
-	sessionBrief        string
+	sessionProfile      SessionProfile
 	assistantMode       string
 	latestVisualContext string
 	listenerCancel      context.CancelFunc
@@ -317,13 +317,36 @@ func (a *App) SetAssistantMode(mode string) string {
 	return mode
 }
 
-// SetSessionBrief adds interview-specific details to the current session prompt.
-func (a *App) SetSessionBrief(brief string) string {
-	brief = truncateContext(brief, 2000)
+// SaveSessionProfile stores interview-specific context alongside its session.
+// The UI also uses this for one-time migration from legacy localStorage keys.
+func (a *App) SaveSessionProfile(sessionID string, profile SessionProfile) error {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return fmt.Errorf("sin persistencia disponible")
+	}
+	profile = normalizeSessionProfile(profile)
+	if err := database.saveSessionProfile(sessionID, profile); err != nil {
+		return err
+	}
 	a.mu.Lock()
-	a.sessionBrief = brief
+	if a.sessionID == sessionID {
+		a.sessionProfile = profile
+	}
 	a.mu.Unlock()
-	return brief
+	return nil
+}
+
+// GetSessionProfile loads interview context from SQLite for the selected session.
+func (a *App) GetSessionProfile(sessionID string) (SessionProfile, error) {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return SessionProfile{}, fmt.Errorf("sin persistencia disponible")
+	}
+	return database.sessionProfile(sessionID)
 }
 
 func (a *App) NewSession() bool {
@@ -342,7 +365,7 @@ func (a *App) NewSession() bool {
 	a.replySequence++
 	a.sessionID = newSessionID()
 	a.sessionHistory = nil
-	a.sessionBrief = ""
+	a.sessionProfile = SessionProfile{}
 	a.latestVisualContext = ""
 	a.pendingAudio = nil
 	a.transcript = "Esperando audio de la reunión…"
@@ -758,7 +781,7 @@ func (a *App) nameSession(database *store, sessionID, exchange string) {
 
 func (a *App) buildSessionContextLocked() string {
 	var context strings.Builder
-	if brief := strings.TrimSpace(a.sessionBrief); brief != "" {
+	if brief := a.sessionProfile.promptContext(); strings.TrimSpace(brief) != "" {
 		context.WriteString("Interview profile and goals:\n")
 		context.WriteString(brief)
 		context.WriteString("\n\n")

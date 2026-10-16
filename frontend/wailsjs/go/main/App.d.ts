@@ -16,6 +16,8 @@ export function DeleteSession(arg1:string):Promise<Array<main.SessionSummary>>;
 
 export function DiscardPendingSegment():Promise<boolean>;
 
+export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
+
 export function IsListening():Promise<boolean>;
 
 export function LastCapture():Promise<main.CaptureStatus>;
@@ -26,6 +28,8 @@ export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
 
+export function SaveSessionProfile(arg1:string,arg2:main.SessionProfile):Promise<void>;
+
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 
 export function SendPendingSegment():Promise<boolean>;
@@ -33,7 +37,6 @@ export function SendPendingSegment():Promise<boolean>;
 export function Sessions():Promise<Array<main.SessionSummary>>;
 
 export function SetAssistantMode(arg1:string):Promise<string>;
-export function SetSessionBrief(arg1:string):Promise<string>;
 
 export function SetAudioLanguage(arg1:string):Promise<string>;
 

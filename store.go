@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -120,6 +122,75 @@ func (s *store) appendMessage(sessionID, role, text string) error {
 func (s *store) saveVisualContext(sessionID, text string) error {
 	_, err := s.db.Exec("UPDATE sessions SET visual_context = ? WHERE id = ?", text, sessionID)
 	return err
+}
+
+// SessionProfile is interview-specific context saved with its session.
+type SessionProfile struct {
+	Scenario  string `json:"scenario"`
+	Company   string `json:"company"`
+	Role      string `json:"role"`
+	Objective string `json:"objective"`
+	Notes     string `json:"notes"`
+}
+
+func normalizeSessionProfile(profile SessionProfile) SessionProfile {
+	profile.Scenario = truncateContext(strings.TrimSpace(profile.Scenario), 120)
+	if profile.Scenario == "" {
+		profile.Scenario = "General"
+	}
+	profile.Company = truncateContext(strings.TrimSpace(profile.Company), 160)
+	profile.Role = truncateContext(strings.TrimSpace(profile.Role), 160)
+	profile.Objective = truncateContext(strings.TrimSpace(profile.Objective), 400)
+	profile.Notes = truncateContext(strings.TrimSpace(profile.Notes), 1200)
+	return profile
+}
+
+func (profile SessionProfile) promptContext() string {
+	profile = normalizeSessionProfile(profile)
+	var parts []string
+	if profile.Scenario != "" {
+		parts = append(parts, "Interview scenario: "+profile.Scenario)
+	}
+	if profile.Company != "" {
+		parts = append(parts, "Company: "+profile.Company)
+	}
+	if profile.Role != "" {
+		parts = append(parts, "Role: "+profile.Role)
+	}
+	if profile.Objective != "" {
+		parts = append(parts, "Interview goal: "+profile.Objective)
+	}
+	if profile.Notes != "" {
+		parts = append(parts, "Candidate background and instructions: "+profile.Notes)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (s *store) saveSessionProfile(sessionID string, profile SessionProfile) error {
+	encoded, err := json.Marshal(normalizeSessionProfile(profile))
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec("UPDATE sessions SET session_profile = ? WHERE id = ?", string(encoded), sessionID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return fmt.Errorf("sesión %s no existe", sessionID)
+	}
+	return nil
+}
+
+func (s *store) sessionProfile(sessionID string) (SessionProfile, error) {
+	var encoded string
+	if err := s.db.QueryRow("SELECT session_profile FROM sessions WHERE id = ?", sessionID).Scan(&encoded); err != nil {
+		return SessionProfile{}, err
+	}
+	var profile SessionProfile
+	if err := json.Unmarshal([]byte(encoded), &profile); err != nil {
+		return SessionProfile{}, fmt.Errorf("sesión %s tiene contexto inválido: %w", sessionID, err)
+	}
+	return normalizeSessionProfile(profile), nil
 }
 
 // loadMessages returns the last limit messages in the order they were spoken.
@@ -258,6 +329,10 @@ func (a *App) OpenSession(id string) (OpenSessionResult, error) {
 		messages = append(messages, sessionMessage{role: message.Role, text: message.Text})
 	}
 	visual := database.visualContext(id)
+	profile, err := database.sessionProfile(id)
+	if err != nil {
+		return OpenSessionResult{}, err
+	}
 
 	a.mu.Lock()
 	// Reopening is a session switch, so in-flight audio and replies from the
@@ -276,6 +351,7 @@ func (a *App) OpenSession(id string) (OpenSessionResult, error) {
 	a.replySequence++
 	a.sessionID = id
 	a.sessionHistory = messages
+	a.sessionProfile = profile
 	a.latestVisualContext = visual
 	a.pendingAudio = nil
 	a.transcript = "Sesión reabierta"

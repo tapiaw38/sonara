@@ -30,6 +30,10 @@ export function DiscardPendingSegment() {
   return window['go']['main']['App']['DiscardPendingSegment']();
 }
 
+export function GetSessionProfile(arg1) {
+  return window['go']['main']['App']['GetSessionProfile'](arg1);
+}
+
 export function IsListening() {
   return window['go']['main']['App']['IsListening']();
 }
@@ -50,6 +54,10 @@ export function OpenSession(arg1) {
   return window['go']['main']['App']['OpenSession'](arg1);
 }
 
+export function SaveSessionProfile(arg1, arg2) {
+  return window['go']['main']['App']['SaveSessionProfile'](arg1, arg2);
+}
+
 export function SendMessage(arg1) {
   return window['go']['main']['App']['SendMessage'](arg1);
 }
@@ -64,10 +72,6 @@ export function Sessions() {
 
 export function SetAssistantMode(arg1) {
   return window['go']['main']['App']['SetAssistantMode'](arg1);
-}
-
-export function SetSessionBrief(arg1) {
-  return window['go']['main']['App']['SetSessionBrief'](arg1);
 }
 
 export function SetAudioLanguage(arg1) {

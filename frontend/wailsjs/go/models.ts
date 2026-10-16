@@ -1,12 +1,12 @@
 export namespace main {
-	
+
 	export class AnalysisResult {
 	    response: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AnalysisResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.response = source["response"];
@@ -18,11 +18,11 @@ export namespace main {
 	    running: boolean;
 	    meeting: boolean;
 	    app: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AudioSource(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.target = source["target"];
@@ -37,11 +37,11 @@ export namespace main {
 	    capturedAt: string;
 	    queued: boolean;
 	    agentReady: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CaptureStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -66,11 +66,11 @@ export namespace main {
 	    sessionId: string;
 	    audioGuessing: boolean;
 	    audioCandidates: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ListeningState(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.listening = source["listening"];
@@ -94,11 +94,11 @@ export namespace main {
 	    role: string;
 	    text: string;
 	    createdAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SessionViewMessage(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
@@ -114,11 +114,11 @@ export namespace main {
 	    messages: number;
 	    preview: string;
 	    title: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SessionSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -133,17 +133,17 @@ export namespace main {
 	export class OpenSessionResult {
 	    sessions: SessionSummary[];
 	    messages: SessionViewMessage[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OpenSessionResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sessions = this.convertValues(source["sessions"], SessionSummary);
 	        this.messages = this.convertValues(source["messages"], SessionViewMessage);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -162,7 +162,26 @@ export namespace main {
 		    return a;
 		}
 	}
-	
+	export class SessionProfile {
+	    scenario: string;
+	    company: string;
+	    role: string;
+	    objective: string;
+	    notes: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SessionProfile(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scenario = source["scenario"];
+	        this.company = source["company"];
+	        this.role = source["role"];
+	        this.objective = source["objective"];
+	        this.notes = source["notes"];
+	    }
+	}
+
 
 }
-
