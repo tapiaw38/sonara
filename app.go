@@ -181,6 +181,12 @@ func (a *App) startup(ctx context.Context) {
 	// Opens the log and stamps a header, so every run is separated and the
 	// model tiers in use are on record next to that run's errors.
 	logf("sonara started: %s", status)
+
+	if dir, err := deployScreenshareFilesToDefaultLocation(); err != nil {
+		logf("could not deploy screenshare files: %v", err)
+	} else {
+		logf("screenshare files deployed to %s", dir)
+	}
 }
 
 // shutdown closes the store so SQLite can finish its journal cleanly.

@@ -1,0 +1,13 @@
+# Pinned to the exact tag wayvnc v0.10.2 requires (neatvnc_version = ['>=1.0.0',
+# '<2.0.0'] in its meson.build). wayvnc's own meson.build calls
+# subproject('neatvnc', ...) — this is the upstream-intended drop-in location.
+#
+# neatvnc's own h264 option defaults to 'auto' and pulls libavcodec/libavfilter/
+# libavutil (ffmpeg) when found. build-wayvnc.sh passes -Dneatvnc:h264=disabled
+# at meson-setup time so ffmpeg is never probed, which is the whole reason this
+# is built from source instead of pacman -S wayvnc. Encodings used here (ZRLE,
+# Tight, raw) are compiled in unconditionally — only hardware H.264 is skipped.
+[wrap-git]
+url = https://github.com/any1/neatvnc.git
+revision = v1.0.3
+depth = 1

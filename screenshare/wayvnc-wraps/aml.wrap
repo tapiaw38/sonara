@@ -1,0 +1,7 @@
+# Pinned to the exact tag wayvnc v0.10.2 requires (aml_version = ['>=1.0.0', '<2.0.0']
+# in its meson.build). wayvnc's own meson.build calls subproject('aml', ...) —
+# this is the upstream-intended drop-in location, not something invented here.
+[wrap-git]
+url = https://github.com/any1/aml.git
+revision = v1.0.0
+depth = 1

@@ -1,0 +1,16 @@
+# Install at ~/.config/xdg-desktop-portal-wlr/config (that file does not exist
+# yet on this machine — this is a pure addition, not an overwrite).
+#
+# chooser_type=none + output_name pins every screencast request through this
+# portal to HEADLESS-1, with no picker at all: there is no interactive step
+# where eDP-2 could be chosen by mistake. Source: xdg-desktop-portal-wlr(5).
+#
+# This is a global portal setting — it affects every app that screencasts via
+# this portal while HEADLESS-1 is the target, not just Meet/Teams. If some
+# other screencast later needs the real screen, either edit this file back to
+# chooser_type=default (restores the interactive picker) or stop at
+# chooser_type=none with a different output_name, and restart the portal:
+#   systemctl --user restart xdg-desktop-portal-wlr.service
+[screencast]
+output_name=HEADLESS-1
+chooser_type=none
