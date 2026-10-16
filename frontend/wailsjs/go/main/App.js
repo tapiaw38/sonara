@@ -14,8 +14,16 @@ export function AudioLevel() {
   return window['go']['main']['App']['AudioLevel']();
 }
 
+export function AudioSources() {
+  return window['go']['main']['App']['AudioSources']();
+}
+
 export function CaptureScreen() {
   return window['go']['main']['App']['CaptureScreen']();
+}
+
+export function DeleteSession(arg1) {
+  return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
 export function DiscardPendingSegment() {
@@ -34,6 +42,14 @@ export function ListeningStatus() {
   return window['go']['main']['App']['ListeningStatus']();
 }
 
+export function NewSession() {
+  return window['go']['main']['App']['NewSession']();
+}
+
+export function OpenSession(arg1) {
+  return window['go']['main']['App']['OpenSession'](arg1);
+}
+
 export function SendMessage(arg1) {
   return window['go']['main']['App']['SendMessage'](arg1);
 }
@@ -42,12 +58,28 @@ export function SendPendingSegment() {
   return window['go']['main']['App']['SendPendingSegment']();
 }
 
+export function Sessions() {
+  return window['go']['main']['App']['Sessions']();
+}
+
+export function SetAssistantMode(arg1) {
+  return window['go']['main']['App']['SetAssistantMode'](arg1);
+}
+
 export function SetAudioLanguage(arg1) {
   return window['go']['main']['App']['SetAudioLanguage'](arg1);
 }
 
+export function SetAudioSource(arg1) {
+  return window['go']['main']['App']['SetAudioSource'](arg1);
+}
+
 export function SetManualSend(arg1) {
   return window['go']['main']['App']['SetManualSend'](arg1);
+}
+
+export function SetOpenAIAPIKey(arg1) {
+  return window['go']['main']['App']['SetOpenAIAPIKey'](arg1);
 }
 
 export function StartListening() {
