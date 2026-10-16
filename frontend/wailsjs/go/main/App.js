@@ -66,6 +66,10 @@ export function SetAssistantMode(arg1) {
   return window['go']['main']['App']['SetAssistantMode'](arg1);
 }
 
+export function SetSessionBrief(arg1) {
+  return window['go']['main']['App']['SetSessionBrief'](arg1);
+}
+
 export function SetAudioLanguage(arg1) {
   return window['go']['main']['App']['SetAudioLanguage'](arg1);
 }

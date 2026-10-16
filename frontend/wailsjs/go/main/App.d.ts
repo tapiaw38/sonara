@@ -33,6 +33,7 @@ export function SendPendingSegment():Promise<boolean>;
 export function Sessions():Promise<Array<main.SessionSummary>>;
 
 export function SetAssistantMode(arg1:string):Promise<string>;
+export function SetSessionBrief(arg1:string):Promise<string>;
 
 export function SetAudioLanguage(arg1:string):Promise<string>;
 

@@ -47,6 +47,7 @@ type App struct {
 	store               *store
 	listening           bool
 	sessionHistory      []sessionMessage
+	sessionBrief        string
 	assistantMode       string
 	latestVisualContext string
 	listenerCancel      context.CancelFunc
@@ -316,6 +317,15 @@ func (a *App) SetAssistantMode(mode string) string {
 	return mode
 }
 
+// SetSessionBrief adds interview-specific details to the current session prompt.
+func (a *App) SetSessionBrief(brief string) string {
+	brief = truncateContext(brief, 2000)
+	a.mu.Lock()
+	a.sessionBrief = brief
+	a.mu.Unlock()
+	return brief
+}
+
 func (a *App) NewSession() bool {
 	a.mu.Lock()
 	a.voiceCancel()
@@ -332,6 +342,7 @@ func (a *App) NewSession() bool {
 	a.replySequence++
 	a.sessionID = newSessionID()
 	a.sessionHistory = nil
+	a.sessionBrief = ""
 	a.latestVisualContext = ""
 	a.pendingAudio = nil
 	a.transcript = "Esperando audio de la reunión…"
@@ -747,6 +758,11 @@ func (a *App) nameSession(database *store, sessionID, exchange string) {
 
 func (a *App) buildSessionContextLocked() string {
 	var context strings.Builder
+	if brief := strings.TrimSpace(a.sessionBrief); brief != "" {
+		context.WriteString("Interview profile and goals:\n")
+		context.WriteString(brief)
+		context.WriteString("\n\n")
+	}
 	if visual := strings.TrimSpace(a.latestVisualContext); visual != "" {
 		context.WriteString("Recent screenshot analysis:\n")
 		context.WriteString(visual)

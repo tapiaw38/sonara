@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, SetSessionBrief, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
@@ -32,7 +32,15 @@ const endpoint = ref('')
 const apiKey = ref('')
 const apiKeyMessage = ref('')
 const savingApiKey = ref(false)
-const showApiSettings = ref(false)
+const showSettings = ref(false)
+const showSessionSetup = ref(false)
+const sessionSetupMessage = ref('')
+const sessionScenario = ref('General')
+const sessionCompany = ref('')
+const sessionRole = ref('')
+const sessionObjective = ref('')
+const sessionNotes = ref('')
+const codeFontSize = ref(Number(localStorage.getItem('sonara-code-font-size') || 12))
 const busy = ref(false)
 const compact = ref(false)
 const ghost = ref(false)
@@ -63,6 +71,7 @@ const audioLanguage = ref(localStorage.getItem('sonara-audio-language') === 'en'
 const storedMode = localStorage.getItem('sonara-mode') || 'interview'
 const assistantMode = ref(['interview', 'daily', 'coding', 'coaching'].includes(storedMode) ? storedMode : 'interview')
 const assistantModeLabel = computed(() => ({ interview: 'Entrevista', daily: 'Reunión', coding: 'Coding', coaching: 'Coaching' }[assistantMode.value] || 'Entrevista'))
+const assistantModeTitle = computed(() => ({ interview: 'Copiloto en vivo', daily: 'Copiloto de reunión', coding: 'Copiloto de código', coaching: 'Coach de entrevista' }[assistantMode.value] || 'Copiloto en vivo'))
 const translation = ref('')
 const streamingIndex = ref<number | null>(null)
 const WAVE_BARS = 18
@@ -167,6 +176,85 @@ async function setMode(mode: string) {
   localStorage.setItem('sonara-mode', assistantMode.value)
 }
 
+function sessionProfileKey(id: string) { return `sonara-session-profile:${id}` }
+
+async function activateSessionProfile(id: string) {
+  sessionCompany.value = ''
+  sessionRole.value = ''
+  sessionObjective.value = ''
+  sessionNotes.value = ''
+  sessionScenario.value = 'General'
+  if (id) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(sessionProfileKey(id)) || '{}') as Record<string, string>
+      sessionScenario.value = saved.scenario || 'General'
+      sessionCompany.value = saved.company || ''
+      sessionRole.value = saved.role || ''
+      sessionObjective.value = saved.objective || ''
+      sessionNotes.value = saved.notes || ''
+    } catch {
+      localStorage.removeItem(sessionProfileKey(id))
+    }
+  }
+  await SetSessionBrief([
+    `Scenario: ${sessionScenario.value}`,
+    sessionCompany.value && `Company: ${sessionCompany.value}`,
+    sessionRole.value && `Role: ${sessionRole.value}`,
+    sessionObjective.value && `Interview goal: ${sessionObjective.value}`,
+    sessionNotes.value && `Candidate background and instructions: ${sessionNotes.value}`,
+  ].filter(Boolean).join('\n'))
+}
+
+async function saveSessionSetup() {
+  const profile = {
+    scenario: sessionScenario.value,
+    company: sessionCompany.value.trim(),
+    role: sessionRole.value.trim(),
+    objective: sessionObjective.value.trim(),
+    notes: sessionNotes.value.trim(),
+  }
+  try {
+    await SetSessionBrief([
+      `Scenario: ${profile.scenario}`,
+      profile.company && `Company: ${profile.company}`,
+      profile.role && `Role: ${profile.role}`,
+      profile.objective && `Interview goal: ${profile.objective}`,
+      profile.notes && `Candidate background and instructions: ${profile.notes}`,
+    ].filter(Boolean).join('\n'))
+    if (currentSessionID.value) localStorage.setItem(sessionProfileKey(currentSessionID.value), JSON.stringify(profile))
+    sessionSetupMessage.value = 'Contexto aplicado a esta sesión.'
+  } catch {
+    sessionSetupMessage.value = 'No se pudo aplicar el contexto.'
+  }
+}
+
+function adjustCodeFont(delta: number) {
+  codeFontSize.value = Math.max(10, Math.min(18, codeFontSize.value + delta))
+  localStorage.setItem('sonara-code-font-size', String(codeFontSize.value))
+}
+
+async function handleMessageClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  const button = target.closest<HTMLButtonElement>('[data-copy-code]')
+  if (!button) return
+  const code = button.parentElement?.querySelector('code')?.textContent || ''
+  try {
+    await navigator.clipboard.writeText(code)
+  } catch {
+    const input = document.createElement('textarea')
+    input.value = code
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.append(input)
+    input.select()
+    document.execCommand('copy')
+    input.remove()
+  }
+  button.textContent = 'Copiado'
+  window.setTimeout(() => { if (button.isConnected) button.textContent = 'Copiar' }, 1400)
+}
+
 const sessions = ref<SessionRow[]>([])
 const currentSessionID = ref('')
 const sessionMessage = ref('')
@@ -199,6 +287,7 @@ async function openSession(id: string) {
   if (id === currentSessionID.value) return
   try {
     const opened = await OpenSession(id)
+    const selected = sessions.value.find((row) => row.id === id)
     sessions.value = opened.sessions
     uiSessionGeneration.value++
     captureRequestID.value++
@@ -220,6 +309,8 @@ async function openSession(id: string) {
     lastVoiceSequence.value = state.sequence
     transcript.value = state.transcript
     currentSessionID.value = id
+    if (selected?.mode) await setMode(selected.mode)
+    await activateSessionProfile(id)
     sessionMessage.value = 'Sesión reabierta. El contexto volvió al prompt.'
     showMobileSessions.value = false
   } catch (error) {
@@ -230,6 +321,7 @@ async function openSession(id: string) {
 async function removeSession(id: string) {
   try {
     sessions.value = await DeleteSession(id)
+    localStorage.removeItem(sessionProfileKey(id))
     sessionMessage.value = 'Sesión borrada.'
   } catch (error) {
     sessionMessage.value = String(error || 'No se pudo borrar la sesión')
@@ -254,6 +346,7 @@ async function newSession() {
   startedAt.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   captureStatus.value = 'Nueva sesión lista'
   currentSessionID.value = (await ListeningStatus()).sessionId
+  await activateSessionProfile(currentSessionID.value)
   await refreshSessions()
 }
 
@@ -267,6 +360,7 @@ async function loadState() {
     const state = await ListeningStatus()
     selectedAudioSource.value = state.audioSource || ''
     currentSessionID.value = state.sessionId
+    await activateSessionProfile(currentSessionID.value)
     await refreshAudioSources()
     await refreshSessions()
     await refreshCapture()
@@ -325,7 +419,7 @@ function formatMessage(text: string) {
     if (index % 3 === 1) return ''
     if (index % 3 === 2) {
       const language = parts[index - 1] || 'text'
-      return `<pre><code class="language-${escape(language)}">${escape(part.trim())}</code></pre>`
+      return `<pre><button type="button" class="copy-code-button" data-copy-code>Copiar</button><code class="language-${escape(language)}">${escape(part.trim())}</code></pre>`
     }
     return formatPlain(part)
   }).join('')
@@ -461,11 +555,18 @@ async function sendMessage() {
 </script>
 
 <template>
-  <main class="shell" :class="{ compact, ghost, 'is-analyzing': analyzingCapture }" :style="{ '--surface-opacity': ghost ? opacityPercent / 100 : 1 }">
+  <main class="shell" :class="{ compact, ghost, 'is-analyzing': analyzingCapture }" :style="{ '--surface-opacity': ghost ? opacityPercent / 100 : 1, '--code-font-size': `${codeFontSize}px` }">
     <header class="topbar">
       <div class="brand"><img class="brand-mark" src="/sonara-logo.png" alt="" /><span>SONARA</span></div>
+      <nav class="product-nav" aria-label="Modo de trabajo">
+        <button :class="{ active: assistantMode === 'interview' }" @click="setMode('interview')">En vivo</button>
+        <button :class="{ active: assistantMode === 'daily' }" @click="setMode('daily')">Reunión</button>
+        <button :class="{ active: assistantMode === 'coding' }" @click="setMode('coding')">Coding</button>
+        <button :class="{ active: assistantMode === 'coaching' }" @click="setMode('coaching')">Coaching</button>
+      </nav>
       <div class="meeting-state"><span class="status-dot" :class="statusClass"></span>{{ statusLabel }}</div>
       <div class="overlay-controls">
+        <button class="overlay-button settings-button" title="Configuración" aria-label="Configuración" @click="showSettings = true">⚙</button>
         <button class="overlay-button" :class="{ active: compact }" title="Modo compacto" @click="compact = !compact">▣</button>
         <button class="overlay-button" :class="{ active: ghost }" title="Modo casi invisible" @click="ghost = !ghost">◌</button>
         <label v-if="ghost" class="opacity-control" title="Opacidad"><input type="range" min="5" max="100" :value="opacityPercent" @input="setOpacity(($event.target as HTMLInputElement).value)" /><span>{{ opacityPercent }}%</span></label>
@@ -507,45 +608,13 @@ async function sendMessage() {
           <small v-if="sessionMessage" class="session-hint">{{ sessionMessage }}</small>
         </div>
 
-        <div class="sidebar-bottom">
-          <div class="section-label">FUENTE DE AUDIO</div>
-          <div class="audio-source-controls">
-            <select :value="selectedAudioSource" aria-label="Fuente de audio" @change="selectAudioSource(($event.target as HTMLSelectElement).value)">
-              <option value="">Automática</option>
-              <option v-for="source in audioSources" :key="source.target" :value="source.target">{{ source.label }} · #{{ source.target }}{{ source.running ? ' · activo' : '' }}</option>
-            </select>
-            <button title="Actualizar fuentes" aria-label="Actualizar fuentes de audio" @click="refreshAudioSources">↻</button>
-          </div>
-          <small v-if="audioGuessing" class="audio-source-hint guessing">Hay {{ audioCandidates }} fuentes de audio posibles; Sonara eligió una adivinando. Revisá la lista de arriba.</small>
-          <small v-if="audioSourceMessage" class="audio-source-hint">{{ audioSourceMessage }}</small>
-          <div class="section-label">IDIOMA DEL AUDIO</div>
-          <div class="language-switch" title="Idioma hablado en la reunión. Las respuestas siempre son en español.">
-            <button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button>
-            <button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button>
-          </div>
-          <div class="section-label">MODO</div>
-          <button class="mode-button" :class="{ active: assistantMode === 'interview' }" @click="setMode('interview')">Entrevista</button>
-          <button class="mode-button" :class="{ active: assistantMode === 'daily' }" @click="setMode('daily')">Comunicación diaria</button>
-          <button class="mode-button" :class="{ active: assistantMode === 'coding' }" @click="setMode('coding')">Coding</button>
-          <button class="mode-button" :class="{ active: assistantMode === 'coaching' }" @click="setMode('coaching')">Coaching</button>
-          <div class="api-settings">
-            <button class="api-settings-toggle" @click="showApiSettings = !showApiSettings">{{ showApiSettings ? '−' : '+' }} Configurar API key</button>
-            <form v-if="showApiSettings" class="api-key-form" @submit.prevent="saveApiKey">
-              <label for="openai-key">OpenAI API key</label>
-              <input id="openai-key" v-model="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
-              <small>Solo en memoria. Se pierde al cerrar Sonara.</small>
-              <div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !apiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar' }}</button><button type="button" :disabled="savingApiKey" @click="apiKey = ''; saveApiKey()">Quitar</button></div>
-              <small v-if="apiKeyMessage" role="status">{{ apiKeyMessage }}</small>
-            </form>
-          </div>
-        </div>
       </aside>
       <div class="sidebar-resizer" role="separator" aria-label="Cambiar ancho de barra lateral" aria-orientation="vertical" tabindex="0" :aria-valuenow="sidebarWidth" aria-valuemin="160" aria-valuemax="420" @pointerdown="startSidebarResize" @pointermove="resizeSidebar" @pointerup="stopSidebarResize" @pointercancel="stopSidebarResize" @lostpointercapture="stopSidebarResize" @keydown.left.prevent="nudgeSidebar(-16)" @keydown.right.prevent="nudgeSidebar(16)"></div>
 
       <div class="content">
         <div class="content-header">
-          <div><p class="eyebrow">ENTREVISTA ACTUAL</p><h1>Asistente de reunión</h1></div>
-          <button class="ghost-button" :class="{ scanning: analyzingCapture }" @click="captureScreen">{{ analyzingCapture ? '◌ Analizando' : '⌘ Capturar' }}</button>
+          <div><p class="eyebrow">{{ assistantModeLabel.toUpperCase() }} · SESIÓN ACTUAL</p><h1>{{ assistantModeTitle }}</h1><p class="workspace-subtitle">Escucha la conversación y prepara respuestas mientras hablas.</p></div>
+          <div class="content-actions"><button class="session-setup-trigger" @click="showSessionSetup = true">＋ Contexto</button><button class="ghost-button" :class="{ scanning: analyzingCapture }" @click="captureScreen">{{ analyzingCapture ? '◌ Analizando' : '⌘ Capturar' }}</button></div>
         </div>
 
         <div class="panels">
@@ -561,8 +630,8 @@ async function sendMessage() {
           </section>
 
           <section class="panel response-panel">
-            <div class="panel-heading"><span>Respuesta sugerida</span><span class="kbd">⌘ ↵</span></div>
-            <div v-if="messages.length || agentWorking" ref="messagesPanel" class="messages"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div><div v-if="agentWorking" class="typing-indicator"><span></span><span></span><span></span><small>{{ analyzingCapture ? 'Sonara leyendo imagen' : listenStatus || 'Sonara preparando respuesta' }}</small></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>{{ emptyConversationLabel }}</p></div>
+            <div class="panel-heading"><span>Respuesta sugerida</span><div class="response-tools"><div v-if="assistantMode === 'coding'" class="font-tools" aria-label="Tamaño de código"><button title="Reducir letra" :disabled="codeFontSize <= 10" @click="adjustCodeFont(-1)">A−</button><span>{{ codeFontSize }}px</span><button title="Aumentar letra" :disabled="codeFontSize >= 18" @click="adjustCodeFont(1)">A+</button></div><span class="kbd">⌘ ↵</span></div></div>
+            <div v-if="messages.length || agentWorking" ref="messagesPanel" class="messages" @click="handleMessageClick"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span><div class="message-content" v-html="formatMessage(message.text)"></div></div><div v-if="agentWorking" class="typing-indicator"><span></span><span></span><span></span><small>{{ analyzingCapture ? 'Sonara leyendo imagen' : listenStatus || 'Sonara preparando respuesta' }}</small></div></div><div v-else class="empty-state"><span class="empty-icon">✦</span><p>{{ emptyConversationLabel }}</p></div>
             <div class="composer"><textarea v-model="draft" :disabled="sendingMessage" placeholder="Escribe una pregunta…" rows="2" @keydown.enter.exact.prevent="sendMessage" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage"></textarea><button class="send-button" :disabled="sendingMessage" aria-label="Enviar" @click="sendMessage">{{ sendingMessage ? '…' : '↑' }}</button></div>
           </section>
         </div>
@@ -570,5 +639,28 @@ async function sendMessage() {
         <footer class="footer"><span>{{ captureStatus }} · Ctrl+Alt+C</span><span class="footer-right"><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span></footer>
       </div>
     </section>
+
+    <div v-if="showSettings" class="modal-overlay" @click.self="showSettings = false" @keydown.esc="showSettings = false">
+      <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header class="dialog-header"><div><p class="eyebrow">SONARA</p><h2 id="settings-title">Configuración</h2></div><button class="dialog-close" aria-label="Cerrar configuración" @click="showSettings = false">×</button></header>
+        <div class="settings-section"><h3>Audio</h3><label for="settings-audio-source">Fuente de captura</label><div class="audio-source-controls"><select id="settings-audio-source" :value="selectedAudioSource" @change="selectAudioSource(($event.target as HTMLSelectElement).value)"><option value="">Automática</option><option v-for="source in audioSources" :key="source.target" :value="source.target">{{ source.label }} · #{{ source.target }}{{ source.running ? ' · activo' : '' }}</option></select><button title="Actualizar fuentes" aria-label="Actualizar fuentes de audio" @click="refreshAudioSources">↻</button></div><small v-if="audioGuessing" class="audio-source-hint guessing">Hay {{ audioCandidates }} fuentes posibles; revisa cuál corresponde a la reunión.</small><small v-if="audioSourceMessage" class="audio-source-hint">{{ audioSourceMessage }}</small><label>Idioma hablado</label><div class="language-switch"><button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button><button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button></div></div>
+        <div class="settings-section"><h3>OpenAI</h3><form class="api-key-form" @submit.prevent="saveApiKey"><label for="openai-key">API key</label><input id="openai-key" v-model="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Se guarda localmente en la configuración de Sonara.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !apiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="apiKey = ''; saveApiKey()">Quitar</button></div><small v-if="apiKeyMessage" role="status">{{ apiKeyMessage }}</small><small class="endpoint-status">{{ endpoint || 'Sin conectar' }}</small></form></div>
+      </section>
+    </div>
+
+    <div v-if="showSessionSetup" class="modal-overlay" @click.self="showSessionSetup = false" @keydown.esc="showSessionSetup = false">
+      <section class="settings-dialog session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-setup-title">
+        <header class="dialog-header"><div><p class="eyebrow">PREPARACIÓN</p><h2 id="session-setup-title">Contexto de entrevista</h2><p>Personaliza las respuestas para esta sesión.</p></div><button class="dialog-close" aria-label="Cerrar contexto" @click="showSessionSetup = false">×</button></header>
+        <form class="session-setup-form" @submit.prevent="saveSessionSetup">
+          <label for="session-scenario">Tipo de entrevista</label><select id="session-scenario" v-model="sessionScenario"><option>General</option><option>Conductual</option><option>Técnica</option><option>Diseño de sistemas</option><option>Producto y negocio</option><option>Personalizada</option></select>
+          <label for="session-company">Empresa <span>Opcional</span></label><input id="session-company" v-model="sessionCompany" placeholder="Ej. Acme" />
+          <label for="session-role">Puesto</label><input id="session-role" v-model="sessionRole" placeholder="Ej. Desarrollador frontend" />
+          <label for="session-objective">Objetivo de la entrevista</label><input id="session-objective" v-model="sessionObjective" placeholder="Ej. entrevista técnica, primera ronda…" />
+          <label for="session-notes">Tu experiencia o instrucciones</label><textarea id="session-notes" v-model="sessionNotes" rows="4" placeholder="Logros relevantes, tecnologías, tono y datos que Sonara debe tener en cuenta…"></textarea>
+          <small class="profile-hint">Este contexto se agrega al prompt de la sesión y queda guardado localmente para volver a abrirla.</small>
+          <div class="dialog-actions"><span role="status">{{ sessionSetupMessage }}</span><button class="primary-action" type="submit">Guardar contexto</button></div>
+        </form>
+      </section>
+    </div>
   </main>
 </template>
