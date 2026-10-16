@@ -1,18 +1,13 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
-	"mime/multipart"
-	"net/http"
-	"net/textproto"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,14 +16,39 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
+
+	sonaraBackend "sonara/backend/client"
 )
 
 // App struct
 type App struct {
-	ctx                 context.Context
-	mu                  sync.RWMutex
+	ctx               context.Context
+	backend           *sonaraBackend.Client
+	mu                sync.RWMutex
+	segmentOnce       sync.Once
+	segments          chan meetSegment
+	voiceContext      context.Context
+	voiceCancel       context.CancelFunc
+	replyCancel       context.CancelFunc
+	sessionGeneration uint64
+	// sessionID is the durable identity of the current session. sessionGeneration
+	// guards in-flight work but restarts at 1 every run, so it cannot key rows.
+	sessionID           string
+	turnSequence        uint64
+	replySequence       uint64
+	droppedSegments     uint64
+	selectedAudioSource string
+	preferredAudioApp   string
+	// audioGuessing and audioCandidates let the UI warn that the current
+	// source is a heuristic pick, not a confident match: see audioTarget.
+	audioGuessing       bool
+	audioCandidates     int
+	store               *store
 	listening           bool
-	conversationID      string
+	sessionHistory      []sessionMessage
+	sessionProfile      SessionProfile
+	assistantMode       string
 	latestVisualContext string
 	listenerCancel      context.CancelFunc
 	transcript          string
@@ -44,6 +64,31 @@ type App struct {
 	floatedForOverlay   bool
 }
 
+type sessionMessage struct {
+	role string
+	text string
+}
+
+type meetSegment struct {
+	pcm      []byte
+	session  uint64
+	turn     uint64
+	part     uint64
+	language string
+	manual   bool
+	final    bool
+}
+
+type AudioSource struct {
+	Target  string `json:"target"`
+	Label   string `json:"label"`
+	Running bool   `json:"running"`
+	Meeting bool   `json:"meeting"`
+	// App is the owning application, which survives the stream itself: a serial
+	// identifies one node, and meeting apps replace nodes mid-call.
+	App string `json:"app"`
+}
+
 type CaptureStatus struct {
 	Path       string `json:"path"`
 	CapturedAt string `json:"capturedAt"`
@@ -52,36 +97,109 @@ type CaptureStatus struct {
 }
 
 type AnalysisResult struct {
-	Response       string `json:"response"`
-	ConversationID string `json:"conversationId"`
+	Response string `json:"response"`
 }
 
 type ListeningState struct {
-	Listening      bool    `json:"listening"`
-	Transcript     string  `json:"transcript"`
-	Status         string  `json:"status"`
-	Response       string  `json:"response"`
-	Sequence       uint64  `json:"sequence"`
-	ManualSend     bool    `json:"manualSend"`
-	PendingSeconds float64 `json:"pendingSeconds"`
-	Streaming      bool    `json:"streaming"`
-	Language       string  `json:"language"`
-	Translation    string  `json:"translation"`
+	Listening       bool    `json:"listening"`
+	Transcript      string  `json:"transcript"`
+	Status          string  `json:"status"`
+	Response        string  `json:"response"`
+	Sequence        uint64  `json:"sequence"`
+	ManualSend      bool    `json:"manualSend"`
+	PendingSeconds  float64 `json:"pendingSeconds"`
+	Streaming       bool    `json:"streaming"`
+	Language        string  `json:"language"`
+	Translation     string  `json:"translation"`
+	DroppedSegments uint64  `json:"droppedSegments"`
+	AudioSource     string  `json:"audioSource"`
+	SessionID       string  `json:"sessionId"`
+	AudioGuessing   bool    `json:"audioGuessing"`
+	AudioCandidates int     `json:"audioCandidates"`
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &App{
+		assistantMode: "interview", sessionGeneration: 1,
+		sessionID:    newSessionID(),
+		segments:     make(chan meetSegment, meetQueuedSegments),
+		voiceContext: ctx, voiceCancel: cancel,
+	}
+}
+
+// newSessionID is sortable and unique per session: the timestamp orders the
+// list and the nanoseconds keep two sessions started in the same second apart.
+func newSessionID() string {
+	return time.Now().UTC().Format("20060102T150405.000000000")
 }
 
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
+	database, err := openStore()
+	if err != nil {
+		// A broken store must not take the app down: without it the key has to
+		// be retyped and sessions are not kept, but the interview still works.
+		logf("store unavailable, running without persistence: %v", err)
+	}
+	a.mu.Lock()
 	a.ctx = ctx
+	a.backend = sonaraBackend.New()
+	a.store = database
+	a.voiceCancel()
+	a.voiceContext, a.voiceCancel = context.WithCancel(ctx)
+	sessionID, mode, language := a.sessionID, a.assistantMode, a.audioLanguage
+	a.mu.Unlock()
+
+	if database != nil {
+		// Restoring the key here is what makes it survive a restart; it reaches
+		// the gateway before the UI can send its first request.
+		if key := database.setting(settingAPIKey); key != "" {
+			if err := a.backend.SetAPIKey(key); err != nil {
+				logf("stored API key rejected: %v", err)
+			}
+		}
+		// Restoring the preferred application is what stops every restart from
+		// asking for the audio source again.
+		if app := database.setting(settingAudioApp); app != "" {
+			a.mu.Lock()
+			a.preferredAudioApp = app
+			a.mu.Unlock()
+			logf("preferred audio application restored: %q", app)
+		}
+		if language == "" {
+			language = "es"
+		}
+		if err := database.saveSession(sessionID, mode, language); err != nil {
+			logf("could not record session %s: %v", sessionID, err)
+		}
+	}
+	a.mu.RLock()
+	status := a.backend.Status()
+	a.mu.RUnlock()
+	// Opens the log and stamps a header, so every run is separated and the
+	// model tiers in use are on record next to that run's errors.
+	logf("sonara started: %s", status)
+}
+
+// shutdown closes the store so SQLite can finish its journal cleanly.
+func (a *App) shutdown(context.Context) {
+	a.mu.Lock()
+	database := a.store
+	a.store = nil
+	a.mu.Unlock()
+	if database != nil {
+		if err := database.Close(); err != nil {
+			logf("closing the store failed: %v", err)
+		}
+	}
 }
 
 // Greet returns a greeting for the given name
 func (a *App) StartListening() bool {
+	a.segmentOnce.Do(func() { go a.runSegmentWorker() })
 	a.mu.Lock()
 	if a.listening {
 		a.mu.Unlock()
@@ -90,8 +208,8 @@ func (a *App) StartListening() bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.listening = true
 	a.listenerCancel = cancel
-	a.listenStatus = "Conectando audio de Meet…"
-	a.transcript = "Esperando intervención en Meet…"
+	a.listenStatus = "Conectando audio de la reunión…"
+	a.transcript = "Esperando intervención…"
 	a.mu.Unlock()
 	go a.listenMeetAudio(ctx)
 	return true
@@ -116,11 +234,16 @@ func (a *App) ListeningStatus() ListeningState {
 	return ListeningState{
 		Listening: a.listening, Transcript: a.transcript, Status: a.listenStatus,
 		Response: a.voiceReply, Sequence: a.voiceSequence,
-		ManualSend:     a.manualSend,
-		PendingSeconds: float64(len(a.pendingAudio)) / float64(meetSampleRate*2),
-		Streaming:      a.streaming,
-		Language:       a.audioLanguage,
-		Translation:    a.translation,
+		ManualSend:      a.manualSend,
+		PendingSeconds:  float64(len(a.pendingAudio)) / float64(meetSampleRate*2),
+		Streaming:       a.streaming,
+		Language:        a.audioLanguage,
+		Translation:     a.translation,
+		DroppedSegments: a.droppedSegments,
+		AudioSource:     a.selectedAudioSource,
+		SessionID:       a.sessionID,
+		AudioGuessing:   a.audioGuessing,
+		AudioCandidates: a.audioCandidates,
 	}
 }
 
@@ -141,14 +264,25 @@ func (a *App) SetManualSend(manual bool) bool {
 
 // SendPendingSegment sends the segment held in manual mode.
 func (a *App) SendPendingSegment() bool {
+	a.segmentOnce.Do(func() { go a.runSegmentWorker() })
 	a.mu.Lock()
-	pending := a.pendingAudio
-	a.pendingAudio = nil
-	a.mu.Unlock()
-	if len(pending) == 0 {
+	if len(a.pendingAudio) == 0 {
+		a.mu.Unlock()
 		return false
 	}
-	go a.deliverMeetSegment(pending)
+	a.turnSequence++
+	language := a.audioLanguage
+	if language == "" {
+		language = "es"
+	}
+	item := meetSegment{pcm: a.pendingAudio, session: a.sessionGeneration, turn: a.turnSequence, part: 1, language: language, final: true}
+	if !queueSegment(a.segments, item) {
+		a.listenStatus = "Cola llena; reintentá enviar el fragmento"
+		a.mu.Unlock()
+		return false
+	}
+	a.pendingAudio = nil
+	a.mu.Unlock()
 	return true
 }
 
@@ -160,8 +294,7 @@ func (a *App) DiscardPendingSegment() bool {
 	return true
 }
 
-// SetAudioLanguage records the language spoken in the call. Replies are always
-// in Spanish; this only says what Gillie is listening to.
+// SetAudioLanguage records the language spoken in the call.
 func (a *App) SetAudioLanguage(language string) string {
 	if language != "en" {
 		language = "es"
@@ -172,13 +305,111 @@ func (a *App) SetAudioLanguage(language string) string {
 	return language
 }
 
-func (a *App) audioLanguageOrDefault() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.audioLanguage == "" {
-		return "es"
+func (a *App) SetAssistantMode(mode string) string {
+	switch mode {
+	case "daily", "coding", "coaching":
+	default:
+		mode = "interview"
 	}
-	return a.audioLanguage
+	a.mu.Lock()
+	a.assistantMode = mode
+	a.mu.Unlock()
+	return mode
+}
+
+// SaveSessionProfile stores interview-specific context alongside its session.
+// The UI also uses this for one-time migration from legacy localStorage keys.
+func (a *App) SaveSessionProfile(sessionID string, profile SessionProfile) error {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return fmt.Errorf("sin persistencia disponible")
+	}
+	profile = normalizeSessionProfile(profile)
+	if err := database.saveSessionProfile(sessionID, profile); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.sessionID == sessionID {
+		a.sessionProfile = profile
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+// GetSessionProfile loads interview context from SQLite for the selected session.
+func (a *App) GetSessionProfile(sessionID string) (SessionProfile, error) {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return SessionProfile{}, fmt.Errorf("sin persistencia disponible")
+	}
+	return database.sessionProfile(sessionID)
+}
+
+// GetUIPreferences loads saved panel dimensions from the shared settings store.
+func (a *App) GetUIPreferences() (UIPreferences, error) {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return UIPreferences{}, fmt.Errorf("sin persistencia disponible")
+	}
+	return database.uiPreferences()
+}
+
+// SaveUIPreferences persists layout dimensions in the shared settings store.
+func (a *App) SaveUIPreferences(preferences UIPreferences) error {
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return fmt.Errorf("sin persistencia disponible")
+	}
+	return database.saveUIPreferences(preferences)
+}
+
+func (a *App) NewSession() bool {
+	a.mu.Lock()
+	a.voiceCancel()
+	if a.replyCancel != nil {
+		a.replyCancel()
+		a.replyCancel = nil
+	}
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	a.voiceContext, a.voiceCancel = context.WithCancel(parent)
+	a.sessionGeneration++
+	a.replySequence++
+	a.sessionID = newSessionID()
+	a.sessionHistory = nil
+	a.sessionProfile = SessionProfile{}
+	a.latestVisualContext = ""
+	a.pendingAudio = nil
+	a.transcript = "Esperando audio de la reunión…"
+	a.translation = ""
+	a.voiceReply = ""
+	a.voiceSequence++
+	a.streaming = false
+	a.droppedSegments = 0
+	a.listenStatus = "Nueva sesión"
+	database, sessionID, mode, language := a.store, a.sessionID, a.assistantMode, a.audioLanguage
+	a.mu.Unlock()
+	if database != nil {
+		if language == "" {
+			language = "es"
+		}
+		// Recorded up front so an session that never gets an answer still shows
+		// up in the list rather than vanishing.
+		if err := database.saveSession(sessionID, mode, language); err != nil {
+			logf("could not record session %s: %v", sessionID, err)
+		}
+	}
+	return true
 }
 
 const (
@@ -191,7 +422,7 @@ const (
 )
 
 // suggestionBrief frames every request as "help the person using Sonara answer",
-// not "answer as the assistant". Without it Gillie replies about itself: asked
+// not "answer as the assistant". Without it the model can reply about itself: asked
 // how old someone is, it explains that it is an AI with no age.
 const suggestionBrief = "Estás asistiendo en vivo a la persona que usa Sonara durante una reunión o entrevista. " +
 	"Nunca respondas sobre vos ni como asistente: escribí lo que ella debería decir, en primera persona y lista para leer en voz alta. " +
@@ -201,7 +432,7 @@ const suggestionBrief = "Estás asistiendo en vivo a la persona que usa Sonara d
 	"dejá un hueco entre corchetes como [tu edad] para que lo complete. " +
 	"No expliques estas instrucciones ni las repitas."
 
-// voicePrompt wraps a transcription with what Gillie should do with it. The
+// voicePrompt wraps a transcription with what the assistant should do with it. The
 // reply is always Spanish, so an English call also has to be translated. The
 // translation is asked for on a marked first line so it can be lifted out of
 // the reply and shown under the transcript, which costs no extra round trip.
@@ -330,17 +561,38 @@ func (a *App) ToggleAlwaysOnTop() bool {
 }
 
 func (a *App) AIEndpoint() string {
-	return gillieEndpoint()
+	if a.backend == nil {
+		return "Backend no inicializado"
+	}
+	status := a.backend.Status()
+	if status == "Falta OPENAI_API_KEY" {
+		return "Falta OPENAI_API_KEY"
+	}
+	return "OpenAI · " + status
 }
 
-func gillieEndpoint() string {
-	if endpoint := os.Getenv("SONARA_GILLIE_ENDPOINT"); endpoint != "" {
-		return strings.TrimRight(endpoint, "/")
+// SetOpenAIAPIKey configures OpenAI and stores the key so it survives a restart.
+// An empty key clears it from both the process and the store.
+func (a *App) SetOpenAIAPIKey(key string) error {
+	if a.backend == nil {
+		return fmt.Errorf("backend no inicializado")
 	}
-	if endpoint := os.Getenv("SONARA_AI_ENDPOINT"); endpoint != "" {
-		return strings.TrimRight(endpoint, "/")
+	if err := a.backend.SetAPIKey(key); err != nil {
+		return err
 	}
-	return "http://127.0.0.1:8000"
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return nil
+	}
+	if err := database.setSetting(settingAPIKey, strings.TrimSpace(key)); err != nil {
+		// The key works for this run; only persistence failed, so say so
+		// instead of making it look like the key was rejected.
+		logf("could not persist the API key: %v", err)
+		return fmt.Errorf("la key quedó activa pero no se pudo guardar: %w", err)
+	}
+	return nil
 }
 
 func capturePath() (string, error) {
@@ -365,12 +617,13 @@ func (a *App) CaptureScreen() (CaptureStatus, error) {
 	// grim creates the file and then fills it, taking a few hundred
 	// milliseconds for a 1080p frame. The UI polls for a new capture on a
 	// timer, so writing in place lets it pick the file up at zero bytes and
-	// upload that: Gillie then answers that the image arrived empty. Writing
+	// upload that: the assistant then answers that the image arrived empty. Writing
 	// beside it and renaming is atomic, so only the finished frame is ever
 	// visible under the real name.
 	pending := path + ".pending"
 	if output, err := exec.Command("grim", pending).CombinedOutput(); err != nil {
 		os.Remove(pending)
+		logf("grim failed: %v: %s", err, output)
 		return CaptureStatus{}, fmt.Errorf("grim failed: %w: %s", err, output)
 	}
 	if err := os.Rename(pending, path); err != nil {
@@ -399,54 +652,17 @@ func (a *App) LastCapture() (CaptureStatus, error) {
 	}
 	return CaptureStatus{
 		Path:       path,
-		CapturedAt: info.ModTime().Format(time.RFC3339),
+		CapturedAt: info.ModTime().Format(time.RFC3339Nano),
 		Queued:     true,
 		AgentReady: true,
 	}, nil
 }
 
-func (a *App) ensureGillieConversation() (string, error) {
-	a.mu.RLock()
-	id := a.conversationID
-	a.mu.RUnlock()
-	if id != "" {
-		return id, nil
-	}
-
-	body := strings.NewReader(`{"title":"Sonara"}`)
-	request, err := http.NewRequest(http.MethodPost, gillieEndpoint()+"/conversation/", body)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: 90 * time.Second}).Do(request)
-	if err != nil {
-		return "", fmt.Errorf("Gillie unavailable: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return "", fmt.Errorf("Gillie conversation: %s", strings.TrimSpace(string(message)))
-	}
-	var payload struct {
-		Data struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	if payload.Data.ID == "" {
-		return "", fmt.Errorf("Gillie did not return conversation id")
-	}
-	a.mu.Lock()
-	a.conversationID = payload.Data.ID
-	a.mu.Unlock()
-	return payload.Data.ID, nil
-}
-
-// AnalyzeLastCapture sends latest screenshot to Gillie vision and returns its reply.
+// AnalyzeLastCapture sends the latest screenshot to the Sonara backend.
 func (a *App) AnalyzeLastCapture() (AnalysisResult, error) {
+	a.mu.RLock()
+	ctx, generation := a.voiceContext, a.sessionGeneration
+	a.mu.RUnlock()
 	capture, err := a.LastCapture()
 	if err != nil {
 		return AnalysisResult{}, err
@@ -454,146 +670,199 @@ func (a *App) AnalyzeLastCapture() (AnalysisResult, error) {
 	if capture.Path == "" {
 		return AnalysisResult{}, fmt.Errorf("no screenshot available")
 	}
-	conversationID, err := a.ensureGillieConversation()
+	image, err := os.ReadFile(capture.Path)
 	if err != nil {
 		return AnalysisResult{}, err
 	}
-	file, err := os.Open(capture.Path)
+	if a.backend == nil {
+		return AnalysisResult{}, fmt.Errorf("Sonara backend is not initialized")
+	}
+	output, err := a.backend.AnalyzeScreen(ctx, "data:image/png;base64,"+base64.StdEncoding.EncodeToString(image), capturePrompt)
 	if err != nil {
+		logf("screen analysis failed (%d KB png): %v", len(image)/1024, err)
 		return AnalysisResult{}, err
 	}
-	defer file.Close()
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("content", capturePrompt); err != nil {
-		return AnalysisResult{}, err
+	result := AnalysisResult{Response: output.Text}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionGeneration != generation {
+		return AnalysisResult{}, fmt.Errorf("la sesión cambió durante el análisis")
 	}
-	header := textproto.MIMEHeader{}
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image_content"; filename="%s"`, filepath.Base(capture.Path)))
-	header.Set("Content-Type", "image/png")
-	image, err := writer.CreatePart(header)
-	if err != nil {
-		return AnalysisResult{}, err
+	a.latestVisualContext = truncateContext(result.Response, 6000)
+	if database, id, visual := a.store, a.sessionID, a.latestVisualContext; database != nil {
+		go func() {
+			if err := database.saveVisualContext(id, visual); err != nil {
+				logf("could not store the visual context for session %s: %v", id, err)
+			}
+		}()
 	}
-	if _, err := io.Copy(image, file); err != nil {
-		return AnalysisResult{}, err
-	}
-	if err := writer.Close(); err != nil {
-		return AnalysisResult{}, err
-	}
-
-	url := fmt.Sprintf("%s/conversation/%s/message?has_image_processor=activate", gillieEndpoint(), conversationID)
-	request, err := http.NewRequest(http.MethodPost, url, &body)
-	if err != nil {
-		return AnalysisResult{}, err
-	}
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(request)
-	if err != nil {
-		return AnalysisResult{}, fmt.Errorf("Gillie analysis: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return AnalysisResult{}, fmt.Errorf("Gillie analysis: %s", strings.TrimSpace(string(message)))
-	}
-	var payload struct {
-		Data []struct {
-			Content string `json:"content"`
-			Sender  string `json:"sender"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return AnalysisResult{}, err
-	}
-	for i := len(payload.Data) - 1; i >= 0; i-- {
-		if payload.Data[i].Sender == "assistant" && payload.Data[i].Content != "" {
-			responseText := payload.Data[i].Content
-			a.mu.Lock()
-			a.latestVisualContext = truncateContext(responseText, 6000)
-			a.mu.Unlock()
-			return AnalysisResult{Response: responseText, ConversationID: conversationID}, nil
-		}
-	}
-	return AnalysisResult{}, fmt.Errorf("Gillie returned no assistant response")
+	return result, nil
 }
 
-// SendMessage sends a text message through the same Gillie conversation used by vision.
+// SendMessage sends a text message to the configured Sonara assistant agent.
 func (a *App) SendMessage(content string) (AnalysisResult, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return AnalysisResult{}, fmt.Errorf("message is empty")
 	}
-	conversationID, err := a.ensureGillieConversation()
-	if err != nil {
-		return AnalysisResult{}, err
-	}
-
 	a.mu.RLock()
-	visualContext := a.latestVisualContext
+	mode := a.assistantMode
+	contextText := a.buildSessionContextLocked()
+	ctx, generation := a.voiceContext, a.sessionGeneration
 	a.mu.RUnlock()
-	form := url.Values{"content": {content}}
-	if visualContext != "" {
-		form.Set("context", "Latest screenshot analysis from this Sonara session. Use it to answer follow-up questions directly when relevant:\n"+visualContext)
+	if a.backend == nil {
+		return AnalysisResult{}, fmt.Errorf("Sonara backend is not initialized")
 	}
-	request, err := http.NewRequest(
-		http.MethodPost,
-		fmt.Sprintf("%s/conversation/%s/message", gillieEndpoint(), conversationID),
-		strings.NewReader(form.Encode()),
-	)
+	output, err := a.backend.Respond(ctx, content, mode, contextText)
 	if err != nil {
+		logf("chat reply failed (mode %s, %d chars of context): %v", mode, len(contextText), err)
 		return AnalysisResult{}, err
 	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(request)
-	if err != nil {
-		return AnalysisResult{}, fmt.Errorf("Gillie chat: %w", err)
+	result := AnalysisResult{Response: output.Text}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionGeneration != generation {
+		return AnalysisResult{}, fmt.Errorf("la sesión cambió durante la respuesta")
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return AnalysisResult{}, fmt.Errorf("Gillie chat: %s", strings.TrimSpace(string(message)))
-	}
+	a.appendSessionMessageLocked("user", content)
+	a.appendSessionMessageLocked("assistant", result.Response)
+	return result, nil
+}
 
-	var payload struct {
-		Data []struct {
-			Content string `json:"content"`
-			Sender  string `json:"sender"`
-		} `json:"data"`
+func (a *App) requestContext() context.Context {
+	if a.ctx != nil {
+		return a.ctx
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return AnalysisResult{}, err
+	return context.Background()
+}
+
+const sessionHistoryLimit = 10
+
+func (a *App) appendSessionMessageLocked(role, content string) {
+	a.sessionHistory = append(a.sessionHistory, sessionMessage{role: role, text: content})
+	if len(a.sessionHistory) > sessionHistoryLimit {
+		a.sessionHistory = append([]sessionMessage(nil), a.sessionHistory[len(a.sessionHistory)-sessionHistoryLimit:]...)
 	}
-	for i := len(payload.Data) - 1; i >= 0; i-- {
-		if payload.Data[i].Sender == "assistant" && payload.Data[i].Content != "" {
-			return AnalysisResult{Response: payload.Data[i].Content, ConversationID: conversationID}, nil
+	// In memory we keep only the last few turns because that is all the prompt
+	// carries; the store keeps the whole session so it can be reopened later.
+	// Save in conversation order before another session can be opened. Separate
+	// goroutines here could reorder a question and its answer or miss a reopen.
+	if database, id := a.store, a.sessionID; database != nil {
+		opening := a.openingExchangeLocked()
+		if err := database.appendMessage(id, role, content); err != nil {
+			logf("could not store a %s message for session %s: %v", role, id, err)
+			return
+		}
+		// Naming uses the model, so only that work stays asynchronous.
+		if role == "assistant" && opening != "" {
+			go a.nameSession(database, id, opening)
 		}
 	}
-	return AnalysisResult{}, fmt.Errorf("Gillie returned no assistant response")
+}
+
+// openingExchangeLocked returns the first question and answer of the session,
+// or "" when there is not a full exchange yet.
+func (a *App) openingExchangeLocked() string {
+	if len(a.sessionHistory) < 2 {
+		return ""
+	}
+	var exchange strings.Builder
+	for _, message := range a.sessionHistory[:2] {
+		exchange.WriteString(message.role)
+		exchange.WriteString(": ")
+		exchange.WriteString(message.text)
+		exchange.WriteString("\n")
+	}
+	return truncateContext(exchange.String(), 1200)
+}
+
+// nameSession asks the cheapest model for a short label. A failure is silent on
+// purpose: an unnamed session still lists by date, so this is never worth an
+// error in the user's face.
+func (a *App) nameSession(database *store, sessionID, exchange string) {
+	if !database.needsTitle(sessionID) {
+		return
+	}
+	a.mu.RLock()
+	backend := a.backend
+	a.mu.RUnlock()
+	if backend == nil {
+		return
+	}
+	title, err := backend.Title(a.requestContext(), exchange)
+	if err != nil || title == "" {
+		logf("could not name session %s: %v", sessionID, err)
+		return
+	}
+	if err := database.saveTitle(sessionID, title); err != nil {
+		logf("could not store the title for session %s: %v", sessionID, err)
+		return
+	}
+	logf("session %s named %q", sessionID, title)
+}
+
+func (a *App) buildSessionContextLocked() string {
+	var context strings.Builder
+	if brief := a.sessionProfile.promptContext(); strings.TrimSpace(brief) != "" {
+		context.WriteString("Interview profile and goals:\n")
+		context.WriteString(brief)
+		context.WriteString("\n\n")
+	}
+	if visual := strings.TrimSpace(a.latestVisualContext); visual != "" {
+		context.WriteString("Recent screenshot analysis:\n")
+		context.WriteString(visual)
+		context.WriteString("\n\n")
+	}
+	for _, message := range a.sessionHistory {
+		context.WriteString(message.role)
+		context.WriteString(": ")
+		context.WriteString(message.text)
+		context.WriteString("\n")
+	}
+	return truncateContext(context.String(), 6000)
 }
 
 func truncateContext(value string, limit int) string {
 	value = strings.TrimSpace(value)
+	if limit <= 0 {
+		return ""
+	}
 	if len(value) <= limit {
 		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
 	}
 	return value[:limit] + "\n[truncated]"
 }
 
 const (
-	meetSampleRate    = 16000
-	meetFrameBytes    = 3200 // 100ms mono s16 PCM
-	meetSilenceFrames = 8    // 800ms of quiet ends an intervention
-	meetMinimumFrames = 10   // ignore anything shorter than a second
-	meetMaximumFrames = 150  // send after 15s of continuous speech
-	meetVoiceFrames   = 5    // a segment needs half a second of actual voice
-	meetStartFrames   = 3    // 300ms of continuous voice starts recording
-	meetKeepSilence   = 3    // trailing frames kept so words are not clipped
-	meetNoiseWindow   = 30   // 3s of quiet frames back the ambient estimate
-	meetNoiseMargin   = 1.8  // how far above the ambient hiss a voice must sit
-	meetNoiseFloor    = 0.004
-	meetLoudFrame     = 0.08 // RMS treated as a full-height bar in the UI
+	meetSampleRate = 16000
+	meetFrameBytes = 3200 // 100ms mono s16 PCM
+	// 500ms of quiet ends an intervention. This is the single biggest term in
+	// time-to-answer, and it matches what OpenAI's server VAD uses as its own
+	// silence_duration_ms default, so it is short enough not to split sentences.
+	meetSilenceFrames = 5
+	meetMinimumFrames = 10  // ignore anything shorter than a second
+	meetMaximumFrames = 150 // flush after 15s of continuous speech
+	meetVoiceFrames   = 5   // a segment needs half a second of actual voice
+	meetStartFrames   = 3   // 300ms of continuous voice starts recording
+	meetKeepSilence   = 3   // trailing frames kept so words are not clipped
+	// meetOverlapFrames is replayed at the head of a continuation chunk so a
+	// word straddling the 15s flush is transcribed whole by one of the two.
+	meetOverlapFrames = 2
+	// meetMaxParts bounds one intervention. Each part is 15s, so this allows a
+	// question up to a minute; past that the stream is not someone talking, and
+	// continuing would transcribe wall-clock time for as long as it plays.
+	meetMaxParts = 4
+	// meetQueuedSegments is how many finished segments may wait for the network.
+	// The capture loop must never block on a transcription: pw-record's pipe only
+	// holds ~2s, so a blocked reader goes deaf for the rest of the question.
+	meetQueuedSegments = 4
+	meetNoiseWindow    = 30  // 3s of quiet frames back the ambient estimate
+	meetNoiseMargin    = 1.8 // how far above the ambient hiss a voice must sit
+	meetNoiseFloor     = 0.004
+	meetLoudFrame      = 0.08 // RMS treated as a full-height bar in the UI
 )
 
 // noiseFloor tracks the ambient level of the call so the voice threshold sits
@@ -622,6 +891,64 @@ func (n *noiseFloor) threshold() float64 {
 	return math.Max(sorted[len(sorted)/2]*meetNoiseMargin, meetNoiseFloor)
 }
 
+// queueSegment never blocks the recorder. The copy detaches reused PCM buffers.
+func queueSegment(segments chan<- meetSegment, item meetSegment) bool {
+	item.pcm = append([]byte(nil), item.pcm...)
+	select {
+	case segments <- item:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) nextMeetTurn() meetSegment {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.turnSequence++
+	language := a.audioLanguage
+	if language == "" {
+		language = "es"
+	}
+	return meetSegment{session: a.sessionGeneration, turn: a.turnSequence, language: language, manual: a.manualSend}
+}
+
+func (a *App) queueMeetSegment(item meetSegment) bool {
+	if queueSegment(a.segments, item) {
+		return true
+	}
+	a.mu.Lock()
+	a.droppedSegments++
+	dropped := a.droppedSegments
+	a.listenStatus = fmt.Sprintf("Audio perdido: cola llena (%d)", dropped)
+	a.mu.Unlock()
+	// The network is slower than the conversation. This is the one failure that
+	// silently costs the user an answer, so it is always worth a line.
+	logf("segment dropped: queue full at %d pending (turn %d/%d part %d, total dropped %d)",
+		meetQueuedSegments, item.session, item.turn, item.part, dropped)
+	return false
+}
+
+// segmentClose decides how a segment ends. A real pause closes the turn. A run
+// of unbroken parts past meetMaxParts also closes it — otherwise a continuous
+// stream is transcribed for as long as it plays — and additionally holds capture
+// until genuine silence arrives, so the same audio is not picked straight back up.
+func segmentClose(ended bool, part uint64) (final, hold bool) {
+	if ended {
+		return true, false
+	}
+	capped := part+1 >= meetMaxParts
+	return capped, capped
+}
+
+// tailFrames returns a copy of the last n frames of a segment.
+func tailFrames(segment []byte, n int) []byte {
+	if size := n * meetFrameBytes; size < len(segment) {
+		return append([]byte(nil), segment[len(segment)-size:]...)
+	}
+	return append([]byte(nil), segment...)
+}
+
 // trimTrailingSilence drops the silence that ended the segment, keeping a few
 // frames so the last word is not clipped. A shorter upload is a faster
 // transcription, and the trailing pause carries nothing.
@@ -637,12 +964,15 @@ func trimTrailingSilence(segment []byte, silenceFrames int) []byte {
 	return segment[:trimmed]
 }
 
-// listenMeetAudio captures only Chrome/Chromium PipeWire output. It never falls
-// back to the default system monitor, so unrelated desktop audio is excluded.
+// listenMeetAudio captures PipeWire output from meeting browsers and Teams.
+// It never falls back to the default system monitor, excluding unrelated audio.
 func (a *App) listenMeetAudio(ctx context.Context) {
-	target, err := chromeAudioTarget(ctx)
+	target, err := a.audioTarget(ctx)
 	if err != nil {
-		a.setListenStatus("Esperando audio de Chrome/Meet…")
+		// Same key as the success line below, so the log shows each change of
+		// state once instead of every two-second retry.
+		logDedup("audio-target", "no audio target: %v", err)
+		a.setListenStatus("Fuente de audio: " + err.Error())
 		if waitForRetry(ctx) {
 			go a.listenMeetAudio(ctx)
 		}
@@ -653,32 +983,43 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	command := exec.CommandContext(captureCtx, "pw-record", "--target", target, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
 	stdout, err := command.StdoutPipe()
 	if err != nil || command.Start() != nil {
-		a.setListeningFailure("No se pudo conectar a audio de Chrome/Meet")
+		logf("pw-record could not attach to target %s: %v", target, err)
+		a.setListeningFailure("No se pudo conectar al audio de la reunión")
 		return
 	}
 	defer command.Wait()
-	a.setListenStatus("Escuchando audio de Meet")
+	// Which node was picked is the first thing to check when the transcript is
+	// empty or carries the wrong audio.
+	logDedup("audio-target", "capturing PipeWire target %s", target)
+	a.setListenStatus("Escuchando audio de la reunión")
 
-	// Chrome opens a new PipeWire node when a call starts playing, so the node
+	// Meeting apps may open a new PipeWire node when a call starts playing, so the node
 	// picked at connect time can stay silent forever. Watch for a better one and
 	// drop the current recorder so the reconnect path retargets.
 	var speaking atomic.Bool
-	go watchChromeStream(captureCtx, target, &speaking, stopCapture)
+	go watchChromeStream(captureCtx, target, &speaking, stopCapture, a.audioTarget)
 
 	frame := make([]byte, meetFrameBytes)
 	segment := make([]byte, 0, meetSampleRate*2*12)
 	ambient := &noiseFloor{}
 	recording, startFrames, voicedFrames, silenceFrames := false, 0, 0, 0
+	// Set when a run of unbroken audio was cut off: nothing new is recorded
+	// until a genuinely quiet frame proves the stream actually paused.
+	awaitingSilence := false
+	var turn meetSegment
 	for {
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			// Pausing cancels the context and kills the recorder, so this is
 			// also where a segment cut short by the user gets sent.
 			if recording && voicedFrames >= meetVoiceFrames {
-				go a.deliverMeetSegment(append([]byte(nil), segment...))
+				turn.pcm, turn.final = segment, true
+				turn.part++
+				a.queueMeetSegment(turn)
 			}
 			a.setAudioLevel(0)
 			if ctx.Err() == nil {
-				a.setListenStatus("Stream de Chrome cambió; reconectando…")
+				logDedup("recorder", "recorder on target %s stopped (%v); reconnecting", target, err)
+				a.setListenStatus("Cambió el audio de la reunión; reconectando…")
 				if waitForRetry(ctx) {
 					go a.listenMeetAudio(ctx)
 				}
@@ -692,11 +1033,22 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 			ambient.observe(level)
 		}
 		if !recording {
+			if awaitingSilence {
+				// Only a quiet frame clears the hold; while the continuous audio
+				// keeps playing nothing is recorded or billed.
+				if !voice {
+					awaitingSilence = false
+					a.setListenStatus("Escuchando audio de la reunión")
+				}
+				startFrames, segment = 0, segment[:0]
+				continue
+			}
 			if voice {
 				startFrames++
 				segment = append(segment, frame...)
 				if startFrames >= meetStartFrames {
 					recording, silenceFrames, voicedFrames = true, 0, startFrames
+					turn = a.nextMeetTurn()
 					speaking.Store(true)
 					a.setListenStatus("Intervención detectada…")
 				}
@@ -712,27 +1064,55 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 		} else {
 			silenceFrames++
 		}
-		if silenceFrames < meetSilenceFrames && len(segment)/meetFrameBytes < meetMaximumFrames {
+		ended := silenceFrames >= meetSilenceFrames
+		if !ended && len(segment)/meetFrameBytes < meetMaximumFrames {
 			continue
 		}
+		final, capped := segmentClose(ended, turn.part)
 		// A burst that never carried enough voice was background noise, not an
 		// intervention: sending it only buys an empty transcription.
-		if voicedFrames >= meetVoiceFrames && len(segment)/meetFrameBytes >= meetMinimumFrames {
-			a.processMeetSegment(trimTrailingSilence(segment, silenceFrames))
+		if (voicedFrames >= meetVoiceFrames && len(segment)/meetFrameBytes >= meetMinimumFrames) || (ended && turn.part > 0) {
+			turn.part++
+			turn.final = final
+			if ended {
+				turn.pcm = trimTrailingSilence(segment, silenceFrames)
+			} else {
+				turn.pcm = segment
+			}
+			a.queueMeetSegment(turn)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if !ended && !capped {
+			// The 15s ceiling hit mid-sentence. Keep recording and replay a short
+			// tail, so a long question stays one continuous capture instead of
+			// losing whatever is said while the first half is in flight.
+			segment = append(segment[:0], tailFrames(segment, meetOverlapFrames)...)
+			silenceFrames, voicedFrames = 0, meetVoiceFrames
+			a.setListenStatus("Intervención larga; sigo escuchando…")
+			continue
+		}
+		if !ended {
+			// Past this many unbroken parts it is not an intervention: nobody
+			// talks for minutes without a half-second pause. It is music or a
+			// shared video, and continuing would transcribe wall-clock time for
+			// as long as it plays. Wait for real silence before listening again.
+			logf("turn %d/%d stopped after %d unbroken parts; waiting for silence",
+				turn.session, turn.turn, turn.part)
+			a.setListenStatus("Audio continuo: esperando una pausa real")
+			awaitingSilence = true
 		}
 		recording, startFrames, voicedFrames, silenceFrames = false, 0, 0, 0
 		speaking.Store(false)
 		segment = segment[:0]
-		if ctx.Err() != nil {
-			return
-		}
-		a.setListenStatus("Escuchando audio de Meet")
+		a.setListenStatus("Escuchando audio de la reunión")
 	}
 }
 
 // watchChromeStream drops the current recorder when Chrome exposes a different
 // output node, so a call that starts after the app connected is still captured.
-func watchChromeStream(ctx context.Context, target string, speaking *atomic.Bool, stopCapture context.CancelFunc) {
+func watchChromeStream(ctx context.Context, target string, speaking *atomic.Bool, stopCapture context.CancelFunc, choose func(context.Context) (string, error)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -743,68 +1123,17 @@ func watchChromeStream(ctx context.Context, target string, speaking *atomic.Bool
 		if speaking.Load() {
 			continue
 		}
-		current, err := chromeAudioTarget(ctx)
-		if err != nil || current == target {
+		current, err := choose(ctx)
+		if err != nil {
+			stopCapture()
+			return
+		}
+		if current == target {
 			continue
 		}
 		stopCapture()
 		return
 	}
-}
-
-func chromeAudioTarget(ctx context.Context) (string, error) {
-	output, err := exec.CommandContext(ctx, "pw-dump").Output()
-	if err != nil {
-		return "", err
-	}
-	return pickChromeTarget(output)
-}
-
-func pickChromeTarget(output []byte) (string, error) {
-	var nodes []struct {
-		Type string `json:"type"`
-		ID   any    `json:"id"`
-		Info struct {
-			State string         `json:"state"`
-			Props map[string]any `json:"props"`
-		} `json:"info"`
-	}
-	if err := json.Unmarshal(output, &nodes); err != nil {
-		return "", err
-	}
-	// Chrome keeps idle output nodes around, so prefer a running one and, among
-	// equals, the newest — object.serial only ever grows, so the highest one is
-	// the node a call just opened. The value returned is the node id: pw-record
-	// resolves --target by id or name, and feeding it a serial silently links
-	// nothing and records digital silence forever.
-	best, bestRank, bestSerial := "", -1, float64(-1)
-	for _, node := range nodes {
-		if node.Type != "PipeWire:Interface:Node" || node.Info.Props["media.class"] != "Stream/Output/Audio" {
-			continue
-		}
-		identity := strings.ToLower(fmt.Sprintf("%v %v %v", node.Info.Props["application.name"], node.Info.Props["application.process.binary"], node.Info.Props["node.name"]))
-		if !strings.Contains(identity, "chrome") && !strings.Contains(identity, "chromium") && !strings.Contains(identity, "google-chrome") {
-			continue
-		}
-		target, serial := fmt.Sprint(node.ID), float64(-1)
-		if identifier, ok := node.ID.(float64); ok {
-			target = fmt.Sprint(int64(identifier))
-		}
-		if value, ok := node.Info.Props["object.serial"].(float64); ok {
-			serial = value
-		}
-		rank := 0
-		if node.Info.State == "running" {
-			rank = 1
-		}
-		if rank > bestRank || (rank == bestRank && serial > bestSerial) {
-			best, bestRank, bestSerial = target, rank, serial
-		}
-	}
-	if best == "" {
-		return "", fmt.Errorf("Chrome no tiene stream de salida")
-	}
-	return best, nil
 }
 
 func pcmRMS(frame []byte) float64 {
@@ -814,182 +1143,6 @@ func pcmRMS(frame []byte) float64 {
 		sum += sample * sample
 	}
 	return math.Sqrt(sum / float64(len(frame)/2))
-}
-
-func (a *App) processMeetSegment(pcm []byte) {
-	audio := append([]byte(nil), pcm...) // the caller reuses its segment buffer
-	a.mu.Lock()
-	manual := a.manualSend
-	if manual {
-		a.pendingAudio = audio
-		a.listenStatus = fmt.Sprintf("Fragmento de %.1fs listo para enviar", float64(len(audio))/float64(meetSampleRate*2))
-	}
-	a.mu.Unlock()
-	if manual {
-		return
-	}
-	a.deliverMeetSegment(audio)
-}
-
-// deliverMeetSegment transcribes the segment and then streams the reply, the
-// same two-step the Gillie CLI uses in listen mode. The single blocking
-// /message call it replaced returned nothing until the whole answer was
-// generated, which made every intervention feel stalled.
-func (a *App) deliverMeetSegment(pcm []byte) {
-	conversationID, err := a.ensureGillieConversation()
-	if err != nil {
-		a.setListenStatus("Gillie no disponible: " + err.Error())
-		return
-	}
-	language := a.audioLanguageOrDefault()
-	a.setListenStatus("Gillie transcribiendo\u2026")
-	transcript, err := a.transcribeMeetAudio(conversationID, language, wavFromPCM(pcm))
-	if err != nil {
-		a.setListenStatus("Error de transcripci\u00f3n: " + err.Error())
-		return
-	}
-	if transcript == "" {
-		a.setListenStatus("No se entendi\u00f3 la intervenci\u00f3n")
-		return
-	}
-
-	a.mu.Lock()
-	a.transcript = transcript
-	a.translation, a.voiceReply = "", ""
-	a.voiceSequence++ // opens a new reply the UI fills in as tokens arrive
-	a.streaming = true
-	a.listenStatus = "Gillie respondiendo\u2026"
-	a.mu.Unlock()
-
-	raw := ""
-	err = a.streamGillieReply(conversationID, voicePrompt(language, transcript), func(token string) {
-		raw += token
-		translation, reply := splitTranslation(raw)
-		a.mu.Lock()
-		a.translation, a.voiceReply = translation, reply
-		a.mu.Unlock()
-	})
-
-	a.mu.Lock()
-	a.streaming = false
-	if err != nil {
-		a.listenStatus = "Error de respuesta: " + err.Error()
-	} else {
-		a.listenStatus = "Respuesta sugerida lista"
-	}
-	a.mu.Unlock()
-}
-
-func (a *App) transcribeMeetAudio(conversationID, language string, audio []byte) (string, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	// Names the language being spoken, not the one Gillie answers in.
-	if err := writer.WriteField("language", language); err != nil {
-		return "", err
-	}
-	header := textproto.MIMEHeader{}
-	header.Set("Content-Disposition", `form-data; name="voice_content"; filename="meet-segment.wav"`)
-	header.Set("Content-Type", "audio/wav")
-	part, err := writer.CreatePart(header)
-	if err != nil {
-		return "", err
-	}
-	if _, err := part.Write(audio); err != nil {
-		return "", err
-	}
-	if err := writer.Close(); err != nil {
-		return "", err
-	}
-	request, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/conversation/%s/transcribe", gillieEndpoint(), conversationID), &body)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	response, err := (&http.Client{Timeout: 60 * time.Second}).Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("Gillie transcribe respondi\u00f3 %s", response.Status)
-	}
-	var payload struct {
-		Data struct {
-			Text string `json:"text"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(payload.Data.Text), nil
-}
-
-// streamGillieReply reads the SSE reply, handing every text token to onToken.
-// Each data payload is JSON-encoded so tokens may contain newlines.
-func (a *App) streamGillieReply(conversationID, content string, onToken func(string)) error {
-	a.mu.RLock()
-	visualContext := a.latestVisualContext
-	a.mu.RUnlock()
-	form := url.Values{"content": {content}}
-	if visualContext != "" {
-		form.Set("context", "Latest screenshot analysis from this Sonara session. Use it to answer follow-up questions directly when relevant:\n"+visualContext)
-	}
-	request, err := http.NewRequest(
-		http.MethodPost,
-		fmt.Sprintf("%s/conversation/%s/message/stream", gillieEndpoint(), conversationID),
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "text/event-stream")
-	response, err := (&http.Client{Timeout: 15 * time.Minute}).Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("Gillie stream: %s", strings.TrimSpace(string(message)))
-	}
-
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		token, done := parseSSEToken(scanner.Text())
-		if done {
-			return nil
-		}
-		if token != "" {
-			onToken(token)
-		}
-	}
-	return scanner.Err()
-}
-
-// parseSSEToken turns one SSE line into a text token. Non-text events (the
-// audio URLs the CLI plays) and keep-alives yield nothing.
-func parseSSEToken(line string) (token string, done bool) {
-	payload, found := strings.CutPrefix(line, "data: ")
-	if !found {
-		return "", false
-	}
-	if payload == "[DONE]" {
-		return "", true
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
-		return payload, false // the CLI falls back to the raw payload too
-	}
-	text, ok := decoded.(string)
-	if !ok {
-		return "", false
-	}
-	if text == "[DONE]" {
-		return "", true
-	}
-	return text, false
 }
 
 func wavFromPCM(pcm []byte) []byte {

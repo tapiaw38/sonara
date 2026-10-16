@@ -8,9 +8,17 @@ export function AnalyzeLastCapture():Promise<main.AnalysisResult>;
 
 export function AudioLevel():Promise<number>;
 
+export function AudioSources():Promise<Array<main.AudioSource>>;
+
 export function CaptureScreen():Promise<main.CaptureStatus>;
 
+export function DeleteSession(arg1:string):Promise<Array<main.SessionSummary>>;
+
 export function DiscardPendingSegment():Promise<boolean>;
+
+export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
+
+export function GetUIPreferences():Promise<main.UIPreferences>;
 
 export function IsListening():Promise<boolean>;
 
@@ -18,13 +26,29 @@ export function LastCapture():Promise<main.CaptureStatus>;
 
 export function ListeningStatus():Promise<main.ListeningState>;
 
+export function NewSession():Promise<boolean>;
+
+export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
+
+export function SaveSessionProfile(arg1:string,arg2:main.SessionProfile):Promise<void>;
+
+export function SaveUIPreferences(arg1:main.UIPreferences):Promise<void>;
+
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 
 export function SendPendingSegment():Promise<boolean>;
 
+export function Sessions():Promise<Array<main.SessionSummary>>;
+
+export function SetAssistantMode(arg1:string):Promise<string>;
+
 export function SetAudioLanguage(arg1:string):Promise<string>;
 
+export function SetAudioSource(arg1:string):Promise<string>;
+
 export function SetManualSend(arg1:boolean):Promise<boolean>;
+
+export function SetOpenAIAPIKey(arg1:string):Promise<void>;
 
 export function StartListening():Promise<boolean>;
 
