@@ -6,16 +6,28 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
-// node ids and serials are deliberately different: pw-record resolves --target
-// by id, while the newest-stream ranking is based on object.serial.
+// Node IDs and serials are deliberately different: pw-record --target takes
+// object.serial or node.name, never the pw-dump node id.
 func node(name string, id, serial int, state string) string {
 	return fmt.Sprintf(`{"type":"PipeWire:Interface:Node","id":%d,"info":{"state":%q,"props":{"media.class":"Stream/Output/Audio","application.name":%q,"object.serial":%d}}}`,
 		id, state, name, serial)
 }
 
-func TestPickChromeTargetPrefersRunningNewestChromeNode(t *testing.T) {
+func nodeWithMedia(name, media string, id, serial int, state string) string {
+	return fmt.Sprintf(`{"type":"PipeWire:Interface:Node","id":%d,"info":{"state":%q,"props":{"media.class":"Stream/Output/Audio","application.name":%q,"media.name":%q,"object.serial":%d}}}`,
+		id, state, name, media, serial)
+}
+
+// A real incident went deaf for 12 minutes in exactly this shape: several
+// Chrome tabs with audio, nothing named "teams" among them (Teams Web is a
+// Chrome tab, so it never is), and no fallback once the single-match rule came
+// up empty. The fix is to guess — running wins, then the newest serial — since
+// a wrong guess shows up as nonsense in the transcript and gets corrected by
+// hand, while silence announces nothing at all.
+func TestPickChromeTargetGuessesAmongAmbiguousBrowserStreams(t *testing.T) {
 	dump := "[" + strings.Join([]string{
 		node("Firefox", 139, 301, "running"),
 		node("Google Chrome", 173, 328, "idle"),
@@ -24,40 +36,129 @@ func TestPickChromeTargetPrefersRunningNewestChromeNode(t *testing.T) {
 	}, ",") + "]"
 
 	target, err := pickChromeTarget([]byte(dump))
-	if err != nil {
-		t.Fatalf("pickChromeTarget: %v", err)
-	}
-	if target != "188" {
-		t.Errorf("target = %q, want 188 (node id of the newest running Chrome node)", target)
+	if err != nil || target != "461" {
+		t.Errorf("target = %q, err = %v, want the newest running serial, 461", target, err)
 	}
 }
 
-func TestPickChromeTargetReturnsNodeIDNotSerial(t *testing.T) {
+func TestPickChromeTargetReturnsSerialNotNodeID(t *testing.T) {
 	dump := "[" + node("Google Chrome", 173, 328, "running") + "]"
 	target, err := pickChromeTarget([]byte(dump))
 	if err != nil {
 		t.Fatalf("pickChromeTarget: %v", err)
 	}
-	if target == "328" {
-		t.Fatal("returned object.serial; pw-record --target resolves node ids and records silence for an unknown serial")
+	if target == "173" {
+		t.Fatal("returned pw-dump node id instead of object.serial")
 	}
-	if target != "173" {
-		t.Errorf("target = %q, want 173", target)
+	if target != "328" {
+		t.Errorf("target = %q, want serial 328", target)
 	}
 }
 
 func TestPickChromeTargetFallsBackToIdleChrome(t *testing.T) {
 	dump := "[" + node("Google Chrome", 173, 328, "idle") + "]"
 	target, err := pickChromeTarget([]byte(dump))
-	if err != nil || target != "173" {
-		t.Errorf("target = %q, err = %v, want 173", target, err)
+	if err != nil || target != "328" {
+		t.Errorf("target = %q, err = %v, want serial 328", target, err)
 	}
 }
 
-func TestPickChromeTargetWithoutChrome(t *testing.T) {
-	dump := "[" + node("Firefox", 139, 301, "running") + "]"
+func TestPickChromeTargetWithoutMeetingApp(t *testing.T) {
+	dump := "[" + node("VLC", 139, 301, "running") + "]"
 	if _, err := pickChromeTarget([]byte(dump)); err == nil {
-		t.Error("expected an error when Chrome has no output stream")
+		t.Error("expected an error when no supported meeting app has an output stream")
+	}
+}
+
+func TestPickChromeTargetSupportsTeams(t *testing.T) {
+	dump := "[" + node("Microsoft Teams", 211, 504, "running") + "]"
+	target, err := pickChromeTarget([]byte(dump))
+	if err != nil || target != "504" {
+		t.Errorf("target = %q, err = %v, want Teams serial 504", target, err)
+	}
+}
+
+// media.name is not used to decide: in production Chrome reports it as the
+// generic "Playback" regardless of the tab, so a title here is only ever
+// synthetic test data. The guess goes by running state and recency instead.
+func TestPickChromeTargetGuessesTheNewestRunningTabWhenNamesCannotDecide(t *testing.T) {
+	dump := "[" + strings.Join([]string{
+		nodeWithMedia("Google Chrome", "Google Meet", 211, 504, "running"),
+		nodeWithMedia("Google Chrome", "YouTube Music", 212, 600, "running"),
+	}, ",") + "]"
+	target, err := pickChromeTarget([]byte(dump))
+	if err != nil || target != "600" {
+		t.Errorf("target = %q, err = %v, want the newer tab, 600, even though it is not the meeting", target, err)
+	}
+}
+
+func TestPickChromeTargetPrefersDedicatedTeamsOverBrowserMusic(t *testing.T) {
+	dump := "[" + strings.Join([]string{
+		nodeWithMedia("Microsoft Teams", "Teams call", 211, 504, "running"),
+		nodeWithMedia("Google Chrome", "YouTube Music", 212, 600, "running"),
+	}, ",") + "]"
+	target, err := pickChromeTarget([]byte(dump))
+	if err != nil || target != "504" {
+		t.Errorf("target = %q, err = %v, want Teams serial 504", target, err)
+	}
+}
+
+// Running outranks idle even when the idle stream's title says "Meet": a tab
+// that merely exists loses to one that is actually live, and the title is
+// never consulted either way.
+func TestPickChromeTargetPrefersRunningOverIdleRegardlessOfTitle(t *testing.T) {
+	dump := "[" + strings.Join([]string{
+		nodeWithMedia("Google Chrome", "Google Meet", 211, 504, "idle"),
+		nodeWithMedia("Google Chrome", "YouTube Music", 212, 600, "running"),
+	}, ",") + "]"
+	target, err := pickChromeTarget([]byte(dump))
+	if err != nil || target != "600" {
+		t.Errorf("target = %q, err = %v, want the running tab, 600", target, err)
+	}
+}
+
+func TestSetAssistantModeSupportsAvailableModes(t *testing.T) {
+	app := NewApp()
+	for _, mode := range []string{"interview", "daily", "coding", "coaching"} {
+		if got := app.SetAssistantMode(mode); got != mode {
+			t.Errorf("SetAssistantMode(%q) = %q", mode, got)
+		}
+	}
+	if got := app.SetAssistantMode("unknown"); got != "interview" {
+		t.Errorf("SetAssistantMode(unknown) = %q, want interview", got)
+	}
+}
+
+func TestNewSessionRejectsLateVoiceResult(t *testing.T) {
+	app := NewApp()
+	oldSession := app.sessionGeneration
+	app.replySequence = 1
+	app.NewSession()
+	app.finishVoiceResponse(oldSession, 1, "pregunta anterior", "respuesta anterior", nil)
+	app.holdPendingAudio(oldSession, make([]byte, meetSampleRate*2))
+	if len(app.sessionHistory) != 0 || app.voiceReply != "" || len(app.pendingAudio) != 0 {
+		t.Fatal("late voice result leaked into the new session")
+	}
+}
+
+func TestSessionHistoryUsesStoredMessages(t *testing.T) {
+	app := NewApp()
+	app.mu.Lock()
+	for i := range sessionHistoryLimit + 2 {
+		app.appendSessionMessageLocked("user", fmt.Sprintf("message-%d", i))
+	}
+	context := app.buildSessionContextLocked()
+	length := len(app.sessionHistory)
+	app.mu.Unlock()
+	if length != sessionHistoryLimit || strings.Contains(context, "message-0\n") || !strings.Contains(context, "message-11") {
+		t.Errorf("stored=%d, context=%q", length, context)
+	}
+}
+
+func TestTruncateContextPreservesUTF8(t *testing.T) {
+	got := truncateContext("áéíó", 3)
+	if !utf8.ValidString(got) || !strings.HasPrefix(got, "á\n") {
+		t.Errorf("truncateContext broke UTF-8: %q", got)
 	}
 }
 
@@ -127,27 +228,60 @@ func TestTrimTrailingSilence(t *testing.T) {
 	}
 }
 
-func TestParseSSEToken(t *testing.T) {
-	cases := []struct {
-		line  string
-		token string
-		done  bool
-	}{
-		{`data: "hola"`, "hola", false},
-		{`data: " con espacios "`, " con espacios ", false},
-		{`data: "linea\nrota"`, "linea\nrota", false}, // newlines survive JSON decoding
-		{`data: [DONE]`, "", true},
-		{`data: "[DONE]"`, "", true},
-		{`data: {"type":"audio","url":"http://x/a.mp3"}`, "", false},
-		{`event: ping`, "", false},
-		{``, "", false},
-		{`data: sin-json`, "sin-json", false},
+// The 15s ceiling must not end the capture: a long question has to stay one
+// continuous recording, with a short overlap so no word is lost at the seam.
+func TestTailFramesCarriesTheOverlap(t *testing.T) {
+	segment := make([]byte, 0, meetMaximumFrames*meetFrameBytes)
+	for i := range meetMaximumFrames {
+		frame := make([]byte, meetFrameBytes)
+		frame[0] = byte(i)
+		segment = append(segment, frame...)
 	}
-	for _, want := range cases {
-		token, done := parseSSEToken(want.line)
-		if token != want.token || done != want.done {
-			t.Errorf("parseSSEToken(%q) = (%q, %v), want (%q, %v)", want.line, token, done, want.token, want.done)
+	tail := tailFrames(segment, meetOverlapFrames)
+	if len(tail) != meetOverlapFrames*meetFrameBytes {
+		t.Fatalf("tail is %d frames, want %d", len(tail)/meetFrameBytes, meetOverlapFrames)
+	}
+	// It has to be the *last* frames, not the first: the seam is at the end.
+	if tail[0] != byte(meetMaximumFrames-meetOverlapFrames) {
+		t.Errorf("tail starts at frame %d, want %d", tail[0], meetMaximumFrames-meetOverlapFrames)
+	}
+	// A segment shorter than the overlap is returned whole rather than panicking.
+	if got := tailFrames(segment[:meetFrameBytes], meetOverlapFrames); len(got) != meetFrameBytes {
+		t.Errorf("short segment returned %d bytes, want %d", len(got), meetFrameBytes)
+	}
+}
+
+func TestContinuationChunksDeduplicateOverlap(t *testing.T) {
+	first := make([]byte, 3*meetFrameBytes)
+	second := append(append([]byte(nil), first[len(first)-meetOverlapFrames*meetFrameBytes:]...), make([]byte, meetFrameBytes)...)
+	joined := appendPCMChunk(first, second)
+	if len(joined) != 4*meetFrameBytes {
+		t.Errorf("joined audio = %d frames, want 4", len(joined)/meetFrameBytes)
+	}
+	if got := joinTranscriptPieces("What is your experience with", "with Go and Kubernetes?"); got != "What is your experience with Go and Kubernetes?" {
+		t.Errorf("merged transcript = %q", got)
+	}
+}
+
+// A blocked capture loop goes deaf, so queueing must never block: pw-record's
+// pipe only holds about two seconds of audio.
+func TestQueueSegmentNeverBlocks(t *testing.T) {
+	segments := make(chan meetSegment, meetQueuedSegments)
+	for i := range meetQueuedSegments {
+		if !queueSegment(segments, meetSegment{pcm: []byte{byte(i)}}) {
+			t.Fatalf("segment %d was dropped while the queue had room", i)
 		}
+	}
+	if queueSegment(segments, meetSegment{pcm: []byte{9}}) {
+		t.Error("queueSegment accepted a segment past the queue size")
+	}
+	// The copy matters: the capture loop reuses its buffer for the next segment.
+	buffer := []byte{1, 2, 3}
+	queued := make(chan meetSegment, 1)
+	queueSegment(queued, meetSegment{pcm: buffer})
+	buffer[0] = 99
+	if got := <-queued; got.pcm[0] != 1 {
+		t.Errorf("queued segment aliases the caller's buffer: got %d, want 1", got.pcm[0])
 	}
 }
 
@@ -232,7 +366,7 @@ func TestAudioLevelIsNormalisedAndClamped(t *testing.T) {
 func TestManualSendHoldsSegmentUntilRequested(t *testing.T) {
 	app := NewApp()
 	app.SetManualSend(true)
-	app.processMeetSegment(make([]byte, meetSampleRate*2)) // 1s of silence-valued PCM
+	app.holdPendingAudio(app.sessionGeneration, make([]byte, meetSampleRate*2)) // 1s of silence-valued PCM
 
 	if got := app.ListeningStatus().PendingSeconds; got != 1 {
 		t.Errorf("pendingSeconds = %v, want 1", got)
@@ -299,5 +433,30 @@ func TestOverlayPlanRestoresTilingOnlyIfWeFloated(t *testing.T) {
 	cmds, _ = overlayPlan(true, true, false)
 	if len(cmds) != 1 || cmds[0] != "toggleoverlay" {
 		t.Fatalf("no debe des-flotar una ventana que el usuario floto, dio %v", cmds)
+	}
+}
+
+// A pause closes a turn. Unbroken audio also has to close it, or a stream that
+// never goes quiet is transcribed for as long as it plays — which is what a
+// shared video or hold music did: twelve 15s parts in a row, a third of them
+// coming back with no speech in them at all.
+func TestSegmentCloseBoundsUnbrokenAudio(t *testing.T) {
+	if final, hold := segmentClose(true, 0); !final || hold {
+		t.Errorf("a real pause = (final %v, hold %v), want (true, false)", final, hold)
+	}
+	// Mid-intervention parts stay open so a long question is one capture.
+	for part := uint64(0); part+1 < meetMaxParts; part++ {
+		if final, hold := segmentClose(false, part); final || hold {
+			t.Errorf("part %d = (final %v, hold %v), want both false", part, final, hold)
+		}
+	}
+	// The last allowed part must close the turn, or the reply never arrives,
+	// and must hold capture so the same audio is not picked straight back up.
+	if final, hold := segmentClose(false, meetMaxParts-1); !final || !hold {
+		t.Errorf("the capped part = (final %v, hold %v), want (true, true)", final, hold)
+	}
+	// A pause always wins over the cap: it is a genuine end of turn.
+	if final, hold := segmentClose(true, meetMaxParts+5); !final || hold {
+		t.Errorf("a pause past the cap = (final %v, hold %v), want (true, false)", final, hold)
 	}
 }
