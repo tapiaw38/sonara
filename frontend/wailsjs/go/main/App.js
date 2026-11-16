@@ -126,6 +126,10 @@ export function SetDeepSeekAPIKey(arg1) {
   return window['go']['main']['App']['SetDeepSeekAPIKey'](arg1);
 }
 
+export function SetGeminiAPIKey(arg1) {
+  return window['go']['main']['App']['SetGeminiAPIKey'](arg1);
+}
+
 export function SetManualSend(arg1) {
   return window['go']['main']['App']['SetManualSend'](arg1);
 }

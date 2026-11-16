@@ -3,13 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
-	"strings"
 	"testing"
-	"time"
 )
 
 func TestOverlapSpeakerPicksMostTimeInWindow(t *testing.T) {
@@ -74,92 +70,85 @@ func TestDiarizePCMAccumulationCapsAndStaysAligned(t *testing.T) {
 	}
 }
 
-func fakeDiarizer(t *testing.T, healthy func() bool, respond func(w http.ResponseWriter, body []byte)) (*diarizer, *httptest.Server) {
+// fakeGemini stubs the three HTTP calls diarize() makes: start the resumable
+// upload, receive the bytes, and answer the interaction. Good enough to test
+// the whole diarizer without a real Gemini account.
+func fakeGemini(t *testing.T, spans []diarizedSpan, interactionStatus int, rawOutput string) *diarizer {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/health":
-			if healthy() {
-				w.WriteHeader(http.StatusOK)
-			} else {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}
-		case "/diarize":
-			body := make([]byte, r.ContentLength)
-			r.Body.Read(body)
-			respond(w, body)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-goog-upload-url", "http://"+r.Host+"/upload/bytes")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/upload/bytes", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"file": map[string]string{"uri": "https://files/abc", "name": "files/abc"}})
+	})
+	mux.HandleFunc("/v1beta/interactions", func(w http.ResponseWriter, r *http.Request) {
+		if interactionStatus != http.StatusOK {
+			w.WriteHeader(interactionStatus)
+			return
 		}
-	}))
+		text := rawOutput
+		if text == "" {
+			encoded, _ := json.Marshal(spans)
+			text = string(encoded)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "completed",
+			"steps": []map[string]any{
+				{"type": "model_output", "content": []map[string]string{{"type": "text", "text": text}}},
+			},
+		})
+	})
+	mux.HandleFunc("/v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	d := &diarizer{
-		baseURL: srv.URL, client: srv.Client(),
-		startProcess: func() (*exec.Cmd, error) { return nil, nil },
-	}
-	return d, srv
+
+	savedBase, savedUpload := geminiBaseURL, geminiUploadURL
+	t.Cleanup(func() { geminiBaseURL, geminiUploadURL = savedBase, savedUpload })
+	geminiBaseURL, geminiUploadURL = srv.URL+"/v1beta", srv.URL+"/upload/v1beta/files"
+
+	d := &diarizer{client: srv.Client()}
+	d.SetAPIKey("test-key")
+	return d
 }
 
-func TestDiarizerWaitsForHealthThenCalls(t *testing.T) {
-	healthyAt := time.Now().Add(30 * time.Millisecond)
-	d, _ := fakeDiarizer(t, func() bool { return time.Now().After(healthyAt) }, func(w http.ResponseWriter, body []byte) {
-		json.NewEncoder(w).Encode(diarizeResponse{Speakers: []diarizedSpan{{StartMS: 0, EndMS: 1000, Speaker: "A"}}})
-	})
-	savedPoll := diarizeHealthPoll
-	t.Cleanup(func() { diarizeHealthPoll = savedPoll })
-	diarizeHealthPoll = 5 * time.Millisecond
-
+func TestDiarizeHappyPath(t *testing.T) {
+	d := fakeGemini(t, []diarizedSpan{{StartMS: 0, EndMS: 1000, Speaker: "Speaker 1"}}, http.StatusOK, "")
 	spans, err := d.diarize(context.Background(), []byte("RIFF....WAVEfmt "))
-	if err != nil || len(spans) != 1 || spans[0].Speaker != "A" {
+	if err != nil || len(spans) != 1 || spans[0].Speaker != "Speaker 1" {
 		t.Fatalf("spans = %+v, err = %v", spans, err)
 	}
-	if !d.ready {
-		t.Error("a successful call must leave the diarizer marked ready")
-	}
 }
 
-func TestDiarizerNeverHealthyFailsPermanently(t *testing.T) {
-	savedTimeout, savedPoll := diarizeHealthTimeout, diarizeHealthPoll
-	t.Cleanup(func() { diarizeHealthTimeout, diarizeHealthPoll = savedTimeout, savedPoll })
-	diarizeHealthTimeout, diarizeHealthPoll = 20*time.Millisecond, 5*time.Millisecond
-
-	d, _ := fakeDiarizer(t, func() bool { return false }, nil)
+func TestDiarizeNoKeyConfigured(t *testing.T) {
+	d := newDiarizer()
+	if d.Configured() {
+		t.Fatal("a fresh diarizer must not be configured")
+	}
 	if _, err := d.diarize(context.Background(), nil); err == nil {
-		t.Fatal("a service that never becomes healthy must error")
-	}
-	if !d.failed {
-		t.Error("must be marked failed so later calls do not retry")
-	}
-	calls := 0
-	d.startProcess = func() (*exec.Cmd, error) { calls++; return nil, nil }
-	d.diarize(context.Background(), nil)
-	if calls != 0 {
-		t.Error("a failed diarizer must not try to start the process again")
+		t.Fatal("calling without a key must error")
 	}
 }
 
-func TestDiarizerPropagatesServiceError(t *testing.T) {
-	d, _ := fakeDiarizer(t, func() bool { return true }, func(w http.ResponseWriter, body []byte) {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(diarizeResponse{Error: "modelo no cargado"})
-	})
-	_, err := d.diarize(context.Background(), nil)
-	if err == nil || !strings.Contains(err.Error(), "modelo no cargado") {
-		t.Fatalf("err = %v, want it to carry the service's message", err)
+func TestDiarizePropagatesInteractionFailure(t *testing.T) {
+	d := fakeGemini(t, nil, http.StatusInternalServerError, "")
+	if _, err := d.diarize(context.Background(), []byte("x")); err == nil {
+		t.Fatal("a failing interaction must error")
 	}
 }
 
-func TestDiarizerStartProcessFailureIsPermanent(t *testing.T) {
-	d := &diarizer{baseURL: "http://127.0.0.1:0", client: http.DefaultClient,
-		startProcess: func() (*exec.Cmd, error) { return nil, errors.New("python3: not found") }}
-	if err := d.ensure(context.Background()); err == nil {
-		t.Fatal("a process that cannot start must error")
-	}
-	if !d.failed {
-		t.Error("must be marked failed")
+func TestDiarizeRejectsMalformedModelOutput(t *testing.T) {
+	d := fakeGemini(t, nil, http.StatusOK, "not a json array")
+	if _, err := d.diarize(context.Background(), []byte("x")); err == nil {
+		t.Fatal("non-JSON model output must error, not silently produce zero speakers")
 	}
 }
 
 // TestRunDiarizationLabelsStoredSegments exercises the whole final pass end to
-// end: a fake diarization service, two stored meeting_output segments spoken
+// end: a fake Gemini service, two stored meeting_output segments spoken
 // by different (simulated) participants, and the microphone left untouched.
 func TestRunDiarizationLabelsStoredSegments(t *testing.T) {
 	a, database := testMeetingApp(t)
@@ -169,15 +158,11 @@ func TestRunDiarizationLabelsStoredSegments(t *testing.T) {
 	bobID, _ := database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 6000, EndMS: 10000, Text: "Hola a todos", Status: segmentOK})
 	gapID, _ := database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 10000, EndMS: 12000, Status: segmentGap})
 
-	d, _ := fakeDiarizer(t, func() bool { return true }, func(w http.ResponseWriter, body []byte) {
-		json.NewEncoder(w).Encode(diarizeResponse{Speakers: []diarizedSpan{
-			{StartMS: 2000, EndMS: 6000, Speaker: "SPEAKER_01"}, // appears second but speaks first
-			{StartMS: 6000, EndMS: 10000, Speaker: "SPEAKER_00"},
-		}})
-	})
-	a.diarizer = d
+	a.diarizer = fakeGemini(t, []diarizedSpan{
+		{StartMS: 2000, EndMS: 6000, Speaker: "Speaker 2"}, // appears second but speaks first
+		{StartMS: 6000, EndMS: 10000, Speaker: "Speaker 1"},
+	}, http.StatusOK, "")
 	run.diarizePCM = make([]byte, 1000) // non-empty: there is something to diarize
-	t.Setenv("SONARA_DIARIZE_ENABLED", "1")
 
 	var events []MeetingSegmentEvent
 	a.emitHook = func(_ string, data any) {
@@ -223,26 +208,21 @@ func TestRunDiarizationLabelsStoredSegments(t *testing.T) {
 	}
 }
 
-// TestRunDiarizationSkipsWhenDisabledOrEmpty confirms the two ways this pass
-// stays a true no-op: feature off, or nothing was ever accumulated (e.g. the
-// meeting_output track never captured anything).
-func TestRunDiarizationSkipsWhenDisabledOrEmpty(t *testing.T) {
+// TestRunDiarizationSkipsWhenNotConfiguredOrEmpty confirms the two ways this
+// pass stays a true no-op: no Gemini key set, or nothing was ever
+// accumulated (e.g. the meeting_output track never captured anything).
+func TestRunDiarizationSkipsWhenNotConfiguredOrEmpty(t *testing.T) {
 	a, database := testMeetingApp(t)
 	run := testRun(t, a, database)
 	segID, _ := database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 0, EndMS: 1000, Text: "x", Status: segmentOK})
-	calls := 0
-	a.diarizer = &diarizer{startProcess: func() (*exec.Cmd, error) { calls++; return nil, nil }}
 
 	run.diarizePCM = []byte{1, 2, 3}
-	a.runDiarization(run) // SONARA_DIARIZE_ENABLED not set
+	a.runDiarization(run) // a.diarizer has no key configured
 
-	t.Setenv("SONARA_DIARIZE_ENABLED", "1")
+	a.diarizer.SetAPIKey("test-key")
 	run.diarizePCM = nil
-	a.runDiarization(run) // enabled, but nothing was accumulated
+	a.runDiarization(run) // configured, but nothing was accumulated
 
-	if calls != 0 {
-		t.Error("neither case should ever reach the diarization service")
-	}
 	segments, _ := database.transcriptSegments("m1")
 	for _, s := range segments {
 		if s.ID == segID && s.SpeakerKey != "" {
@@ -252,15 +232,14 @@ func TestRunDiarizationSkipsWhenDisabledOrEmpty(t *testing.T) {
 }
 
 // TestRunDiarizationFailureLeavesSegmentsUntouched confirms a service error
-// (model missing, process crashed, etc.) is swallowed: the meeting's text is
-// never at risk from this best-effort pass.
+// (bad key, network, Gemini outage) is swallowed: the meeting's text is never
+// at risk from this best-effort pass.
 func TestRunDiarizationFailureLeavesSegmentsUntouched(t *testing.T) {
 	a, database := testMeetingApp(t)
 	run := testRun(t, a, database)
 	segID, _ := database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 0, EndMS: 1000, Text: "x", Status: segmentOK})
-	a.diarizer = &diarizer{failed: true, failure: errors.New("no instalado")}
+	a.diarizer = fakeGemini(t, nil, http.StatusInternalServerError, "")
 	run.diarizePCM = []byte{1, 2, 3}
-	t.Setenv("SONARA_DIARIZE_ENABLED", "1")
 
 	a.runDiarization(run) // must not panic, must not error out to the caller
 

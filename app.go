@@ -196,6 +196,9 @@ func (a *App) startup(ctx context.Context) {
 			a.preferredMic = mic
 			a.mu.Unlock()
 		}
+		if key := database.setting(settingGeminiKey); key != "" {
+			a.diarizer.SetAPIKey(key)
+		}
 		if language == "" {
 			language = "es"
 		}
@@ -215,7 +218,6 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	// Before the store closes: pending meeting blocks still have to be written.
 	a.stopMeetingAndWait(15 * time.Second)
-	a.diarizer.stop()
 	a.mu.Lock()
 	database := a.store
 	a.store = nil
@@ -654,6 +656,27 @@ func (a *App) MeetingProvider() string {
 		return ""
 	}
 	return a.backend.MeetingProvider()
+}
+
+// SetGeminiAPIKey configures phase-2 diarization. An empty key turns it off:
+// meetings keep transcribing, just without per-participant names.
+func (a *App) SetGeminiAPIKey(key string) error {
+	key = strings.TrimSpace(key)
+	if key != "" && (len(key) < 10 || len(key) > 500 || strings.ContainsAny(key, " \t\r\n")) {
+		return fmt.Errorf("clave de Gemini inválida")
+	}
+	a.diarizer.SetAPIKey(key)
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return nil
+	}
+	if err := database.setSetting(settingGeminiKey, key); err != nil {
+		logf("could not persist the Gemini key: %v", err)
+		return fmt.Errorf("la key quedó activa pero no se pudo guardar: %w", err)
+	}
+	return nil
 }
 
 func capturePath() (string, error) {

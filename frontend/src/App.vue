@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetDeepSeekAPIKey, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetDeepSeekAPIKey, SetGeminiAPIKey, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import MeetingTranscript from './components/MeetingTranscript.vue'
 
@@ -15,6 +15,8 @@ const view = ref<'copilot' | 'meeting'>('copilot')
 const meetingSessionID = ref('')
 const deepseekKey = ref('')
 const deepseekMessage = ref('')
+const geminiKey = ref('')
+const geminiMessage = ref('')
 const draft = ref('')
 const transcript = ref('Esperando audio de la reunión…')
 const messages = ref<Message[]>([])
@@ -531,6 +533,22 @@ async function saveDeepSeekKey() {
   }
 }
 
+async function saveGeminiKey() {
+  if (savingApiKey.value) return
+  savingApiKey.value = true
+  geminiMessage.value = ''
+  try {
+    const removing = !geminiKey.value
+    await SetGeminiAPIKey(geminiKey.value)
+    geminiKey.value = ''
+    geminiMessage.value = removing ? 'Clave quitada: las reuniones ya no separan participantes.' : 'Clave guardada: al terminar una reunión se intenta separar a los participantes.'
+  } catch (error) {
+    geminiMessage.value = String(error || 'No se pudo guardar la clave')
+  } finally {
+    savingApiKey.value = false
+  }
+}
+
 loadState()
 
 async function toggleAlwaysOnTop() {
@@ -798,6 +816,7 @@ async function sendMessage() {
         <div class="settings-section"><h3>Audio</h3><label for="settings-audio-source">Fuente de captura</label><div class="audio-source-controls"><select id="settings-audio-source" :value="selectedAudioSource" @change="selectAudioSource(($event.target as HTMLSelectElement).value)"><option value="">Automática</option><option v-for="source in audioSources" :key="source.target" :value="source.target">{{ source.label }} · #{{ source.target }}{{ source.running ? ' · activo' : '' }}</option></select><button title="Actualizar fuentes" aria-label="Actualizar fuentes de audio" @click="refreshAudioSources">↻</button></div><small v-if="audioGuessing" class="audio-source-hint guessing">Hay {{ audioCandidates }} fuentes posibles; revisa cuál corresponde a la reunión.</small><small v-if="audioSourceMessage" class="audio-source-hint">{{ audioSourceMessage }}</small><label>Idioma hablado</label><div class="language-switch"><button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button><button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button></div></div>
         <div class="settings-section"><h3>OpenAI</h3><form class="api-key-form" @submit.prevent="saveApiKey"><label for="openai-key">API key</label><input id="openai-key" v-model="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Se guarda localmente en la configuración de Sonara.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !apiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="apiKey = ''; saveApiKey()">Quitar</button></div><small v-if="apiKeyMessage" role="status">{{ apiKeyMessage }}</small><small class="endpoint-status">{{ endpoint || 'Sin conectar' }}</small></form></div>
         <div class="settings-section"><h3>DeepSeek</h3><form class="api-key-form" @submit.prevent="saveDeepSeekKey"><label for="deepseek-key">API key</label><input id="deepseek-key" v-model="deepseekKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Transcribe las reuniones con un modelo más barato: el audio se envía a DeepSeek. Sin clave, se usa OpenAI. Las capturas de pantalla siempre van a OpenAI.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !deepseekKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="deepseekKey = ''; saveDeepSeekKey()">Quitar</button></div><small v-if="deepseekMessage" role="status">{{ deepseekMessage }}</small></form></div>
+        <div class="settings-section"><h3>Gemini (experimental)</h3><form class="api-key-form" @submit.prevent="saveGeminiKey"><label for="gemini-key">API key</label><input id="gemini-key" v-model="geminiKey" type="password" autocomplete="off" spellcheck="false" placeholder="AI…" /><small>Separa a los participantes de una reunión al terminar de grabarla: el audio de esa pista se envía a Gemini. Sin clave, quedan como "Participante". No instala nada en tu máquina.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !geminiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="geminiKey = ''; saveGeminiKey()">Quitar</button></div><small v-if="geminiMessage" role="status">{{ geminiMessage }}</small></form></div>
       </section>
     </div>
 

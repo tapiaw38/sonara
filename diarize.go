@@ -8,80 +8,88 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Phase 2: speaker diarization of the meeting_output track. It is optional,
-// additive, and off by default (SONARA_DIARIZE_ENABLED=1 to turn it on): a
-// meeting transcribes exactly as in phase 1 whether or not this is enabled or
-// available, and nothing here ever blocks recording or transcription. If the
-// local service cannot be reached, participants simply stay "Participante"
-// instead of "Participante 1/2/…".
+// Phase 2: speaker diarization of the meeting_output track, via the Gemini
+// API (cloud) rather than a local model — no PyTorch, no local service, no
+// Hugging Face token to install on the user's machine. It is optional,
+// additive, and off unless a Gemini key is configured (Settings): a meeting
+// transcribes exactly as in phase 1 whether or not this is set up, and
+// nothing here ever blocks recording or transcription. If the call fails,
+// participants simply stay "Participante" instead of "Participante 1/2/…".
 //
 // Unlike transcription, diarization runs once, after capture stops, on the
-// whole accumulated meeting_output track rather than per block: pyannote
-// assigns its speaker labels independently on every call, so diarizing one
-// short block at a time would give each block its own, mutually
-// incompatible "SPEAKER_00" — stable identity across blocks needs the model to
-// see them together. That means this track's audio — never the microphone's —
-// is held in memory for the length of the meeting instead of being discarded
-// per block, and only when this feature is on; see diarizeMaxDuration for the
+// whole accumulated meeting_output track rather than per block: a fresh
+// Gemini call has no memory of a previous one, so diarizing short blocks
+// independently would give each one its own, mutually incompatible "Speaker
+// 1" — stable identity across the meeting needs the model to see it all at
+// once. That means this track's audio — never the microphone's — is held in
+// memory for the length of the meeting instead of being discarded per block,
+// and only when a Gemini key is configured; see diarizeMaxDuration for the
 // memory this can use and its cap.
 //
 // This also means the microphone is never diarized or voice-matched: "Yo" is
 // assigned by which device captured it, not by analyzing the audio. Matching a
 // user's own voice inside the meeting_output mix (phase 3, to catch an echo of
 // themselves through someone else's speakers) is not implemented.
+//
+// *** UNVERIFIED AGAINST A REAL KEY ***: this talks to
+// generativelanguage.googleapis.com's Files and Interactions APIs per their
+// public docs (ai.google.dev, fetched 2026-11-16), but has never been run
+// against a real Gemini account — see PLAN_TRANSCRIPCION_REUNIONES.md.
 
-// diarizeHealthTimeout and diarizeHealthPoll are vars, not consts, so tests
-// can shrink them instead of waiting on the real (minutes-long) model load.
+// geminiBaseURL and geminiUploadURL are vars, not consts, so tests can point
+// them at a fake server instead of the real Google host.
 var (
-	// diarizeHealthTimeout covers the model loading on first use.
-	diarizeHealthTimeout = 90 * time.Second
-	diarizeHealthPoll    = 1 * time.Second
+	geminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta"
+	geminiUploadURL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
 )
 
 const (
-	// diarizeFinalTimeout bounds one whole-meeting diarization call. pyannote's
-	// own published figure (31s per hour of audio) is for an H100; a laptop CPU
-	// has no published number, so this is generous rather than measured.
+	geminiAPIRevision = "2026-05-20"
+	// diarizeFinalTimeout bounds the whole final pass: one file upload plus
+	// one Gemini call, for up to diarizeMaxDuration of audio.
 	diarizeFinalTimeout = 15 * time.Minute
 	// diarizeMaxDuration caps the accumulated meeting_output audio: past this,
 	// further audio is dropped from the diarization pass (the meeting itself
 	// keeps transcribing normally; only the extra minutes stay unlabeled).
+	// Well under the Files API's stated 2GB per-file cap; chosen as a memory
+	// bound for this app, not a Gemini limit.
 	diarizeMaxDuration = 3 * time.Hour
 	diarizeMaxBytes    = int64(diarizeMaxDuration/time.Second) * meetSampleRate * 2
 )
 
-func diarizeEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("SONARA_DIARIZE_ENABLED")))
-	return v == "1" || v == "true"
-}
-
-func diarizeURL() string {
-	if v := strings.TrimSpace(os.Getenv("SONARA_DIARIZE_URL")); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	return "http://127.0.0.1:8778"
-}
-
-func diarizePython() string {
-	if v := strings.TrimSpace(os.Getenv("SONARA_DIARIZE_PYTHON")); v != "" {
+func geminiModelName() string {
+	if v := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); v != "" {
 		return v
 	}
-	return "python3"
+	return "gemini-4-hydrogen"
 }
 
-func diarizeScript() string {
-	if v := strings.TrimSpace(os.Getenv("SONARA_DIARIZE_SCRIPT")); v != "" {
-		return v
-	}
-	return filepath.Join("diarize", "server.py")
+// diarizePrompt asks for speaker turns only, not a transcript: Sonara already
+// has the words from its own ASR pipeline and only needs who said them.
+const diarizePrompt = "This is the audio captured from one side of a meeting (everyone except the listener). " +
+	"Identify who is speaking and when. Return ONLY a JSON array of speaker turns: each item has " +
+	"start_ms and end_ms (integer milliseconds from the very start of this audio) and speaker " +
+	"(a short label such as \"Speaker 1\", kept the same every time that voice speaks again). " +
+	"Merge consecutive turns from the same speaker. Do not transcribe any words. Ignore silence."
+
+var diarizeSchema = map[string]any{
+	"type": "array",
+	"items": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"start_ms": map[string]any{"type": "integer"},
+			"end_ms":   map[string]any{"type": "integer"},
+			"speaker":  map[string]any{"type": "string"},
+		},
+		"required": []string{"start_ms", "end_ms", "speaker"},
+	},
 }
 
 type diarizedSpan struct {
@@ -90,141 +98,230 @@ type diarizedSpan struct {
 	Speaker string `json:"speaker"`
 }
 
-type diarizeResponse struct {
-	Speakers []diarizedSpan `json:"speakers"`
-	Error    string         `json:"error,omitempty"`
-}
-
-// diarizer manages the local Python service: one per App, started lazily on
-// first use and kept running for as long as the app is open. A failure to
-// start or to become healthy is permanent for this diarizer (no retry storm
-// against a broken local setup); fixing it needs an app restart.
+// diarizer is one per App: a thin HTTP client plus the Gemini API key, set
+// from Settings (SetGeminiAPIKey) the same way the DeepSeek key is.
 type diarizer struct {
-	baseURL string
-	client  *http.Client
-
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	ready   bool
-	failed  bool
-	failure error
-
-	// startProcess launches the local service; replaced in tests so no real
-	// Python subprocess is spawned.
-	startProcess func() (*exec.Cmd, error)
+	client *http.Client
+	keyMu  sync.RWMutex
+	apiKey string
 }
 
 func newDiarizer() *diarizer {
-	return &diarizer{
-		baseURL: diarizeURL(),
-		client:  &http.Client{Timeout: diarizeFinalTimeout},
-		startProcess: func() (*exec.Cmd, error) {
-			cmd := exec.Command(diarizePython(), diarizeScript())
-			cmd.Stderr = diarizeLogWriter{}
-			cmd.Stdout = diarizeLogWriter{}
-			return cmd, cmd.Start()
-		},
-	}
+	return &diarizer{client: &http.Client{Timeout: diarizeFinalTimeout}}
 }
 
-// diarizeLogWriter prefixes the service's own stderr/stdout into Sonara's log
-// without ever logging the audio or transcript content that service handles.
-type diarizeLogWriter struct{}
-
-func (diarizeLogWriter) Write(p []byte) (int, error) {
-	logf("diarize service: %s", strings.TrimRight(string(p), "\n"))
-	return len(p), nil
+func (d *diarizer) SetAPIKey(key string) {
+	d.keyMu.Lock()
+	d.apiKey = strings.TrimSpace(key)
+	d.keyMu.Unlock()
 }
 
-// ensure starts the service if needed and waits for it to answer /health. It
-// is cheap to call repeatedly: once ready (or failed), it returns immediately.
-func (d *diarizer) ensure(ctx context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.ready {
-		return nil
-	}
-	if d.failed {
-		return d.failure
-	}
-	if d.cmd == nil {
-		cmd, err := d.startProcess()
-		if err != nil {
-			d.failed, d.failure = true, fmt.Errorf("no se pudo iniciar el servicio de diarización: %w", err)
-			return d.failure
-		}
-		d.cmd = cmd
-	}
-	deadline := time.Now().Add(diarizeHealthTimeout)
-	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.baseURL+"/health", nil)
-		if err == nil {
-			if resp, err := d.client.Do(req); err == nil {
-				resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					d.ready = true
-					return nil
-				}
-			}
-		}
-		if !time.Now().Before(deadline) {
-			d.failed, d.failure = true, fmt.Errorf("el servicio de diarización no respondió en %s", diarizeHealthTimeout)
-			return d.failure
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(diarizeHealthPoll):
-		}
-	}
+func (d *diarizer) key() string {
+	d.keyMu.RLock()
+	defer d.keyMu.RUnlock()
+	return d.apiKey
 }
+
+// Configured is also how the rest of the app decides diarization is "on":
+// setting a key in Settings is the opt-in, with no separate feature flag.
+func (d *diarizer) Configured() bool { return d.key() != "" }
 
 // diarize sends one WAV file (the whole meeting_output track) and returns its
-// speaker spans, each independently labeled by the service — stabilizing
-// those labels across a session is stableSpeakerKeys's job, not this call's.
+// speaker spans, each independently labeled by the model — stabilizing those
+// labels across a session is stableSpeakerKeys's job, not this call's.
 func (d *diarizer) diarize(ctx context.Context, wav []byte) ([]diarizedSpan, error) {
-	if err := d.ensure(ctx); err != nil {
-		return nil, err
+	apiKey := d.key()
+	if apiKey == "" {
+		return nil, fmt.Errorf("falta la clave de Gemini (Configuración)")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+"/diarize", bytes.NewReader(wav))
+	fileURI, fileName, mimeType, err := d.uploadFile(ctx, apiKey, wav)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo subir el audio a Gemini: %w", err)
+	}
+	// Best-effort cleanup on an independent context: a canceled caller must
+	// not skip deleting what was already uploaded. Google expires it by
+	// itself after 48h either way (see PLAN_TRANSCRIPCION_REUNIONES.md).
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := d.deleteFile(cleanupCtx, apiKey, fileName); err != nil {
+			logf("could not delete the meeting audio uploaded to Gemini: %v", err)
+		}
+	}()
+	return d.requestDiarization(ctx, apiKey, fileURI, mimeType)
+}
+
+// uploadFile runs the Files API's resumable upload in two requests: one to
+// start the session and get an upload URL, one to send the bytes.
+func (d *diarizer) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri, name, mimeType string, err error) {
+	mimeType = "audio/wav"
+	start, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiUploadURL,
+		strings.NewReader(`{"file":{"display_name":"sonara-meeting"}}`))
+	if err != nil {
+		return "", "", "", err
+	}
+	start.Header.Set("x-goog-api-key", apiKey)
+	start.Header.Set("Content-Type", "application/json")
+	start.Header.Set("X-Goog-Upload-Protocol", "resumable")
+	start.Header.Set("X-Goog-Upload-Command", "start")
+	start.Header.Set("X-Goog-Upload-Header-Content-Length", strconv.Itoa(len(wav)))
+	start.Header.Set("X-Goog-Upload-Header-Content-Type", mimeType)
+	startResp, err := d.client.Do(start)
+	if err != nil {
+		return "", "", "", err
+	}
+	uploadURL := startResp.Header.Get("x-goog-upload-url")
+	io.Copy(io.Discard, io.LimitReader(startResp.Body, 1<<16))
+	startResp.Body.Close()
+	if startResp.StatusCode < 200 || startResp.StatusCode >= 300 {
+		return "", "", "", fmt.Errorf("estado %d al iniciar la subida", startResp.StatusCode)
+	}
+	if uploadURL == "" {
+		return "", "", "", fmt.Errorf("la respuesta no incluyó la URL de subida")
+	}
+
+	put, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bytes.NewReader(wav))
+	if err != nil {
+		return "", "", "", err
+	}
+	put.Header.Set("Content-Length", strconv.Itoa(len(wav)))
+	put.Header.Set("X-Goog-Upload-Offset", "0")
+	put.Header.Set("X-Goog-Upload-Command", "upload, finalize")
+	putResp, err := d.client.Do(put)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer putResp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(putResp.Body, 1<<16))
+	if err != nil {
+		return "", "", "", err
+	}
+	if putResp.StatusCode < 200 || putResp.StatusCode >= 300 {
+		return "", "", "", fmt.Errorf("estado %d al subir el audio", putResp.StatusCode)
+	}
+	var decoded struct {
+		File struct {
+			URI  string `json:"uri"`
+			Name string `json:"name"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil || decoded.File.URI == "" {
+		return "", "", "", fmt.Errorf("la subida no devolvió un archivo usable")
+	}
+	return decoded.File.URI, decoded.File.Name, mimeType, nil
+}
+
+// deleteFile is best-effort: its exact endpoint was not confirmed against
+// Google's own docs in this session (only that deletion is possible through
+// the API). A failure here never affects the meeting; see the doc comment.
+func (d *diarizer) deleteFile(ctx context.Context, apiKey, fileName string) error {
+	if fileName == "" {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, geminiBaseURL+"/"+fileName, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("x-goog-api-key", apiKey)
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("estado %d", resp.StatusCode)
+	}
+	return nil
+}
+
+type geminiInput struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	URI      string `json:"uri,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+type geminiResponseFormat struct {
+	Type     string         `json:"type"`
+	MimeType string         `json:"mime_type"`
+	Schema   map[string]any `json:"schema"`
+}
+
+type geminiRequest struct {
+	Model          string               `json:"model"`
+	Input          []geminiInput        `json:"input"`
+	ResponseFormat geminiResponseFormat `json:"response_format"`
+}
+
+type geminiInteraction struct {
+	Status string `json:"status"`
+	Steps  []struct {
+		Type    string `json:"type"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"steps"`
+}
+
+func (d *diarizer) requestDiarization(ctx context.Context, apiKey, fileURI, mimeType string) ([]diarizedSpan, error) {
+	body, err := json.Marshal(geminiRequest{
+		Model: geminiModelName(),
+		Input: []geminiInput{
+			{Type: "text", Text: diarizePrompt},
+			{Type: "audio", URI: fileURI, MimeType: mimeType},
+		},
+		ResponseFormat: geminiResponseFormat{Type: "text", MimeType: "application/json", Schema: diarizeSchema},
+	})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "audio/wav")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiBaseURL+"/interactions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-goog-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Api-Revision", geminiAPIRevision)
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, err
 	}
-	var out diarizeResponse
-	if resp.StatusCode != http.StatusOK {
-		message := fmt.Sprintf("estado %d", resp.StatusCode)
-		if json.Unmarshal(body, &out) == nil && out.Error != "" {
-			message = out.Error
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("Gemini respondió con estado %d", resp.StatusCode)
+	}
+	var decoded geminiInteraction
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return nil, fmt.Errorf("Gemini devolvió una respuesta inválida")
+	}
+	if decoded.Status != "completed" {
+		return nil, fmt.Errorf("Gemini no completó la solicitud (estado %q)", decoded.Status)
+	}
+	var text strings.Builder
+	for _, step := range decoded.Steps {
+		if step.Type != "model_output" {
+			continue
 		}
-		return nil, fmt.Errorf("el servicio de diarización falló: %s", message)
+		for _, part := range step.Content {
+			if part.Type == "text" {
+				text.WriteString(part.Text)
+			}
+		}
 	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("el servicio de diarización devolvió una respuesta inválida")
+	if strings.TrimSpace(text.String()) == "" {
+		return nil, fmt.Errorf("Gemini no devolvió resultado")
 	}
-	return out.Speakers, nil
-}
-
-// stop ends the subprocess, if one was started. Safe to call even when
-// diarization was never used.
-func (d *diarizer) stop() {
-	d.mu.Lock()
-	cmd := d.cmd
-	d.cmd = nil
-	d.mu.Unlock()
-	if cmd != nil && cmd.Process != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+	var spans []diarizedSpan
+	if err := json.Unmarshal([]byte(text.String()), &spans); err != nil {
+		return nil, fmt.Errorf("Gemini no devolvió la lista de hablantes esperada")
 	}
+	return spans, nil
 }
 
 // --- Accumulating the meeting_output track for the final diarization pass ---
@@ -280,7 +377,7 @@ func overlapSpeaker(spans []diarizedSpan, startMS, endMS int64) string {
 	return best
 }
 
-// stableSpeakerKeys renumbers one diarization call's raw labels ("SPEAKER_00",
+// stableSpeakerKeys renumbers one diarization call's raw labels ("Speaker 1",
 // whatever the model used) into "spk_0", "spk_1"… ordered by first appearance,
 // so storage and display never depend on the model's own naming.
 func stableSpeakerKeys(spans []diarizedSpan) map[string]string {
@@ -299,7 +396,7 @@ func stableSpeakerKeys(spans []diarizedSpan) map[string]string {
 // run.diarizePCM. It never fails the meeting — every error is logged and
 // swallowed, leaving segments with their generic track label.
 func (a *App) runDiarization(run *meetingRun) {
-	if !diarizeEnabled() {
+	if !a.diarizer.Configured() {
 		return
 	}
 	run.diarizeMu.Lock()

@@ -64,6 +64,8 @@ export function SetAudioSource(arg1:string):Promise<string>;
 
 export function SetDeepSeekAPIKey(arg1:string):Promise<void>;
 
+export function SetGeminiAPIKey(arg1:string):Promise<void>;
+
 export function SetManualSend(arg1:boolean):Promise<boolean>;
 
 export function SetMicrophone(arg1:string):Promise<string>;

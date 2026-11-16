@@ -233,7 +233,7 @@ watch(() => props.sessionId, (id) => { void load(id) })
       </div>
       <p class="meeting-note">
         Se graba tu micrófono y el audio de la reunión (Teams o navegador, fuente elegida en ♫). El audio se transcribe con <strong>{{ providerLabel }}</strong> y no se guarda: solo queda el texto. Avisá a los participantes que se transcribe.
-        <template v-if="status.diarizeEnabled"> Al terminar, se intenta separar a los participantes de la reunión (experimental, local); si falla, quedan como "Participante".</template>
+        <template v-if="status.diarizeEnabled"> Al terminar, se envía esa pista a Gemini para separar a los participantes (experimental); si falla, quedan como "Participante".</template>
       </p>
       <div class="meeting-row meeting-actions">
         <button v-if="!recording && !processing" class="record-button" :disabled="!canStart" @click="start"><span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}</button>

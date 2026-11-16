@@ -38,6 +38,8 @@ const (
 	// settingMicrophone remembers the microphone by PipeWire node name: the
 	// serial is recreated on every boot, the name is stable.
 	settingMicrophone = "preferred_microphone"
+	// settingGeminiKey is the Gemini key used for phase-2 diarization.
+	settingGeminiKey = "gemini_api_key"
 )
 
 func storePath() (string, error) {

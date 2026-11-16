@@ -173,8 +173,8 @@ type MeetingStatus struct {
 	Pending         int    `json:"pending"`
 	Failed          int    `json:"failed"`
 	Message         string `json:"message"`
-	// DiarizeEnabled reflects SONARA_DIARIZE_ENABLED, not whether the local
-	// service actually came up: that is only known after a meeting ends.
+	// DiarizeEnabled reflects whether a Gemini key is configured, not whether
+	// the call will actually succeed: that is only known after a meeting ends.
 	DiarizeEnabled bool `json:"diarizeEnabled"`
 }
 
@@ -203,7 +203,7 @@ func (a *App) MeetingTranscriptStatus() MeetingStatus {
 	a.mu.RLock()
 	run, backend := a.meeting, a.backend
 	a.mu.RUnlock()
-	status := MeetingStatus{State: meetingIdle, DiarizeEnabled: diarizeEnabled()}
+	status := MeetingStatus{State: meetingIdle, DiarizeEnabled: a.diarizer.Configured()}
 	if backend != nil {
 		status.Provider = backend.MeetingProvider()
 	}
@@ -489,8 +489,8 @@ func (a *App) captureTrack(ctx context.Context, run *meetingRun, track, target s
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			break
 		}
-		if track == trackOutput && diarizeEnabled() {
-			// The raw, continuous signal, not VAD-gated: pyannote does its own
+		if track == trackOutput && a.diarizer.Configured() {
+			// The raw, continuous signal, not VAD-gated: the model does its own
 			// segmentation and needs the real pauses to find speaker turns.
 			run.appendDiarizePCM(frame)
 		}
@@ -528,7 +528,7 @@ func (a *App) watchMicrophone(ctx context.Context, stop context.CancelFunc) {
 
 func (a *App) recordGap(run *meetingRun, track string, from, to int64) {
 	a.storeSegment(run, TranscriptSegment{Track: track, StartMS: from, EndMS: to, Status: segmentGap})
-	if track == trackOutput && diarizeEnabled() {
+	if track == trackOutput && a.diarizer.Configured() {
 		// Keeps the accumulator's byte offset aligned to the shared clock
 		// across the gap, including the very first one before capture starts.
 		run.padDiarizeSilence(to - from)

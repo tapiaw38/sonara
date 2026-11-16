@@ -2,17 +2,18 @@
 
 Fecha de investigación: 2026-11-16. Estado: fases 1, 1b y 2 (diarización) implementadas en `feat/meeting-transcript`; fase 3 (voz propia) pendiente. Rama: `feat/meeting-transcript` desde `develop`.
 
-## Fase 2 implementada (2026-11-16) — con una limitación de diseño importante
+## Fase 2 implementada (2026-11-16) — revisada el mismo día: de pyannote local a Gemini en la nube
 
-- **Diarización corre una sola vez, al terminar la grabación, no por bloque.** pyannote asigna sus etiquetas de forma independiente en cada llamada; diarizar bloque por bloque daría IDs incompatibles entre bloques (el "mantener IDs estables" del diseño original no se sostiene con llamadas por bloque). Por eso la pista `meeting_output` completa se acumula en memoria mientras dura la grabación (sólo si `SONARA_DIARIZE_ENABLED=1`; nunca el micrófono) y se diariza entera en un solo paso cuando se detiene. Los nombres de participantes aparecen recién entonces, no en vivo.
-- Acumulación con tope `diarizeMaxDuration = 3h` (`diarize.go`); pasado ese límite, el resto de la reunión sigue transcribiéndose normal pero sin diarizar. Memoria se libera apenas termina el paso, con éxito o error.
-- Esquema: migración `0005_diarized_speakers.sql` agrega `speaker_key` a `transcript_segments` y reconstruye `transcript_speakers` con clave `(session_id, track, speaker_key)`. Numeración por defecto "Participante N" según primera aparición; sobrescribible por participante.
-- Servicio Python local (`diarize/server.py`, stdlib `http.server`, sin framework) expone `/health` y `/diarize`; Sonara lo arranca bajo demanda (`diarizer` en `diarize.go`) y lo detiene al cerrar. Si nunca queda sano, falla una vez y no reintenta en esa corrida de la app — la reunión no se ve afectada, los segmentos quedan con el nombre genérico.
-- **No verificado con el modelo real**: no hay token de Hugging Face ni PyTorch instalado en esta máquina. Lo que sí se verificó:
-  - Toda la lógica Go (mapeo de hablantes estable, solapamiento, acumulación/tope, fallback, integración completa con la base de datos) con tests que simulan el servicio HTTP (`diarize_test.go`), sin pyannote.
-  - La capa HTTP del servicio Python (`/health`, `/diarize`, validación de WAV, error JSON) con un pipeline simulado — ver `diarize/README.md`.
-  - **Sin probar**: carga real del modelo, calidad de la separación de hablantes, tiempo real en CPU, ni una reunión real con varias voces.
-- Instrucciones de instalación (token de Hugging Face, entorno Python, variables de entorno) en `diarize/README.md`.
+Primera versión de fase 2 usaba pyannote local (servicio Python, PyTorch, token de Hugging Face). El usuario pidió no instalar nada pesado en su máquina; se reemplazó por la API de Gemini (nube), sin tocar casi nada del diseño de arriba.
+
+- **Diarización sigue corriendo una sola vez, al terminar la grabación, no por bloque.** Una llamada a Gemini no recuerda la anterior: diarizar bloque por bloque daría IDs incompatibles entre bloques. Por eso la pista `meeting_output` completa se acumula en memoria mientras dura la grabación (sólo si hay clave de Gemini configurada; nunca el micrófono) y se manda entera en un solo paso cuando se detiene. Los nombres de participantes aparecen recién entonces, no en vivo.
+- **Sin instalación local**: se eliminó el servicio Python (`diarize/server.py`, pyannote, PyTorch, token de Hugging Face). La diarización activa ("Configurada" = hay clave de Gemini en Configuración) es sólo una llamada HTTP, igual que DeepSeek/OpenAI.
+- Flujo con la API de Gemini (`diarize.go`): subir el WAV con la API de archivos (subida resumible: `POST /upload/v1beta/files` para iniciar, `POST` a la URL devuelta para los bytes), pedir sólo los turnos de habla (sin transcribir texto, Sonara ya lo tiene por su propio ASR) a `POST /v1beta/interactions` con `response_format` JSON y el modelo `gemini-4-hydrogen`, y borrar el archivo subido al terminar (best-effort; Google lo expira solo a las 48h igual).
+- Acumulación con tope `diarizeMaxDuration = 3h` (límite de memoria de la app, no de Gemini); pasado ese límite, el resto de la reunión sigue transcribiéndose normal pero sin diarizar. Memoria se libera apenas termina el paso, con éxito o error.
+- Esquema sin cambios: migración `0005_diarized_speakers.sql` agrega `speaker_key` a `transcript_segments` y reconstruye `transcript_speakers` con clave `(session_id, track, speaker_key)`. Numeración por defecto "Participante N" según primera aparición; sobrescribible por participante.
+- **No verificado con una cuenta real de Gemini**: no hay clave de API en esta máquina. El endpoint, los nombres de campo (`uri`, `mime_type`, `response_format`, `steps[].content[].text`) y las cabeceras (`x-goog-api-key`, `Api-Revision: 2026-05-20`) vienen de la documentación oficial (`aistudio.google.com/docs/*`, consultada 2026-11-16), no de una llamada real. En particular, el endpoint de borrado de archivo (`DELETE /v1beta/files/{name}`) no estaba confirmado en la documentación consultada; si el nombre no es correcto, el borrado falla en silencio (se registra en el log) y Google igual expira el archivo a las 48h.
+- Lo que sí se verificó: toda la lógica Go (mapeo de hablantes estable, solapamiento, acumulación/tope, fallback, integración completa con la base de datos, las tres llamadas HTTP de `diarize()`) con tests que simulan el servicio de Gemini (`diarize_test.go`), sin cuenta real.
+- **Decisión pendiente revisada:** nombres reales (Juan, Pedro, María) siguen sin resolverse por ningún proveedor de diarización —agrupan voces, no identifican personas—. Alternativa barata planteada y no implementada: un paso de texto que lea la transcripción ya generada y sugiera nombres cuando alguien se nombra en la charla ("Hola Pedro"), con cualquier LLM ya integrado (DeepSeek/OpenAI), sin depender de Gemini.
 
 ## Objetivo
 
@@ -160,8 +161,8 @@ Ningún proyecto en Go/Wails; código no reutilizable directo, sí como diseño.
 3. Añadir UI de selección, inicio/pausa, estado por pista, vista de reunión en lista de sesiones y botón exportar.
 4. Añadir proveedor DeepSeek ASR para transcripción de reunión con fallback OpenAI; comparar calidad es/en con 3–5 grabaciones.
 5. Añadir adaptador `chat/completions` y enrutamiento texto→DeepSeek / imagen→OpenAI; medir latencia de copiloto antes de activarlo por defecto.
-6. Integrar pyannote como proceso opcional; medir 3–5 grabaciones consentidas en CPU/GPU objetivo, incluyendo eco y voces solapadas.
-7. Sólo tras métrica aceptable, añadir enrolamiento/matching de voz; calibrar falso positivo frente a fallback `desconocido`.
+6. ~~Integrar pyannote como proceso opcional~~ — superado: se usó la API de Gemini en la nube en vez de un proceso local (ver "Fase 2 implementada" arriba). Falta medir con cuenta real: 3–5 grabaciones consentidas, calidad, eco y voces solapadas.
+7. Sólo tras métrica aceptable, añadir enrolamiento/matching de voz, o el atajo más simple de inferir nombres leyendo el texto de la transcripción; calibrar falso positivo frente a fallback `desconocido`.
 
 ## Detalles a validar en máquina objetivo
 
