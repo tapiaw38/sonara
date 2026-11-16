@@ -1,6 +1,18 @@
 # Plan: transcripción de reuniones con participantes
 
-Fecha de investigación: 2026-11-16. Estado: fases 1 y 1b implementadas en `feat/meeting-transcript` (sin commit); fases 2–3 (pyannote, voz propia) pendientes. Rama prevista: `feat/meeting-transcript` desde `develop`.
+Fecha de investigación: 2026-11-16. Estado: fases 1, 1b y 2 (diarización) implementadas en `feat/meeting-transcript`; fase 3 (voz propia) pendiente. Rama: `feat/meeting-transcript` desde `develop`.
+
+## Fase 2 implementada (2026-11-16) — con una limitación de diseño importante
+
+- **Diarización corre una sola vez, al terminar la grabación, no por bloque.** pyannote asigna sus etiquetas de forma independiente en cada llamada; diarizar bloque por bloque daría IDs incompatibles entre bloques (el "mantener IDs estables" del diseño original no se sostiene con llamadas por bloque). Por eso la pista `meeting_output` completa se acumula en memoria mientras dura la grabación (sólo si `SONARA_DIARIZE_ENABLED=1`; nunca el micrófono) y se diariza entera en un solo paso cuando se detiene. Los nombres de participantes aparecen recién entonces, no en vivo.
+- Acumulación con tope `diarizeMaxDuration = 3h` (`diarize.go`); pasado ese límite, el resto de la reunión sigue transcribiéndose normal pero sin diarizar. Memoria se libera apenas termina el paso, con éxito o error.
+- Esquema: migración `0005_diarized_speakers.sql` agrega `speaker_key` a `transcript_segments` y reconstruye `transcript_speakers` con clave `(session_id, track, speaker_key)`. Numeración por defecto "Participante N" según primera aparición; sobrescribible por participante.
+- Servicio Python local (`diarize/server.py`, stdlib `http.server`, sin framework) expone `/health` y `/diarize`; Sonara lo arranca bajo demanda (`diarizer` en `diarize.go`) y lo detiene al cerrar. Si nunca queda sano, falla una vez y no reintenta en esa corrida de la app — la reunión no se ve afectada, los segmentos quedan con el nombre genérico.
+- **No verificado con el modelo real**: no hay token de Hugging Face ni PyTorch instalado en esta máquina. Lo que sí se verificó:
+  - Toda la lógica Go (mapeo de hablantes estable, solapamiento, acumulación/tope, fallback, integración completa con la base de datos) con tests que simulan el servicio HTTP (`diarize_test.go`), sin pyannote.
+  - La capa HTTP del servicio Python (`/health`, `/diarize`, validación de WAV, error JSON) con un pipeline simulado — ver `diarize/README.md`.
+  - **Sin probar**: carga real del modelo, calidad de la separación de hablantes, tiempo real en CPU, ni una reunión real con varias voces.
+- Instrucciones de instalación (token de Hugging Face, entorno Python, variables de entorno) en `diarize/README.md`.
 
 ## Objetivo
 

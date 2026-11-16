@@ -40,7 +40,7 @@ export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
 
-export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string):Promise<Record<string, string>>;
+export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Record<string, string>>;
 
 export function RetryMeetingSegments(arg1:string):Promise<number>;
 

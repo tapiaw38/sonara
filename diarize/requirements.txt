@@ -1,0 +1,9 @@
+# Not pinned to an exact version: verified here only against Python's stdlib
+# (server.py's HTTP layer was smoke-tested with a stubbed pipeline — see
+# README.md). pyannote.audio's own minimum version for the
+# speaker-diarization-community-1 model was not confirmed in this environment
+# (no internet-free way to check compatibility without installing torch).
+# Pin these once you have confirmed a working combination on your machine.
+pyannote.audio>=3.3
+torch>=2.1
+torchaudio>=2.1

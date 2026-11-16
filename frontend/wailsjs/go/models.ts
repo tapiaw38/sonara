@@ -102,6 +102,7 @@ export namespace main {
 	    pending: number;
 	    failed: number;
 	    message: string;
+	    diarizeEnabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new MeetingStatus(source);
@@ -118,6 +119,7 @@ export namespace main {
 	        this.pending = source["pending"];
 	        this.failed = source["failed"];
 	        this.message = source["message"];
+	        this.diarizeEnabled = source["diarizeEnabled"];
 	    }
 	}
 	export class TranscriptSegment {
@@ -127,6 +129,7 @@ export namespace main {
 	    endMs: number;
 	    text: string;
 	    status: string;
+	    speakerKey: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TranscriptSegment(source);
@@ -140,6 +143,7 @@ export namespace main {
 	        this.endMs = source["endMs"];
 	        this.text = source["text"];
 	        this.status = source["status"];
+	        this.speakerKey = source["speakerKey"];
 	    }
 	}
 	export class MeetingView {

@@ -68,6 +68,8 @@ type App struct {
 	emitHook          func(event string, data any)
 	meetingTranscribe meetingTranscriber
 	saveDialog        func(ctx context.Context, filename string) (string, error)
+	// diarizer is phase 2 (speaker diarization): one per App, started lazily.
+	diarizer *diarizer
 }
 
 type sessionMessage struct {
@@ -140,6 +142,7 @@ func NewApp() *App {
 		sessionID:    newSessionID(),
 		segments:     make(chan meetSegment, meetQueuedSegments),
 		voiceContext: ctx, voiceCancel: cancel,
+		diarizer: newDiarizer(),
 	}
 }
 
@@ -212,6 +215,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	// Before the store closes: pending meeting blocks still have to be written.
 	a.stopMeetingAndWait(15 * time.Second)
+	a.diarizer.stop()
 	a.mu.Lock()
 	database := a.store
 	a.store = nil

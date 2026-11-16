@@ -3,23 +3,26 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ExportMeetingTranscript, MeetingTranscriptSegments, MeetingTranscriptStatus, Microphones, RenameMeetingSpeaker, RetryMeetingSegments, SelectedMicrophone, SetMicrophone, StartMeetingTranscript, StopMeetingTranscript } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 
-type Segment = { id: number; track: string; startMs: number; endMs: number; text: string; status: string }
+type Segment = { id: number; track: string; startMs: number; endMs: number; text: string; status: string; speakerKey: string }
 type View = { sessionId: string; startedAt: string; language: string; segments: Segment[]; speakers: Record<string, string> }
-type Status = { state: string; sessionId: string; elapsedMs: number; provider: string; microphoneState: string; outputState: string; pending: number; failed: number; message: string }
+type Status = { state: string; sessionId: string; elapsedMs: number; provider: string; microphoneState: string; outputState: string; pending: number; failed: number; message: string; diarizeEnabled: boolean }
 type Mic = { target: string; label: string; running: boolean; app: string }
+// One renameable entity: the microphone track, the generic meeting_output
+// label, or one diarized participant (track + speakerKey).
+type SpeakerRef = { track: string; speakerKey: string }
 
 // sessionId is the saved meeting to show; empty means none picked yet.
 const props = defineProps<{ sessionId: string }>()
 const emit = defineEmits<{ (event: 'sessions-changed'): void; (event: 'opened', id: string): void }>()
 
-const status = ref<Status>({ state: 'idle', sessionId: '', elapsedMs: 0, provider: '', microphoneState: '', outputState: '', pending: 0, failed: 0, message: '' })
+const status = ref<Status>({ state: 'idle', sessionId: '', elapsedMs: 0, provider: '', microphoneState: '', outputState: '', pending: 0, failed: 0, message: '', diarizeEnabled: false })
 const view = ref<View | null>(null)
 const mics = ref<Mic[]>([])
 const selectedMic = ref('')
 const message = ref('')
 const busy = ref(false)
 const list = ref<HTMLElement | null>(null)
-const editingTrack = ref('')
+const editing = ref<SpeakerRef | null>(null)
 const draftName = ref('')
 const tick = ref(0)
 
@@ -32,6 +35,21 @@ const providerLabel = computed(() => status.value.provider === 'deepseek' ? 'Dee
 const selectedMicAvailable = computed(() => mics.value.some((mic) => mic.app === selectedMic.value))
 const canStart = computed(() => !busy.value && status.value.state === 'idle' && !!selectedMic.value && selectedMicAvailable.value)
 const speakers = computed(() => view.value?.speakers ?? { microphone: 'Yo', meeting_output: 'Participante' })
+// Every distinct speaker actually present in this meeting's segments, in
+// first-appearance order, so the rename chips match who really spoke instead
+// of always showing a fixed microphone/meeting_output pair.
+const presentSpeakers = computed<SpeakerRef[]>(() => {
+  const seen = new Set<string>()
+  const refs: SpeakerRef[] = []
+  for (const segment of view.value?.segments ?? []) {
+    if (segment.status !== 'ok') continue
+    const dedupeKey = `${segment.track}:${segment.speakerKey}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    refs.push({ track: segment.track, speakerKey: segment.speakerKey })
+  }
+  return refs
+})
 
 const trackText: Record<string, string> = {
   ok: 'capturando', starting: 'iniciando', missing: 'no disponible', reconnecting: 'reconectando', error: 'error',
@@ -49,7 +67,12 @@ const elapsed = computed(() => { void tick.value; return clock(status.value.elap
 const statusAt = ref(Date.now())
 let timer = 0
 
-function speaker(track: string) { return speakers.value[track] || 'Hablante desconocido' }
+// Mirrors the Go side's speakerDisplayKey/trackLabel: a diarized participant's
+// own name, falling back to the track's generic name, falling back to "unknown".
+function speaker(track: string, speakerKey = '') {
+  const key = speakerKey ? `${track}:${speakerKey}` : track
+  return speakers.value[key] || speakers.value[track] || 'Hablante desconocido'
+}
 
 function sessionDate(iso: string) {
   const when = new Date(iso)
@@ -155,17 +178,17 @@ async function retry() {
   }
 }
 
-function editName(track: string) {
-  editingTrack.value = track
-  draftName.value = speakers.value[track] ?? ''
+function editName(ref: SpeakerRef) {
+  editing.value = ref
+  draftName.value = speaker(ref.track, ref.speakerKey)
 }
 
 async function saveName() {
-  const track = editingTrack.value
-  if (!track || !view.value) return
-  editingTrack.value = ''
+  const ref = editing.value
+  if (!ref || !view.value) return
+  editing.value = null
   try {
-    view.value.speakers = await RenameMeetingSpeaker(view.value.sessionId, track, draftName.value)
+    view.value.speakers = await RenameMeetingSpeaker(view.value.sessionId, ref.track, ref.speakerKey, draftName.value)
   } catch (error) {
     message.value = String(error)
   }
@@ -210,6 +233,7 @@ watch(() => props.sessionId, (id) => { void load(id) })
       </div>
       <p class="meeting-note">
         Se graba tu micrófono y el audio de la reunión (Teams o navegador, fuente elegida en ♫). El audio se transcribe con <strong>{{ providerLabel }}</strong> y no se guarda: solo queda el texto. Avisá a los participantes que se transcribe.
+        <template v-if="status.diarizeEnabled"> Al terminar, se intenta separar a los participantes de la reunión (experimental, local); si falla, quedan como "Participante".</template>
       </p>
       <div class="meeting-row meeting-actions">
         <button v-if="!recording && !processing" class="record-button" :disabled="!canStart" @click="start"><span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}</button>
@@ -235,20 +259,20 @@ watch(() => props.sessionId, (id) => { void load(id) })
       <div class="panel-heading">
         <span>{{ view ? `Reunión · ${sessionDate(view.startedAt)}` : 'Transcripción' }}</span>
         <span v-if="view" class="speaker-names">
-          <template v-for="track in ['microphone', 'meeting_output']" :key="track">
-            <input v-if="editingTrack === track" v-model="draftName" class="speaker-input" maxlength="60" :placeholder="track === 'microphone' ? 'Yo' : 'Participante'" @keydown.enter.prevent="saveName" @keydown.esc="editingTrack = ''" @blur="saveName" />
-            <button v-else class="speaker-chip" :title="'Cambiar nombre de ' + speaker(track)" @click="editName(track)">{{ speaker(track) }} ✎</button>
+          <template v-for="ref in presentSpeakers" :key="ref.track + ':' + ref.speakerKey">
+            <input v-if="editing && editing.track === ref.track && editing.speakerKey === ref.speakerKey" v-model="draftName" class="speaker-input" maxlength="60" :placeholder="speaker(ref.track, ref.speakerKey)" @keydown.enter.prevent="saveName" @keydown.esc="editing = null" @blur="saveName" />
+            <button v-else class="speaker-chip" :title="'Cambiar nombre de ' + speaker(ref.track, ref.speakerKey)" @click="editName(ref)">{{ speaker(ref.track, ref.speakerKey) }} ✎</button>
           </template>
         </span>
       </div>
       <div v-if="view && view.segments.length" ref="list" class="segments">
         <template v-for="segment in view.segments" :key="segment.id">
           <p v-if="segment.status === 'ok'" class="segment" :class="segment.track">
-            <time>{{ clock(segment.startMs) }}</time><strong>{{ speaker(segment.track) }}</strong><span>{{ segment.text }}</span>
+            <time>{{ clock(segment.startMs) }}</time><strong>{{ speaker(segment.track, segment.speakerKey) }}</strong><span>{{ segment.text }}</span>
           </p>
           <p v-else class="segment gap" :class="segment.status">
             <time>{{ clock(segment.startMs) }}–{{ clock(segment.endMs) }}</time>
-            <span>{{ segment.status === 'failed' ? 'Sin transcribir: falló la transcripción' : 'Sin transcribir: audio no capturado' }} ({{ speaker(segment.track) }})</span>
+            <span>{{ segment.status === 'failed' ? 'Sin transcribir: falló la transcripción' : 'Sin transcribir: audio no capturado' }} ({{ speaker(segment.track, segment.speakerKey) }})</span>
           </p>
         </template>
       </div>

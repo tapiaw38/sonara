@@ -252,7 +252,7 @@ func TestDeletingMeetingCascadesAndBlocksWhileRecording(t *testing.T) {
 	a, database := testMeetingApp(t)
 	run := testRun(t, a, database)
 	database.insertSegment("m1", TranscriptSegment{Track: trackMicrophone, Text: "x", Status: segmentOK})
-	database.saveSpeakerName("m1", trackMicrophone, "Walter")
+	database.saveSpeakerName("m1", trackMicrophone, "", "Walter")
 	if _, err := a.DeleteSession("m1"); err == nil {
 		t.Fatal("a meeting being recorded must not be deletable")
 	}
@@ -271,15 +271,15 @@ func TestDeletingMeetingCascadesAndBlocksWhileRecording(t *testing.T) {
 func TestRenameSpeaker(t *testing.T) {
 	a, database := testMeetingApp(t)
 	testRun(t, a, database)
-	names, err := a.RenameMeetingSpeaker("m1", trackOutput, "  Ana ")
+	names, err := a.RenameMeetingSpeaker("m1", trackOutput, "", "  Ana ")
 	if err != nil || names[trackOutput] != "Ana" || names[trackMicrophone] != "Yo" {
 		t.Fatalf("names = %v, %v", names, err)
 	}
-	names, _ = a.RenameMeetingSpeaker("m1", trackOutput, "")
+	names, _ = a.RenameMeetingSpeaker("m1", trackOutput, "", "")
 	if names[trackOutput] != "Participante" {
 		t.Errorf("empty name must restore the default, got %q", names[trackOutput])
 	}
-	if _, err := a.RenameMeetingSpeaker("m1", "bogus", "x"); err == nil {
+	if _, err := a.RenameMeetingSpeaker("m1", "bogus", "", "x"); err == nil {
 		t.Error("unknown track accepted")
 	}
 }

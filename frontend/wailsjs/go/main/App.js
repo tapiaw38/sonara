@@ -78,8 +78,8 @@ export function OpenSession(arg1) {
   return window['go']['main']['App']['OpenSession'](arg1);
 }
 
-export function RenameMeetingSpeaker(arg1, arg2, arg3) {
-  return window['go']['main']['App']['RenameMeetingSpeaker'](arg1, arg2, arg3);
+export function RenameMeetingSpeaker(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['RenameMeetingSpeaker'](arg1, arg2, arg3, arg4);
 }
 
 export function RetryMeetingSegments(arg1) {

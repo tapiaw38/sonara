@@ -36,23 +36,29 @@ func formatMeetingTranscript(startedAt time.Time, language string, segments []Tr
 	for _, segment := range segments {
 		switch segment.Status {
 		case segmentOK:
-			name := speakers[segment.Track]
+			name := trackLabel(segment.Track, segment.SpeakerKey, speakers)
 			if name == "" {
 				name = "Hablante desconocido"
 			}
 			fmt.Fprintf(&out, "[%s] %s: %s\n", clock(segment.StartMS), name, segment.Text)
 		case segmentFailed:
 			fmt.Fprintf(&out, "[%s–%s] (sin transcribir: falló la transcripción, %s)\n",
-				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, speakers))
+				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, segment.SpeakerKey, speakers))
 		default:
 			fmt.Fprintf(&out, "[%s–%s] (sin transcribir: audio no capturado, %s)\n",
-				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, speakers))
+				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, segment.SpeakerKey, speakers))
 		}
 	}
 	return out.String()
 }
 
-func trackLabel(track string, speakers map[string]string) string {
+// trackLabel resolves a segment's display name the same way the UI does: a
+// diarized participant's own name or number, falling back to the track's
+// generic one, falling back to the raw track string.
+func trackLabel(track, speakerKey string, speakers map[string]string) string {
+	if name := speakers[speakerDisplayKey(track, speakerKey)]; name != "" {
+		return name
+	}
 	if name := speakers[track]; name != "" {
 		return name
 	}

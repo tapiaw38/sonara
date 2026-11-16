@@ -129,6 +129,13 @@ type meetingRun struct {
 	failed      int
 	failedBlock map[int64]meetingBlock
 	failedOrder []int64
+
+	// Phase 2 (diarization): the meeting_output track's raw audio, held only
+	// while diarization is enabled and only until the final pass consumes it.
+	// See diarize.go.
+	diarizeMu     sync.Mutex
+	diarizePCM    []byte
+	diarizeCapped bool
 }
 
 func (r *meetingRun) elapsedMS() int64 { return time.Since(r.started).Milliseconds() }
@@ -166,6 +173,9 @@ type MeetingStatus struct {
 	Pending         int    `json:"pending"`
 	Failed          int    `json:"failed"`
 	Message         string `json:"message"`
+	// DiarizeEnabled reflects SONARA_DIARIZE_ENABLED, not whether the local
+	// service actually came up: that is only known after a meeting ends.
+	DiarizeEnabled bool `json:"diarizeEnabled"`
 }
 
 // MeetingSegmentEvent is the payload of the "meeting:segment" event.
@@ -193,7 +203,7 @@ func (a *App) MeetingTranscriptStatus() MeetingStatus {
 	a.mu.RLock()
 	run, backend := a.meeting, a.backend
 	a.mu.RUnlock()
-	status := MeetingStatus{State: meetingIdle}
+	status := MeetingStatus{State: meetingIdle, DiarizeEnabled: diarizeEnabled()}
 	if backend != nil {
 		status.Provider = backend.MeetingProvider()
 	}
@@ -364,6 +374,9 @@ func (a *App) finishMeeting(run *meetingRun) {
 	a.recordTrailingGaps(run)
 	close(run.jobs)
 	run.workers.Wait()
+	// Best-effort and, for a long meeting, possibly slow: "processing" covers
+	// it, and shutdown's own bound (stopMeetingAndWait) still applies on top.
+	a.runDiarization(run)
 	run.mu.Lock()
 	run.state = meetingIdle
 	run.mu.Unlock()
@@ -476,6 +489,11 @@ func (a *App) captureTrack(ctx context.Context, run *meetingRun, track, target s
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			break
 		}
+		if track == trackOutput && diarizeEnabled() {
+			// The raw, continuous signal, not VAD-gated: pyannote does its own
+			// segmentation and needs the real pauses to find speaker turns.
+			run.appendDiarizePCM(frame)
+		}
 		block, ready := cutter.add(frame, origin+read*meetingFrameMS)
 		read++
 		if ready {
@@ -510,6 +528,11 @@ func (a *App) watchMicrophone(ctx context.Context, stop context.CancelFunc) {
 
 func (a *App) recordGap(run *meetingRun, track string, from, to int64) {
 	a.storeSegment(run, TranscriptSegment{Track: track, StartMS: from, EndMS: to, Status: segmentGap})
+	if track == trackOutput && diarizeEnabled() {
+		// Keeps the accumulator's byte offset aligned to the shared clock
+		// across the gap, including the very first one before capture starts.
+		run.padDiarizeSilence(to - from)
+	}
 }
 
 // enqueueBlock never blocks the recorder. A full queue becomes a visible gap.
@@ -702,16 +725,18 @@ func (a *App) MeetingTranscriptSegments(sessionID string) (MeetingView, error) {
 	return MeetingView{SessionID: sessionID, StartedAt: startedAt, Language: language, Segments: segments, Speakers: speakers}, nil
 }
 
-// RenameMeetingSpeaker sets the display name of a track in one meeting; an
-// empty name restores the default.
-func (a *App) RenameMeetingSpeaker(sessionID, track, name string) (map[string]string, error) {
+// RenameMeetingSpeaker sets the display name of a track (speakerKey "") or of
+// one diarized participant within the meeting_output track (speakerKey
+// "spk_N", as returned in a segment's speakerKey). An empty name restores the
+// default ("Yo", "Participante", or "Participante N").
+func (a *App) RenameMeetingSpeaker(sessionID, track, speakerKey, name string) (map[string]string, error) {
 	a.mu.RLock()
 	database := a.store
 	a.mu.RUnlock()
 	if database == nil {
 		return nil, fmt.Errorf("sin persistencia disponible")
 	}
-	if err := database.saveSpeakerName(sessionID, track, name); err != nil {
+	if err := database.saveSpeakerName(sessionID, track, speakerKey, name); err != nil {
 		return nil, err
 	}
 	return database.speakerNames(sessionID)
