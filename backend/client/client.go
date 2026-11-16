@@ -27,6 +27,7 @@ type Client struct {
 	meeting         assistant.TranscribeUsecase
 	meetingProvider *router.Transcriber
 	title           assistant.TitleUsecase
+	suggestNames    assistant.SuggestSpeakerNamesUsecase
 }
 
 type Response struct {
@@ -60,12 +61,21 @@ func New() *Client {
 		meeting:         assistant.NewTranscribeUsecase(meeting, cfg.TranscribeModel),
 		meetingProvider: meeting,
 		title:           assistant.NewTitleUsecase(routed, cfg),
+		suggestNames:    assistant.NewSuggestSpeakerNamesUsecase(routed, cfg),
 	}
 }
 
 // Title names a session from its opening exchange.
 func (c *Client) Title(ctx context.Context, exchange string) (string, error) {
 	return c.title.Execute(ctx, exchange)
+}
+
+// SuggestSpeakerNames reads a meeting transcript (see assistant.SuggestSpeakerNamesUsecase
+// for the token format) and returns real names found in the conversation
+// itself, never invented. Routed the same as any other text request: DeepSeek
+// when configured, OpenAI otherwise.
+func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (map[string]string, error) {
+	return c.suggestNames.Execute(ctx, transcript)
 }
 
 func (c *Client) Status() string {

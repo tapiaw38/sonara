@@ -80,4 +80,6 @@ export function StopListening():Promise<boolean>;
 
 export function StopMeetingTranscript():Promise<main.MeetingStatus>;
 
+export function SuggestMeetingSpeakerNames(arg1:string):Promise<Record<string, string>>;
+
 export function ToggleAlwaysOnTop():Promise<boolean>;

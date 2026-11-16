@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ExportMeetingTranscript, MeetingTranscriptSegments, MeetingTranscriptStatus, Microphones, RenameMeetingSpeaker, RetryMeetingSegments, SelectedMicrophone, SetMicrophone, StartMeetingTranscript, StopMeetingTranscript } from '../../wailsjs/go/main/App'
+import { ExportMeetingTranscript, MeetingTranscriptSegments, MeetingTranscriptStatus, Microphones, RenameMeetingSpeaker, RetryMeetingSegments, SelectedMicrophone, SetMicrophone, StartMeetingTranscript, StopMeetingTranscript, SuggestMeetingSpeakerNames } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 type Segment = { id: number; track: string; startMs: number; endMs: number; text: string; status: string; speakerKey: string }
@@ -25,6 +25,11 @@ const list = ref<HTMLElement | null>(null)
 const editing = ref<SpeakerRef | null>(null)
 const draftName = ref('')
 const tick = ref(0)
+// Suggestions are never applied automatically: each one needs a click to
+// accept, same principle as every other rename in this panel.
+const suggestions = ref<Record<string, string>>({})
+const suggesting = ref(false)
+const suggestMessage = ref('')
 
 const recording = computed(() => status.value.state === 'recording')
 const processing = computed(() => status.value.state === 'processing')
@@ -99,6 +104,8 @@ async function chooseMic(target: string) {
 }
 
 async function load(id: string) {
+  suggestions.value = {}
+  suggestMessage.value = ''
   if (!id) { view.value = null; return }
   try {
     view.value = (await MeetingTranscriptSegments(id)) as View
@@ -183,6 +190,39 @@ function editName(ref: SpeakerRef) {
   draftName.value = speaker(ref.track, ref.speakerKey)
 }
 
+async function suggestNames() {
+  if (!view.value) return
+  suggesting.value = true
+  suggestMessage.value = ''
+  try {
+    suggestions.value = await SuggestMeetingSpeakerNames(view.value.sessionId)
+    if (!Object.keys(suggestions.value).length) suggestMessage.value = 'No se encontraron nombres mencionados en la conversación.'
+  } catch (error) {
+    suggestMessage.value = String(error)
+  } finally {
+    suggesting.value = false
+  }
+}
+
+async function acceptSuggestion(speakerKey: string) {
+  const name = suggestions.value[speakerKey]
+  const rest = { ...suggestions.value }
+  delete rest[speakerKey]
+  suggestions.value = rest
+  if (!view.value || !name) return
+  try {
+    view.value.speakers = await RenameMeetingSpeaker(view.value.sessionId, 'meeting_output', speakerKey, name)
+  } catch (error) {
+    message.value = String(error)
+  }
+}
+
+function dismissSuggestion(speakerKey: string) {
+  const rest = { ...suggestions.value }
+  delete rest[speakerKey]
+  suggestions.value = rest
+}
+
 async function saveName() {
   const ref = editing.value
   if (!ref || !view.value) return
@@ -239,7 +279,17 @@ watch(() => props.sessionId, (id) => { void load(id) })
         <button v-if="!recording && !processing" class="record-button" :disabled="!canStart" @click="start"><span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}</button>
         <button v-else class="record-button stop" :disabled="processing" @click="stop"><span>■</span>{{ processing ? 'Procesando…' : 'Detener transcripción' }}</button>
         <button class="meeting-secondary" :disabled="!view || !view.segments.length" @click="exportTxt">Exportar .txt</button>
+        <button class="meeting-secondary" :disabled="!view || !view.segments.length || suggesting" @click="suggestNames">{{ suggesting ? 'Buscando nombres…' : 'Sugerir nombres' }}</button>
       </div>
+      <div v-if="Object.keys(suggestions).length" class="name-suggestions" role="status">
+        <span>Se mencionaron estos nombres en la conversación:</span>
+        <span v-for="(name, key) in suggestions" :key="key" class="suggestion-chip">
+          {{ speaker('meeting_output', key) }} → <strong>{{ name }}</strong>
+          <button title="Usar este nombre" @click="acceptSuggestion(key)">Aplicar</button>
+          <button title="Descartar" @click="dismissSuggestion(key)">×</button>
+        </span>
+      </div>
+      <small v-if="suggestMessage" class="meeting-message" role="status">{{ suggestMessage }}</small>
       <div v-if="status.state !== 'idle'" class="track-status" role="status">
         <span class="rec-dot" :class="{ live: recording }"></span><strong>{{ elapsed }}</strong>
         <span>Tu micrófono: <em :class="status.microphoneState">{{ trackLabel(status.microphoneState) }}</em></span>
@@ -313,6 +363,11 @@ watch(() => props.sessionId, (id) => { void load(id) })
 @keyframes rec-blink { 50% { opacity: .35; } }
 .meeting-warning { padding: 8px 10px; display: flex; gap: 10px; align-items: center; justify-content: space-between; border-radius: 6px; color: #eed39a; background: #392c20; font-size: 10px; }
 .meeting-message { color: #a99dba; font-size: 10px; overflow-wrap: anywhere; }
+.name-suggestions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 11px; border-radius: 7px; border: 1px solid rgb(62 126 108); background: rgb(20 40 34); color: #a9c9bd; font-size: 10px; }
+.suggestion-chip { display: flex; gap: 5px; align-items: center; padding: 3px 7px; border-radius: 5px; background: rgb(14 26 22); }
+.suggestion-chip strong { color: #b9f2df; }
+.suggestion-chip button { padding: 2px 7px; border-radius: 4px; color: #0c1e18; background: rgb(98 215 179); font-size: 9px; font-weight: 700; }
+.suggestion-chip button[title="Descartar"] { color: #d7dce0; background: rgb(44 48 54); font-weight: 400; }
 .meeting-transcript { min-height: 300px; height: clamp(300px, calc(100vh - 360px), 620px); }
 .speaker-names { display: flex; gap: 6px; }
 .speaker-chip { padding: 4px 8px; border-radius: 5px; color: #a9c9bd; background: rgb(25 38 34); font: 10px 'DM Mono', monospace; }

@@ -1,6 +1,6 @@
 # Plan: transcripción de reuniones con participantes
 
-Fecha de investigación: 2026-11-16. Estado: fases 1, 1b y 2 (diarización) implementadas en `feat/meeting-transcript`; fase 3 (voz propia) pendiente. Rama: `feat/meeting-transcript` desde `develop`.
+Fecha de investigación: 2026-11-16. Estado: fases 1, 1b y 2 (diarización) implementadas en `feat/meeting-transcript`, más sugerencia de nombres por texto; fase 3 (voz propia) pendiente. Rama: `feat/meeting-transcript` desde `develop`.
 
 ## Fase 2 implementada (2026-11-16) — revisada el mismo día: de pyannote local a Gemini en la nube
 
@@ -13,7 +13,14 @@ Primera versión de fase 2 usaba pyannote local (servicio Python, PyTorch, token
 - Esquema sin cambios: migración `0005_diarized_speakers.sql` agrega `speaker_key` a `transcript_segments` y reconstruye `transcript_speakers` con clave `(session_id, track, speaker_key)`. Numeración por defecto "Participante N" según primera aparición; sobrescribible por participante.
 - **No verificado con una cuenta real de Gemini**: no hay clave de API en esta máquina. El endpoint, los nombres de campo (`uri`, `mime_type`, `response_format`, `steps[].content[].text`) y las cabeceras (`x-goog-api-key`, `Api-Revision: 2026-05-20`) vienen de la documentación oficial (`aistudio.google.com/docs/*`, consultada 2026-11-16), no de una llamada real. En particular, el endpoint de borrado de archivo (`DELETE /v1beta/files/{name}`) no estaba confirmado en la documentación consultada; si el nombre no es correcto, el borrado falla en silencio (se registra en el log) y Google igual expira el archivo a las 48h.
 - Lo que sí se verificó: toda la lógica Go (mapeo de hablantes estable, solapamiento, acumulación/tope, fallback, integración completa con la base de datos, las tres llamadas HTTP de `diarize()`) con tests que simulan el servicio de Gemini (`diarize_test.go`), sin cuenta real.
-- **Decisión pendiente revisada:** nombres reales (Juan, Pedro, María) siguen sin resolverse por ningún proveedor de diarización —agrupan voces, no identifican personas—. Alternativa barata planteada y no implementada: un paso de texto que lea la transcripción ya generada y sugiera nombres cuando alguien se nombra en la charla ("Hola Pedro"), con cualquier LLM ya integrado (DeepSeek/OpenAI), sin depender de Gemini.
+## Sugerencia de nombres por texto (2026-11-16) — implementada
+
+Nombres reales (Juan, Pedro, María) no los resuelve ningún proveedor de diarización — agrupan voces, no identifican personas. Se agregó el atajo barato planteado arriba: leer el texto ya transcripto y sugerir nombres sólo cuando alguien se nombra en la charla ("Hola Pedro", "soy María"), sin depender de Gemini ni de un proveedor nuevo.
+
+- Nuevo caso de uso en el backend (`backend/internal/usecases/assistant/suggest_speaker_names.go`), enrutado igual que cualquier pedido de texto: DeepSeek si hay clave, OpenAI si no. Instrucción explícita de no inventar nombres; ante la duda, omite la etiqueta.
+- `name_suggestions.go` arma el texto por hablante (`spk_0`, `spk_1`… o `generico` para el cupo sin diarizar; el micrófono siempre es contexto como "Yo", nunca algo a renombrar) y valida cada sugerencia contra las etiquetas que realmente existen en esa reunión — una etiqueta inventada por el modelo, o un intento de renombrar "Yo", se descarta antes de llegar a la UI.
+- **Nunca se aplica solo.** Botón "Sugerir nombres" en la vista de reunión; cada sugerencia aparece como chip con "Aplicar" o "×", igual que cualquier otro cambio de nombre.
+- Verificado con un backend simulado (sin llamar a DeepSeek/OpenAI de verdad): parseo de JSON limpio y con cercas de markdown, salida del modelo no-JSON (no debe romper, debe devolver cero sugerencias), error del proveedor (debe propagarse, no silenciarse), y las dos validaciones de seguridad (etiqueta inexistente, intento de renombrar el micrófono).
 
 ## Objetivo
 

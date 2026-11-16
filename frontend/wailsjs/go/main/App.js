@@ -158,6 +158,10 @@ export function StopMeetingTranscript() {
   return window['go']['main']['App']['StopMeetingTranscript']();
 }
 
+export function SuggestMeetingSpeakerNames(arg1) {
+  return window['go']['main']['App']['SuggestMeetingSpeakerNames'](arg1);
+}
+
 export function ToggleAlwaysOnTop() {
   return window['go']['main']['App']['ToggleAlwaysOnTop']();
 }

@@ -70,6 +70,8 @@ type App struct {
 	saveDialog        func(ctx context.Context, filename string) (string, error)
 	// diarizer is phase 2 (speaker diarization): one per App, started lazily.
 	diarizer *diarizer
+	// suggestNamesHook is the test seam for name_suggestions.go's backend call.
+	suggestNamesHook func(ctx context.Context, transcript string) (map[string]string, error)
 }
 
 type sessionMessage struct {
