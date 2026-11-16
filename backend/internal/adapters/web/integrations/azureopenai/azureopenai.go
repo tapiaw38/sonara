@@ -39,11 +39,15 @@ type Config struct {
 	// Endpoint is the resource URL, e.g. https://my-resource.openai.azure.com
 	// (no trailing slash, no path).
 	Endpoint string
-	// APIVersion is the ?api-version= query parameter Azure requires on every
-	// call. Azure revises this independently of the model; there is no
-	// universal "latest" value to default to reliably, so Settings must set
-	// one explicitly.
-	APIVersion string
+	// ChatAPIVersion and TranscribeAPIVersion are each call's own
+	// ?api-version= query parameter. Azure revises chat/vision and audio
+	// endpoints on separate schedules — a resource with both set up
+	// routinely runs two different versions at once (seen on a real
+	// resource: chat on a newer preview than Whisper) — so these are never
+	// assumed equal, even though a user with simpler needs can set them to
+	// the same value.
+	ChatAPIVersion       string
+	TranscribeAPIVersion string
 	// ChatDeployment serves both text and vision: Azure deploys one model
 	// per name, so vision only works once a vision-capable model (e.g.
 	// GPT-4o) is the model deployed under this name.
@@ -65,7 +69,8 @@ func (g *Gateway) SetConfig(cfg Config) {
 	g.mu.Lock()
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	cfg.Endpoint = strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
-	cfg.APIVersion = strings.TrimSpace(cfg.APIVersion)
+	cfg.ChatAPIVersion = strings.TrimSpace(cfg.ChatAPIVersion)
+	cfg.TranscribeAPIVersion = strings.TrimSpace(cfg.TranscribeAPIVersion)
 	cfg.ChatDeployment = strings.TrimSpace(cfg.ChatDeployment)
 	cfg.TranscribeDeployment = strings.TrimSpace(cfg.TranscribeDeployment)
 	g.cfg = cfg
@@ -81,14 +86,14 @@ func (g *Gateway) config() Config {
 // Configured covers chat and vision (one deployment serves both).
 func (g *Gateway) Configured() bool {
 	c := g.config()
-	return c.APIKey != "" && c.Endpoint != "" && c.APIVersion != "" && c.ChatDeployment != ""
+	return c.APIKey != "" && c.Endpoint != "" && c.ChatAPIVersion != "" && c.ChatDeployment != ""
 }
 
 // TranscribeConfigured is separate from Configured: a resource may have a
 // chat deployment but no transcription one, or vice versa.
 func (g *Gateway) TranscribeConfigured() bool {
 	c := g.config()
-	return c.APIKey != "" && c.Endpoint != "" && c.APIVersion != "" && c.TranscribeDeployment != ""
+	return c.APIKey != "" && c.Endpoint != "" && c.TranscribeAPIVersion != "" && c.TranscribeDeployment != ""
 }
 
 type chatMessage struct {
@@ -141,7 +146,7 @@ func userContent(in domain.Request) any {
 
 func (g *Gateway) chatURL(cfg Config) string {
 	return fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s",
-		cfg.Endpoint, cfg.ChatDeployment, cfg.APIVersion)
+		cfg.Endpoint, cfg.ChatDeployment, cfg.ChatAPIVersion)
 }
 
 func (g *Gateway) newChatRequest(ctx context.Context, in domain.Request, instructions string, stream bool) (*http.Request, Config, error) {
@@ -302,7 +307,7 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	}
 	out := domain.Transcript{UploadBytes: body.Len()}
 	url := fmt.Sprintf("%s/openai/deployments/%s/audio/transcriptions?api-version=%s",
-		cfg.Endpoint, cfg.TranscribeDeployment, cfg.APIVersion)
+		cfg.Endpoint, cfg.TranscribeDeployment, cfg.TranscribeAPIVersion)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
 	if err != nil {
 		return out, err

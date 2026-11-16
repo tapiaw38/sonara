@@ -167,9 +167,13 @@ func (s *store) saveUIPreferences(preferences UIPreferences) error {
 // unit. APIKey is never read back by the UI (same policy as the OpenAI key);
 // it is only ever written here.
 type AzureOpenAISettings struct {
-	APIKey               string `json:"apiKey"`
-	Endpoint             string `json:"endpoint"`
-	APIVersion           string `json:"apiVersion"`
+	APIKey   string `json:"apiKey"`
+	Endpoint string `json:"endpoint"`
+	// Chat and transcription are versioned independently on Azure's own
+	// schedule; a resource using both routinely runs two different values at
+	// once (confirmed against a real Azure resource that does exactly this).
+	ChatAPIVersion       string `json:"chatApiVersion"`
+	TranscribeAPIVersion string `json:"transcribeApiVersion"`
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
 }

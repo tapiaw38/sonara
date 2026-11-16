@@ -142,8 +142,8 @@ export function SetAudioSource(arg1) {
   return window['go']['main']['App']['SetAudioSource'](arg1);
 }
 
-export function SetAzureOpenAIConfig(arg1, arg2, arg3, arg4, arg5, arg6) {
-  return window['go']['main']['App']['SetAzureOpenAIConfig'](arg1, arg2, arg3, arg4, arg5, arg6);
+export function SetAzureOpenAIConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['SetAzureOpenAIConfig'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function SetDeepSeekAPIKey(arg1) {

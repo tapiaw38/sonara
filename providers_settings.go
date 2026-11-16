@@ -137,7 +137,8 @@ func (a *App) SetMeetingProvider(name string) error {
 type AzureOpenAIForm struct {
 	HasKey               bool   `json:"hasKey"`
 	Endpoint             string `json:"endpoint"`
-	APIVersion           string `json:"apiVersion"`
+	ChatAPIVersion       string `json:"chatApiVersion"`
+	TranscribeAPIVersion string `json:"transcribeApiVersion"`
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
 }
@@ -156,16 +157,19 @@ func (a *App) GetAzureOpenAISettings() (AzureOpenAIForm, error) {
 		return AzureOpenAIForm{}, err
 	}
 	return AzureOpenAIForm{
-		HasKey: stored.APIKey != "", Endpoint: stored.Endpoint, APIVersion: stored.APIVersion,
+		HasKey: stored.APIKey != "", Endpoint: stored.Endpoint,
+		ChatAPIVersion: stored.ChatAPIVersion, TranscribeAPIVersion: stored.TranscribeAPIVersion,
 		ChatDeployment: stored.ChatDeployment, TranscribeDeployment: stored.TranscribeDeployment,
 	}, nil
 }
 
-// SetAzureOpenAIConfig saves the whole form as one unit. An empty apiKey
-// keeps whatever key is already stored (so the endpoint/deployment names can
-// be edited without retyping the key); clearing the key itself is a
-// separate, explicit action — pass clearKey=true.
-func (a *App) SetAzureOpenAIConfig(endpoint, apiVersion, chatDeployment, transcribeDeployment, apiKey string, clearKey bool) error {
+// SetAzureOpenAIConfig saves the whole form as one unit. Chat and
+// transcription each get their own API version (see
+// azureopenai.Config.ChatAPIVersion): Azure can run them at different
+// versions on the same resource. An empty apiKey keeps whatever key is
+// already stored (so the rest can be edited without retyping it); clearing
+// the key itself is a separate, explicit action — pass clearKey=true.
+func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersion, chatDeployment, transcribeDeployment, apiKey string, clearKey bool) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")
 	}
@@ -174,8 +178,11 @@ func (a *App) SetAzureOpenAIConfig(endpoint, apiVersion, chatDeployment, transcr
 	a.mu.RUnlock()
 
 	settings := AzureOpenAISettings{
-		Endpoint: strings.TrimSpace(endpoint), APIVersion: strings.TrimSpace(apiVersion),
-		ChatDeployment: strings.TrimSpace(chatDeployment), TranscribeDeployment: strings.TrimSpace(transcribeDeployment),
+		Endpoint:             strings.TrimSpace(endpoint),
+		ChatAPIVersion:       strings.TrimSpace(chatAPIVersion),
+		TranscribeAPIVersion: strings.TrimSpace(transcribeAPIVersion),
+		ChatDeployment:       strings.TrimSpace(chatDeployment),
+		TranscribeDeployment: strings.TrimSpace(transcribeDeployment),
 	}
 	switch {
 	case clearKey:
@@ -189,7 +196,8 @@ func (a *App) SetAzureOpenAIConfig(endpoint, apiVersion, chatDeployment, transcr
 	}
 
 	if err := a.backend.SetAzureOpenAIConfig(sonaraBackend.AzureConfig{
-		APIKey: settings.APIKey, Endpoint: settings.Endpoint, APIVersion: settings.APIVersion,
+		APIKey: settings.APIKey, Endpoint: settings.Endpoint,
+		ChatAPIVersion: settings.ChatAPIVersion, TranscribeAPIVersion: settings.TranscribeAPIVersion,
 		ChatDeployment: settings.ChatDeployment, TranscribeDeployment: settings.TranscribeDeployment,
 	}); err != nil {
 		return err

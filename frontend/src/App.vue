@@ -18,7 +18,8 @@ const deepseekMessage = ref('')
 const geminiKey = ref('')
 const geminiMessage = ref('')
 const azureEndpoint = ref('')
-const azureApiVersion = ref('')
+const azureChatApiVersion = ref('')
+const azureTranscribeApiVersion = ref('')
 const azureChatDeployment = ref('')
 const azureTranscribeDeployment = ref('')
 const azureKey = ref('')
@@ -522,7 +523,8 @@ async function loadAzureSettings() {
   try {
     const form = await GetAzureOpenAISettings()
     azureEndpoint.value = form.endpoint
-    azureApiVersion.value = form.apiVersion
+    azureChatApiVersion.value = form.chatApiVersion
+    azureTranscribeApiVersion.value = form.transcribeApiVersion
     azureChatDeployment.value = form.chatDeployment
     azureTranscribeDeployment.value = form.transcribeDeployment
     azureHasKey.value = form.hasKey
@@ -580,7 +582,7 @@ async function saveAzureConfig(clearKey: boolean) {
   savingAzure.value = true
   azureMessage.value = ''
   try {
-    await SetAzureOpenAIConfig(azureEndpoint.value, azureApiVersion.value, azureChatDeployment.value, azureTranscribeDeployment.value, azureKey.value, clearKey)
+    await SetAzureOpenAIConfig(azureEndpoint.value, azureChatApiVersion.value, azureTranscribeApiVersion.value, azureChatDeployment.value, azureTranscribeDeployment.value, azureKey.value, clearKey)
     azureKey.value = ''
     await loadAzureSettings() // reload hasKey from the backend rather than guess it here
     azureMessage.value = clearKey ? 'Clave quitada.' : 'Guardado. Elegí Azure en "Proveedores" para usarlo.'
@@ -889,7 +891,8 @@ async function sendMessage() {
         <div class="settings-section"><h3>DeepSeek</h3><form class="api-key-form" @submit.prevent="saveDeepSeekKey"><label for="deepseek-key">API key</label><input id="deepseek-key" v-model="deepseekKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Modelo más barato para texto, visión o transcripción. Guardar la clave no cambia nada por sí solo: elegí DeepSeek en "Proveedores" para cada capacidad donde lo quieras usar.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !deepseekKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="deepseekKey = ''; saveDeepSeekKey()">Quitar</button></div><small v-if="deepseekMessage" role="status">{{ deepseekMessage }}</small></form></div>
         <div class="settings-section"><h3>Azure OpenAI</h3><form class="api-key-form" @submit.prevent="saveAzureConfig(false)">
           <label for="azure-endpoint">Endpoint</label><input id="azure-endpoint" v-model="azureEndpoint" autocomplete="off" spellcheck="false" placeholder="https://tu-recurso.openai.azure.com" />
-          <label for="azure-api-version">Versión de API</label><input id="azure-api-version" v-model="azureApiVersion" autocomplete="off" spellcheck="false" placeholder="2024-06-01" />
+          <label for="azure-chat-api-version">Versión de API (chat/visión)</label><input id="azure-chat-api-version" v-model="azureChatApiVersion" autocomplete="off" spellcheck="false" placeholder="2024-06-01" />
+          <label for="azure-transcribe-api-version">Versión de API (transcripción)</label><input id="azure-transcribe-api-version" v-model="azureTranscribeApiVersion" autocomplete="off" spellcheck="false" placeholder="puede ser distinta de la de chat" />
           <label for="azure-chat-deployment">Deployment de chat/visión</label><input id="azure-chat-deployment" v-model="azureChatDeployment" autocomplete="off" spellcheck="false" placeholder="Nombre del deployment" />
           <label for="azure-transcribe-deployment">Deployment de transcripción</label><input id="azure-transcribe-deployment" v-model="azureTranscribeDeployment" autocomplete="off" spellcheck="false" placeholder="Nombre del deployment (opcional)" />
           <label for="azure-key">API key</label><input id="azure-key" v-model="azureKey" type="password" autocomplete="off" spellcheck="false" :placeholder="azureHasKey ? 'Ya guardada — dejar en blanco para mantenerla' : 'Clave del recurso'" />

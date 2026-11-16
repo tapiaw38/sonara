@@ -37,7 +37,8 @@ export namespace main {
 	export class AzureOpenAIForm {
 	    hasKey: boolean;
 	    endpoint: string;
-	    apiVersion: string;
+	    chatApiVersion: string;
+	    transcribeApiVersion: string;
 	    chatDeployment: string;
 	    transcribeDeployment: string;
 	
@@ -49,7 +50,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hasKey = source["hasKey"];
 	        this.endpoint = source["endpoint"];
-	        this.apiVersion = source["apiVersion"];
+	        this.chatApiVersion = source["chatApiVersion"];
+	        this.transcribeApiVersion = source["transcribeApiVersion"];
 	        this.chatDeployment = source["chatDeployment"];
 	        this.transcribeDeployment = source["transcribeDeployment"];
 	    }

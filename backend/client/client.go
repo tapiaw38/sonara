@@ -59,7 +59,8 @@ type Transcript struct {
 type AzureConfig struct {
 	APIKey               string
 	Endpoint             string
-	APIVersion           string
+	ChatAPIVersion       string
+	TranscribeAPIVersion string
 	ChatDeployment       string
 	TranscribeDeployment string
 }
@@ -134,7 +135,8 @@ func (c *Client) SetAzureOpenAIConfig(cfg AzureConfig) error {
 		return fmt.Errorf("clave de Azure OpenAI inválida")
 	}
 	c.azure.SetConfig(azureopenai.Config{
-		APIKey: key, Endpoint: cfg.Endpoint, APIVersion: cfg.APIVersion,
+		APIKey: key, Endpoint: cfg.Endpoint,
+		ChatAPIVersion: cfg.ChatAPIVersion, TranscribeAPIVersion: cfg.TranscribeAPIVersion,
 		ChatDeployment: cfg.ChatDeployment, TranscribeDeployment: cfg.TranscribeDeployment,
 	})
 	return nil

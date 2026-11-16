@@ -14,7 +14,7 @@ import (
 func testGateway(url string) *Gateway {
 	g := NewGateway()
 	g.SetConfig(Config{
-		APIKey: "k", Endpoint: url, APIVersion: "2024-06-01",
+		APIKey: "k", Endpoint: url, ChatAPIVersion: "2024-06-01", TranscribeAPIVersion: "2024-08-01-preview",
 		ChatDeployment: "chat-deploy", TranscribeDeployment: "transcribe-deploy",
 	})
 	return g
@@ -25,12 +25,12 @@ func TestConfiguredChecksAreIndependent(t *testing.T) {
 	if g.Configured() || g.TranscribeConfigured() {
 		t.Fatal("a fresh gateway must report both as unconfigured")
 	}
-	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", APIVersion: "v", ChatDeployment: "chat"})
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", ChatAPIVersion: "v", ChatDeployment: "chat"})
 	if !g.Configured() {
 		t.Error("chat config alone should be enough for Configured")
 	}
 	if g.TranscribeConfigured() {
-		t.Error("TranscribeConfigured must stay false without a transcribe deployment")
+		t.Error("TranscribeConfigured must stay false without a transcribe deployment and its own API version")
 	}
 }
 
@@ -141,14 +141,14 @@ func TestTranscribeSendsNoModelFieldAndUsesDeploymentURL(t *testing.T) {
 	if err != nil || out.Text != "hola mundo" {
 		t.Fatalf("got %+v, %v", out, err)
 	}
-	if gotPath != "/openai/deployments/transcribe-deploy/audio/transcriptions?api-version=2024-06-01" {
+	if gotPath != "/openai/deployments/transcribe-deploy/audio/transcriptions?api-version=2024-08-01-preview" {
 		t.Errorf("path = %q", gotPath)
 	}
 }
 
 func TestTranscribeRejectsWhenNotConfigured(t *testing.T) {
 	g := NewGateway()
-	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", APIVersion: "v", ChatDeployment: "chat"}) // no transcribe deployment
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", ChatAPIVersion: "v", ChatDeployment: "chat"}) // no transcribe deployment or its API version
 	if _, err := g.Transcribe(context.Background(), nil, "", ""); err == nil {
 		t.Fatal("missing the transcribe deployment must refuse, not fall back to the chat one")
 	}

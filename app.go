@@ -205,7 +205,8 @@ func (a *App) startup(ctx context.Context) {
 			logf("stored Azure OpenAI settings unreadable: %v", err)
 		} else if azure.APIKey != "" {
 			if err := a.backend.SetAzureOpenAIConfig(sonaraBackend.AzureConfig{
-				APIKey: azure.APIKey, Endpoint: azure.Endpoint, APIVersion: azure.APIVersion,
+				APIKey: azure.APIKey, Endpoint: azure.Endpoint,
+				ChatAPIVersion: azure.ChatAPIVersion, TranscribeAPIVersion: azure.TranscribeAPIVersion,
 				ChatDeployment: azure.ChatDeployment, TranscribeDeployment: azure.TranscribeDeployment,
 			}); err != nil {
 				logf("stored Azure OpenAI settings rejected: %v", err)

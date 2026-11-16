@@ -49,11 +49,11 @@ func TestSetProviderRejectsUnknownName(t *testing.T) {
 func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 	a, database := testMeetingApp(t)
 	a.backend = sonaraBackend.New()
-	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "chat", "transcribe", "secret-key", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "secret-key", false); err != nil {
 		t.Fatal(err)
 	}
 	// Edit only the endpoint, leaving apiKey blank: the stored key must survive.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "chat", "transcribe", "", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "", false); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := database.azureOpenAISettings()
@@ -66,7 +66,7 @@ func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 	}
 
 	// clearKey explicitly removes it even with endpoint/deployments present.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "chat", "transcribe", "", true); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "", true); err != nil {
 		t.Fatal(err)
 	}
 	form, _ = a.GetAzureOpenAISettings()
