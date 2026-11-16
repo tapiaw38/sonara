@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetDeepSeekAPIKey, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
+import MeetingTranscript from './components/MeetingTranscript.vue'
 
 type Message = { role: 'user' | 'assistant'; text: string; time: string }
 type AudioSourceOption = { target: string; label: string; running: boolean; meeting: boolean }
 type SessionRow = { id: string; startedAt: string; mode: string; language: string; messages: number; preview: string; title: string }
 
 const listening = ref(false)
+// 'meeting' is the transcription view; the four copilot modes share 'copilot'.
+// It is UI-only: the copilot keeps its own mode and session underneath.
+const view = ref<'copilot' | 'meeting'>('copilot')
+const meetingSessionID = ref('')
+const deepseekKey = ref('')
+const deepseekMessage = ref('')
 const draft = ref('')
 const transcript = ref('Esperando audio de la reunión…')
 const messages = ref<Message[]>([])
@@ -279,6 +286,11 @@ async function setMode(mode: string) {
   localStorage.setItem('sonara-mode', assistantMode.value)
 }
 
+async function selectMode(mode: string) {
+  view.value = 'copilot'
+  await setMode(mode)
+}
+
 const legacySessionProfilePrefix = 'sonara-session-profile:'
 function legacySessionProfileKey(id: string) { return `${legacySessionProfilePrefix}${id}` }
 
@@ -390,7 +402,17 @@ async function refreshSessions() {
 // Reopening replaces the conversation and shows every saved message. The
 // backend keeps only the recent messages in prompt context.
 async function openSession(id: string) {
+  const row = sessions.value.find((item) => item.id === id)
+  // A saved meeting is read, not resumed: opening it must not replace the
+  // copilot's conversation, so it never goes through OpenSession.
+  if (row?.mode === 'meeting') {
+    meetingSessionID.value = id
+    view.value = 'meeting'
+    showMobileSessions.value = false
+    return
+  }
   if (id === currentSessionID.value) return
+  view.value = 'copilot'
   try {
     const opened = await OpenSession(id)
     const selected = sessions.value.find((row) => row.id === id)
@@ -488,6 +510,22 @@ async function saveApiKey() {
     apiKeyMessage.value = endpoint.value.includes('Falta') ? 'API key eliminada de esta sesión' : 'API key configurada para esta sesión'
   } catch (error) {
     apiKeyMessage.value = String(error || 'No se pudo guardar la API key')
+  } finally {
+    savingApiKey.value = false
+  }
+}
+
+async function saveDeepSeekKey() {
+  if (savingApiKey.value) return
+  savingApiKey.value = true
+  deepseekMessage.value = ''
+  try {
+    const removing = !deepseekKey.value
+    await SetDeepSeekAPIKey(deepseekKey.value)
+    deepseekKey.value = ''
+    deepseekMessage.value = removing ? 'Clave quitada: se usa OpenAI.' : 'Clave guardada: las reuniones se transcriben con DeepSeek.'
+  } catch (error) {
+    deepseekMessage.value = String(error || 'No se pudo guardar la clave')
   } finally {
     savingApiKey.value = false
   }
@@ -667,10 +705,11 @@ async function sendMessage() {
     <header class="topbar">
       <div class="brand"><img class="brand-mark" src="/sonara-logo.png" alt="" /><span>SONARA</span></div>
       <nav class="product-nav" aria-label="Modo de trabajo">
-        <button :class="{ active: assistantMode === 'interview' }" @click="setMode('interview')">En vivo</button>
-        <button :class="{ active: assistantMode === 'daily' }" @click="setMode('daily')">Reunión</button>
-        <button :class="{ active: assistantMode === 'coding' }" @click="setMode('coding')">Coding</button>
-        <button :class="{ active: assistantMode === 'coaching' }" @click="setMode('coaching')">Coaching</button>
+        <button :class="{ active: view === 'copilot' && assistantMode === 'interview' }" @click="selectMode('interview')">En vivo</button>
+        <button :class="{ active: view === 'copilot' && assistantMode === 'daily' }" @click="selectMode('daily')">Reunión</button>
+        <button :class="{ active: view === 'copilot' && assistantMode === 'coding' }" @click="selectMode('coding')">Coding</button>
+        <button :class="{ active: view === 'copilot' && assistantMode === 'coaching' }" @click="selectMode('coaching')">Coaching</button>
+        <button :class="{ active: view === 'meeting' }" @click="view = 'meeting'">Transcribir</button>
       </nav>
       <div class="meeting-state"><span class="status-dot" :class="statusClass"></span>{{ statusLabel }}</div>
       <div class="overlay-controls">
@@ -705,10 +744,10 @@ async function sendMessage() {
         <div id="saved-sessions" class="session-history" :class="{ 'mobile-open': showMobileSessions }">
           <div class="section-label">GUARDADAS <button class="session-refresh" title="Actualizar lista" aria-label="Actualizar sesiones guardadas" @click="refreshSessions">↻</button></div>
           <ul v-if="sessions.length" class="session-list">
-            <li v-for="row in sessions" :key="row.id" class="session-row" :class="{ current: row.id === currentSessionID }">
-              <button class="session-open" :disabled="row.id === currentSessionID" :title="row.preview || 'Sesión sin mensajes'" @click="openSession(row.id)">
-                <strong>{{ sessionLabel(row) }}<span v-if="row.id === currentSessionID"> · en curso</span></strong>
-                <small>{{ sessionDate(row) }} · {{ row.messages }} msg{{ row.title ? '' : ' · ' + row.mode }}</small>
+            <li v-for="row in sessions" :key="row.id" class="session-row" :class="{ current: row.mode !== 'meeting' && row.id === currentSessionID }">
+              <button class="session-open" :disabled="row.mode === 'meeting' ? (view === 'meeting' && row.id === meetingSessionID) : row.id === currentSessionID" :title="row.preview || 'Sesión sin mensajes'" @click="openSession(row.id)">
+                <strong><span v-if="row.mode === 'meeting'">◔ </span>{{ sessionLabel(row) }}<span v-if="row.mode !== 'meeting' && row.id === currentSessionID"> · en curso</span></strong>
+                <small>{{ sessionDate(row) }} · {{ row.messages }} {{ row.mode === 'meeting' ? 'frag' : 'msg' }}{{ row.title ? '' : ' · ' + row.mode }}</small>
               </button>
               <button v-if="row.id !== currentSessionID" class="session-delete" title="Borrar sesión" :aria-label="'Borrar sesión ' + sessionLabel(row)" @click="removeSession(row.id)">×</button>
             </li>
@@ -720,6 +759,8 @@ async function sendMessage() {
       <div class="sidebar-resizer" role="separator" aria-label="Cambiar ancho de barra lateral" aria-orientation="vertical" tabindex="0" :aria-valuenow="sidebarWidth" aria-valuemin="160" aria-valuemax="420" @pointerdown="startSidebarResize" @pointermove="resizeSidebar" @pointerup="stopSidebarResize" @pointercancel="stopSidebarResize" @lostpointercapture="stopSidebarResize" @keydown.left.prevent="nudgeSidebar(-16)" @keydown.right.prevent="nudgeSidebar(16)"></div>
 
       <div class="content">
+        <MeetingTranscript v-if="view === 'meeting'" :session-id="meetingSessionID" @opened="meetingSessionID = $event" @sessions-changed="refreshSessions" />
+        <template v-else>
         <div class="content-header">
           <div><p class="eyebrow">{{ assistantModeLabel.toUpperCase() }} · SESIÓN ACTUAL</p><h1>{{ assistantModeTitle }}</h1><p class="workspace-subtitle">Escucha la conversación y prepara respuestas mientras hablas.</p></div>
           <div class="content-actions"><button class="session-setup-trigger" @click="showSessionSetup = true">＋ Contexto</button><button class="ghost-button" :class="{ scanning: analyzingCapture }" @click="captureScreen">{{ analyzingCapture ? '◌ Analizando' : '⌘ Capturar' }}</button></div>
@@ -746,6 +787,7 @@ async function sendMessage() {
           </section>
         </div>
 
+        </template>
         <footer class="footer"><span>{{ captureStatus }} · Ctrl+Alt+C</span><span class="footer-right"><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span></footer>
       </div>
     </section>
@@ -755,6 +797,7 @@ async function sendMessage() {
         <header class="dialog-header"><div><p class="eyebrow">SONARA</p><h2 id="settings-title">Configuración</h2></div><button class="dialog-close" aria-label="Cerrar configuración" @click="showSettings = false">×</button></header>
         <div class="settings-section"><h3>Audio</h3><label for="settings-audio-source">Fuente de captura</label><div class="audio-source-controls"><select id="settings-audio-source" :value="selectedAudioSource" @change="selectAudioSource(($event.target as HTMLSelectElement).value)"><option value="">Automática</option><option v-for="source in audioSources" :key="source.target" :value="source.target">{{ source.label }} · #{{ source.target }}{{ source.running ? ' · activo' : '' }}</option></select><button title="Actualizar fuentes" aria-label="Actualizar fuentes de audio" @click="refreshAudioSources">↻</button></div><small v-if="audioGuessing" class="audio-source-hint guessing">Hay {{ audioCandidates }} fuentes posibles; revisa cuál corresponde a la reunión.</small><small v-if="audioSourceMessage" class="audio-source-hint">{{ audioSourceMessage }}</small><label>Idioma hablado</label><div class="language-switch"><button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button><button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button></div></div>
         <div class="settings-section"><h3>OpenAI</h3><form class="api-key-form" @submit.prevent="saveApiKey"><label for="openai-key">API key</label><input id="openai-key" v-model="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Se guarda localmente en la configuración de Sonara.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !apiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="apiKey = ''; saveApiKey()">Quitar</button></div><small v-if="apiKeyMessage" role="status">{{ apiKeyMessage }}</small><small class="endpoint-status">{{ endpoint || 'Sin conectar' }}</small></form></div>
+        <div class="settings-section"><h3>DeepSeek</h3><form class="api-key-form" @submit.prevent="saveDeepSeekKey"><label for="deepseek-key">API key</label><input id="deepseek-key" v-model="deepseekKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Transcribe las reuniones con un modelo más barato: el audio se envía a DeepSeek. Sin clave, se usa OpenAI. Las capturas de pantalla siempre van a OpenAI.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !deepseekKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="deepseekKey = ''; saveDeepSeekKey()">Quitar</button></div><small v-if="deepseekMessage" role="status">{{ deepseekMessage }}</small></form></div>
       </section>
     </div>
 

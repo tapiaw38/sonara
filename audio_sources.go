@@ -17,6 +17,20 @@ func availableAudioSources(ctx context.Context) ([]AudioSource, error) {
 	return parseAudioSources(output)
 }
 
+func availableMicrophones(ctx context.Context) ([]AudioSource, error) {
+	output, err := exec.CommandContext(ctx, "pw-dump").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseMicrophones(output)
+}
+
+// Microphones lists capture devices (PipeWire Audio/Source nodes), kept apart
+// from AudioSources so the UI can never offer an output stream as a microphone.
+func (a *App) Microphones() ([]AudioSource, error) {
+	return availableMicrophones(a.requestContext())
+}
+
 func (a *App) AudioSources() ([]AudioSource, error) {
 	return availableAudioSources(a.requestContext())
 }
@@ -163,6 +177,60 @@ func adoptPreferredApp(sources []AudioSource, preferred string) (string, error) 
 	return match, nil
 }
 
+// serialTarget is the pw-record target for a node: its object.serial, falling
+// back to the node name.
+func serialTarget(props map[string]any) string {
+	switch value := props["object.serial"].(type) {
+	case float64:
+		if value > 0 {
+			return strconv.FormatInt(int64(value), 10)
+		}
+	case string:
+		if _, err := strconv.ParseUint(value, 10, 64); err == nil {
+			return value
+		}
+	}
+	name, _ := props["node.name"].(string)
+	return name
+}
+
+// parseMicrophones keeps real capture devices only. Monitors of output sinks
+// are not Audio/Source nodes, so system sounds and notifications never appear
+// as a microphone. App carries the stable node name used to remember the pick.
+func parseMicrophones(output []byte) ([]AudioSource, error) {
+	var nodes []struct {
+		Type string `json:"type"`
+		Info struct {
+			State string         `json:"state"`
+			Props map[string]any `json:"props"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(output, &nodes); err != nil {
+		return nil, err
+	}
+	sources := make([]AudioSource, 0)
+	for _, node := range nodes {
+		props := node.Info.Props
+		if node.Type != "PipeWire:Interface:Node" || props["media.class"] != "Audio/Source" {
+			continue
+		}
+		name, _ := props["node.name"].(string)
+		target := serialTarget(props)
+		if name == "" || target == "" {
+			continue
+		}
+		label, _ := props["node.description"].(string)
+		if strings.TrimSpace(label) == "" {
+			label = name
+		}
+		sources = append(sources, AudioSource{
+			Target: target, Label: label, Running: node.Info.State == "running",
+			App: name, Kind: kindInput,
+		})
+	}
+	return sources, nil
+}
+
 func parseAudioSources(output []byte) ([]AudioSource, error) {
 	var nodes []struct {
 		Type string `json:"type"`
@@ -184,22 +252,7 @@ func parseAudioSources(output []byte) ([]AudioSource, error) {
 		if !isMeetingAudioIdentity(identity) {
 			continue
 		}
-		target := ""
-		switch value := props["object.serial"].(type) {
-		case float64:
-			if value > 0 {
-				target = strconv.FormatInt(int64(value), 10)
-			}
-		case string:
-			if _, err := strconv.ParseUint(value, 10, 64); err == nil {
-				target = value
-			}
-		}
-		if target == "" {
-			if name, ok := props["node.name"].(string); ok {
-				target = name
-			}
-		}
+		target := serialTarget(props)
 		if target == "" {
 			continue
 		}
@@ -217,6 +270,7 @@ func parseAudioSources(output []byte) ([]AudioSource, error) {
 			Target: target, Label: label, Running: node.Info.State == "running",
 			Meeting: strings.Contains(strings.ToLower(appName+" "+binaryName), "teams"),
 			App:     strings.ToLower(strings.TrimSpace(appName + " " + binaryName)),
+			Kind:    kindOutput,
 		})
 	}
 	return sources, nil

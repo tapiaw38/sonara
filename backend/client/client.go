@@ -6,7 +6,10 @@ import (
 	"strings"
 	"sync"
 
+	"sonara/backend/internal/adapters/web/integrations/deepseek"
 	"sonara/backend/internal/adapters/web/integrations/openai"
+	"sonara/backend/internal/adapters/web/integrations/router"
+	"sonara/backend/internal/domain"
 	"sonara/backend/internal/platform/config"
 	"sonara/backend/internal/usecases/assistant"
 )
@@ -15,10 +18,15 @@ type Client struct {
 	mu         sync.RWMutex
 	cfg        config.Config
 	provider   openai.Gateway
+	deepseek   *deepseek.Gateway
 	respond    assistant.RespondUsecase
 	screen     assistant.AnalyzeScreenUsecase
 	transcribe assistant.TranscribeUsecase
-	title      assistant.TitleUsecase
+	// meeting transcribes meeting recordings; it may use a different provider
+	// from the live copilot's transcribe.
+	meeting         assistant.TranscribeUsecase
+	meetingProvider *router.Transcriber
+	title           assistant.TitleUsecase
 }
 
 type Response struct {
@@ -39,12 +47,19 @@ type Transcript struct {
 func New() *Client {
 	cfg := config.Load()
 	provider := openai.NewGateway(cfg)
+	cheap := deepseek.NewGateway(cfg)
+	// Text and audio go to DeepSeek when preferred and keyed; anything with an
+	// image, and any DeepSeek failure, goes to OpenAI.
+	routed := router.New(provider, cheap, cheap.Configured, cfg.TextProvider)
+	meeting := routed.Transcriber(cfg.MeetingProvider)
 	return &Client{
-		cfg: cfg, provider: provider,
-		respond:    assistant.NewRespondUsecase(provider, cfg),
-		screen:     assistant.NewAnalyzeScreenUsecase(provider, cfg),
-		transcribe: assistant.NewTranscribeUsecase(provider, cfg.TranscribeModel),
-		title:      assistant.NewTitleUsecase(provider, cfg),
+		cfg: cfg, provider: provider, deepseek: cheap,
+		respond:         assistant.NewRespondUsecase(routed, cfg),
+		screen:          assistant.NewAnalyzeScreenUsecase(routed, cfg),
+		transcribe:      assistant.NewTranscribeUsecase(routed.Transcriber(cfg.TranscribeProvider), cfg.TranscribeModel),
+		meeting:         assistant.NewTranscribeUsecase(meeting, cfg.TranscribeModel),
+		meetingProvider: meeting,
+		title:           assistant.NewTitleUsecase(routed, cfg),
 	}
 }
 
@@ -60,6 +75,26 @@ func (c *Client) Status() string {
 		return "Falta OPENAI_API_KEY"
 	}
 	return "API key configurada"
+}
+
+// SetDeepSeekKey is SetAPIKey for the cheaper provider; an empty key turns
+// DeepSeek off and everything falls back to OpenAI.
+func (c *Client) SetDeepSeekKey(key string) error {
+	key = strings.TrimSpace(key)
+	if key != "" && (len(key) < 20 || len(key) > 500 || strings.ContainsAny(key, " \t\r\n")) {
+		return fmt.Errorf("API key de DeepSeek inválida")
+	}
+	c.deepseek.SetAPIKey(key)
+	return nil
+}
+
+// MeetingProvider names who transcribes meeting audio right now, so the UI can
+// say where the audio is going before recording starts.
+func (c *Client) MeetingProvider() string { return c.meetingProvider.Provider() }
+
+// TranscribeMeeting is Transcribe for meeting recordings.
+func (c *Client) TranscribeMeeting(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {
+	return toTranscript(c.meeting.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language}))
 }
 
 // SetAPIKey updates key in memory only. It is never returned to the UI or persisted.
@@ -104,7 +139,10 @@ func (c *Client) AnalyzeScreen(ctx context.Context, imageData, prompt string) (R
 }
 
 func (c *Client) Transcribe(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {
-	output, err := c.transcribe.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language})
+	return toTranscript(c.transcribe.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language}))
+}
+
+func toTranscript(output *domain.Transcript, err error) (Transcript, error) {
 	if output == nil {
 		return Transcript{}, err
 	}

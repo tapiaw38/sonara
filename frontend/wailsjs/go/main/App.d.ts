@@ -16,6 +16,8 @@ export function DeleteSession(arg1:string):Promise<Array<main.SessionSummary>>;
 
 export function DiscardPendingSegment():Promise<boolean>;
 
+export function ExportMeetingTranscript(arg1:string):Promise<string>;
+
 export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
 
 export function GetUIPreferences():Promise<main.UIPreferences>;
@@ -26,13 +28,27 @@ export function LastCapture():Promise<main.CaptureStatus>;
 
 export function ListeningStatus():Promise<main.ListeningState>;
 
+export function MeetingProvider():Promise<string>;
+
+export function MeetingTranscriptSegments(arg1:string):Promise<main.MeetingView>;
+
+export function MeetingTranscriptStatus():Promise<main.MeetingStatus>;
+
+export function Microphones():Promise<Array<main.AudioSource>>;
+
 export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
 
+export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string):Promise<Record<string, string>>;
+
+export function RetryMeetingSegments(arg1:string):Promise<number>;
+
 export function SaveSessionProfile(arg1:string,arg2:main.SessionProfile):Promise<void>;
 
 export function SaveUIPreferences(arg1:main.UIPreferences):Promise<void>;
+
+export function SelectedMicrophone():Promise<string>;
 
 export function SendMessage(arg1:string):Promise<main.AnalysisResult>;
 
@@ -46,12 +62,20 @@ export function SetAudioLanguage(arg1:string):Promise<string>;
 
 export function SetAudioSource(arg1:string):Promise<string>;
 
+export function SetDeepSeekAPIKey(arg1:string):Promise<void>;
+
 export function SetManualSend(arg1:boolean):Promise<boolean>;
+
+export function SetMicrophone(arg1:string):Promise<string>;
 
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
 
 export function StartListening():Promise<boolean>;
 
+export function StartMeetingTranscript():Promise<main.MeetingStatus>;
+
 export function StopListening():Promise<boolean>;
+
+export function StopMeetingTranscript():Promise<main.MeetingStatus>;
 
 export function ToggleAlwaysOnTop():Promise<boolean>;

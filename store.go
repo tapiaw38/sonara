@@ -33,6 +33,11 @@ const (
 	// but the application is stable, so this is what makes the choice stick.
 	settingAudioApp      = "preferred_audio_app"
 	settingUIPreferences = "ui_preferences"
+	// settingDeepSeekKey is the DeepSeek key, stored like the OpenAI one.
+	settingDeepSeekKey = "deepseek_api_key"
+	// settingMicrophone remembers the microphone by PipeWire node name: the
+	// serial is recreated on every boot, the name is stable.
+	settingMicrophone = "preferred_microphone"
 )
 
 func storePath() (string, error) {
@@ -312,8 +317,10 @@ func (s *store) sessionMessages(sessionID string) ([]SessionViewMessage, error) 
 func (s *store) recentSessions(limit int) ([]SessionSummary, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.started_at, s.mode, s.language, s.title,
-		       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id),
-		       COALESCE((SELECT m.text FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.id ASC LIMIT 1), '')
+		       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id)
+		         + (SELECT COUNT(*) FROM transcript_segments t WHERE t.session_id = s.id AND t.status = 'ok'),
+		       COALESCE((SELECT m.text FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.id ASC LIMIT 1),
+		                (SELECT t.text FROM transcript_segments t WHERE t.session_id = s.id AND t.status = 'ok' ORDER BY t.start_ms, t.id LIMIT 1), '')
 		FROM sessions s ORDER BY s.started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -426,6 +433,9 @@ func (a *App) DeleteSession(id string) ([]SessionSummary, error) {
 	}
 	if id == current {
 		return nil, fmt.Errorf("no se puede borrar la sesión en curso")
+	}
+	if a.meetingInProgress(id) {
+		return nil, fmt.Errorf("no se puede borrar una reunión que se está grabando")
 	}
 	if err := database.deleteSession(id); err != nil {
 		return nil, err

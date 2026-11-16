@@ -62,6 +62,12 @@ type App struct {
 	audioLanguage       string
 	translation         string
 	floatedForOverlay   bool
+	// Meeting transcription state, independent of the copilot's listening.
+	meeting           *meetingRun
+	preferredMic      string
+	emitHook          func(event string, data any)
+	meetingTranscribe meetingTranscriber
+	saveDialog        func(ctx context.Context, filename string) (string, error)
 }
 
 type sessionMessage struct {
@@ -87,7 +93,15 @@ type AudioSource struct {
 	// App is the owning application, which survives the stream itself: a serial
 	// identifies one node, and meeting apps replace nodes mid-call.
 	App string `json:"app"`
+	// Kind tells the UI which list this belongs to; an output stream must never
+	// be offered as a microphone.
+	Kind string `json:"kind"`
 }
+
+const (
+	kindOutput = "output"
+	kindInput  = "input"
+)
 
 type CaptureStatus struct {
 	Path       string `json:"path"`
@@ -169,6 +183,16 @@ func (a *App) startup(ctx context.Context) {
 			a.mu.Unlock()
 			logf("preferred audio application restored: %q", app)
 		}
+		if key := database.setting(settingDeepSeekKey); key != "" {
+			if err := a.backend.SetDeepSeekKey(key); err != nil {
+				logf("stored DeepSeek key rejected: %v", err)
+			}
+		}
+		if mic := database.setting(settingMicrophone); mic != "" {
+			a.mu.Lock()
+			a.preferredMic = mic
+			a.mu.Unlock()
+		}
 		if language == "" {
 			language = "es"
 		}
@@ -186,6 +210,8 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown closes the store so SQLite can finish its journal cleanly.
 func (a *App) shutdown(context.Context) {
+	// Before the store closes: pending meeting blocks still have to be written.
+	a.stopMeetingAndWait(15 * time.Second)
 	a.mu.Lock()
 	database := a.store
 	a.store = nil
@@ -593,6 +619,37 @@ func (a *App) SetOpenAIAPIKey(key string) error {
 		return fmt.Errorf("la key quedó activa pero no se pudo guardar: %w", err)
 	}
 	return nil
+}
+
+// SetDeepSeekAPIKey configures the cheaper provider for meeting audio and text.
+// An empty key turns it off and everything goes back to OpenAI.
+func (a *App) SetDeepSeekAPIKey(key string) error {
+	if a.backend == nil {
+		return fmt.Errorf("backend no inicializado")
+	}
+	if err := a.backend.SetDeepSeekKey(key); err != nil {
+		return err
+	}
+	a.mu.RLock()
+	database := a.store
+	a.mu.RUnlock()
+	if database == nil {
+		return nil
+	}
+	if err := database.setSetting(settingDeepSeekKey, strings.TrimSpace(key)); err != nil {
+		logf("could not persist the DeepSeek key: %v", err)
+		return fmt.Errorf("la key quedó activa pero no se pudo guardar: %w", err)
+	}
+	return nil
+}
+
+// MeetingProvider names who transcribes meeting audio ("deepseek" or
+// "openai"), so the UI can say where the audio goes before recording.
+func (a *App) MeetingProvider() string {
+	if a.backend == nil {
+		return ""
+	}
+	return a.backend.MeetingProvider()
 }
 
 func capturePath() (string, error) {

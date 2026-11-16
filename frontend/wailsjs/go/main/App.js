@@ -30,6 +30,10 @@ export function DiscardPendingSegment() {
   return window['go']['main']['App']['DiscardPendingSegment']();
 }
 
+export function ExportMeetingTranscript(arg1) {
+  return window['go']['main']['App']['ExportMeetingTranscript'](arg1);
+}
+
 export function GetSessionProfile(arg1) {
   return window['go']['main']['App']['GetSessionProfile'](arg1);
 }
@@ -50,6 +54,22 @@ export function ListeningStatus() {
   return window['go']['main']['App']['ListeningStatus']();
 }
 
+export function MeetingProvider() {
+  return window['go']['main']['App']['MeetingProvider']();
+}
+
+export function MeetingTranscriptSegments(arg1) {
+  return window['go']['main']['App']['MeetingTranscriptSegments'](arg1);
+}
+
+export function MeetingTranscriptStatus() {
+  return window['go']['main']['App']['MeetingTranscriptStatus']();
+}
+
+export function Microphones() {
+  return window['go']['main']['App']['Microphones']();
+}
+
 export function NewSession() {
   return window['go']['main']['App']['NewSession']();
 }
@@ -58,12 +78,24 @@ export function OpenSession(arg1) {
   return window['go']['main']['App']['OpenSession'](arg1);
 }
 
+export function RenameMeetingSpeaker(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RenameMeetingSpeaker'](arg1, arg2, arg3);
+}
+
+export function RetryMeetingSegments(arg1) {
+  return window['go']['main']['App']['RetryMeetingSegments'](arg1);
+}
+
 export function SaveSessionProfile(arg1, arg2) {
   return window['go']['main']['App']['SaveSessionProfile'](arg1, arg2);
 }
 
 export function SaveUIPreferences(arg1) {
   return window['go']['main']['App']['SaveUIPreferences'](arg1);
+}
+
+export function SelectedMicrophone() {
+  return window['go']['main']['App']['SelectedMicrophone']();
 }
 
 export function SendMessage(arg1) {
@@ -90,8 +122,16 @@ export function SetAudioSource(arg1) {
   return window['go']['main']['App']['SetAudioSource'](arg1);
 }
 
+export function SetDeepSeekAPIKey(arg1) {
+  return window['go']['main']['App']['SetDeepSeekAPIKey'](arg1);
+}
+
 export function SetManualSend(arg1) {
   return window['go']['main']['App']['SetManualSend'](arg1);
+}
+
+export function SetMicrophone(arg1) {
+  return window['go']['main']['App']['SetMicrophone'](arg1);
 }
 
 export function SetOpenAIAPIKey(arg1) {
@@ -102,8 +142,16 @@ export function StartListening() {
   return window['go']['main']['App']['StartListening']();
 }
 
+export function StartMeetingTranscript() {
+  return window['go']['main']['App']['StartMeetingTranscript']();
+}
+
 export function StopListening() {
   return window['go']['main']['App']['StopListening']();
+}
+
+export function StopMeetingTranscript() {
+  return window['go']['main']['App']['StopMeetingTranscript']();
 }
 
 export function ToggleAlwaysOnTop() {
