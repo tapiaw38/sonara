@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 	"time"
 )
 
@@ -122,6 +124,16 @@ func logDedup(key, format string, args ...any) {
 }
 
 func openLog() {
+	// logOnce is one global switch for the whole test binary: whichever test
+	// calls logf/logDedup first decides where it points, regardless of file
+	// or declaration order. Without this check, any test exercising real app
+	// logic (not just logging_test.go's own cases) could win that race and
+	// send its lines into the user's real log file instead of a test's own
+	// captured buffer.
+	if testing.Testing() {
+		logger = log.New(io.Discard, "", log.LstdFlags|log.Lshortfile)
+		return
+	}
 	path, err := logPath()
 	if err != nil {
 		// Without a cache directory stderr is all there is, and it may well be
