@@ -879,7 +879,7 @@ async function sendMessage() {
         </div>
 
         </template>
-        <footer class="footer"><span>{{ captureStatus }} · Ctrl+Alt+C</span><span class="footer-right"><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span></footer>
+        <footer class="footer"><span v-if="view === 'copilot'">{{ captureStatus }} · Ctrl+Alt+C</span><span class="footer-right"><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span></footer>
       </div>
     </section>
 

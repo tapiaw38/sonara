@@ -291,6 +291,9 @@ watch(() => props.sessionId, (id) => { void load(id) })
 
 <template>
   <div class="meeting">
+    <div class="content-header">
+      <div><p class="eyebrow">TRANSCRIBIR · {{ shownIsLive ? 'EN CURSO' : view ? 'REUNIÓN GUARDADA' : 'NUEVA' }}</p><h1>{{ view ? `Reunión · ${sessionDate(view.startedAt)}` : 'Transcripción de reunión' }}</h1><p class="workspace-subtitle">Graba micrófono y audio de la reunión por separado, con hablante y hora en cada línea.</p></div>
+    </div>
     <div class="meeting-controls panel">
       <div class="meeting-row">
         <label for="meeting-mic">Micrófono</label>
@@ -350,7 +353,7 @@ watch(() => props.sessionId, (id) => { void load(id) })
 
     <section class="panel meeting-transcript">
       <div class="panel-heading">
-        <span>{{ view ? `Reunión · ${sessionDate(view.startedAt)}` : 'Transcripción' }}</span>
+        <span>Transcripción</span>
         <span v-if="view" class="speaker-names">
           <template v-for="ref in presentSpeakers" :key="ref.track + ':' + ref.speakerKey">
             <input v-if="editing && editing.track === ref.track && editing.speakerKey === ref.speakerKey" v-model="draftName" class="speaker-input" maxlength="60" :placeholder="speaker(ref.track, ref.speakerKey)" @keydown.enter.prevent="saveName" @keydown.esc="editing = null" @blur="saveName" />
