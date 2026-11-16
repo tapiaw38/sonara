@@ -26,6 +26,10 @@ export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
+export function DeleteVoiceSample() {
+  return window['go']['main']['App']['DeleteVoiceSample']();
+}
+
 export function DiscardPendingSegment() {
   return window['go']['main']['App']['DiscardPendingSegment']();
 }
@@ -40,6 +44,10 @@ export function GetSessionProfile(arg1) {
 
 export function GetUIPreferences() {
   return window['go']['main']['App']['GetUIPreferences']();
+}
+
+export function HasVoiceSample() {
+  return window['go']['main']['App']['HasVoiceSample']();
 }
 
 export function IsListening() {
@@ -76,6 +84,10 @@ export function NewSession() {
 
 export function OpenSession(arg1) {
   return window['go']['main']['App']['OpenSession'](arg1);
+}
+
+export function RecordVoiceSample() {
+  return window['go']['main']['App']['RecordVoiceSample']();
 }
 
 export function RenameMeetingSpeaker(arg1, arg2, arg3, arg4) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ExportMeetingTranscript, MeetingTranscriptSegments, MeetingTranscriptStatus, Microphones, RenameMeetingSpeaker, RetryMeetingSegments, SelectedMicrophone, SetMicrophone, StartMeetingTranscript, StopMeetingTranscript, SuggestMeetingSpeakerNames } from '../../wailsjs/go/main/App'
+import { DeleteVoiceSample, ExportMeetingTranscript, HasVoiceSample, MeetingTranscriptSegments, MeetingTranscriptStatus, Microphones, RecordVoiceSample, RenameMeetingSpeaker, RetryMeetingSegments, SelectedMicrophone, SetMicrophone, StartMeetingTranscript, StopMeetingTranscript, SuggestMeetingSpeakerNames } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 type Segment = { id: number; track: string; startMs: number; endMs: number; text: string; status: string; speakerKey: string }
@@ -30,6 +30,11 @@ const tick = ref(0)
 const suggestions = ref<Record<string, string>>({})
 const suggesting = ref(false)
 const suggestMessage = ref('')
+// Phase 3: a voluntary voice sample, used to clear echoes of the user's own
+// voice from the meeting_output track. Off until one is recorded.
+const hasVoiceSample = ref(false)
+const recordingSample = ref(false)
+const sampleMessage = ref('')
 
 const recording = computed(() => status.value.state === 'recording')
 const processing = computed(() => status.value.state === 'processing')
@@ -90,6 +95,30 @@ async function refreshMics() {
     selectedMic.value = await SelectedMicrophone()
   } catch {
     message.value = 'No se pudo leer los micrófonos (¿PipeWire está activo?).'
+  }
+}
+
+async function recordSample() {
+  recordingSample.value = true
+  sampleMessage.value = 'Grabando 8 segundos… hablá con naturalidad.'
+  try {
+    await RecordVoiceSample()
+    hasVoiceSample.value = true
+    sampleMessage.value = 'Muestra guardada. Al terminar una reunión se intenta detectar tu eco.'
+  } catch (error) {
+    sampleMessage.value = String(error)
+  } finally {
+    recordingSample.value = false
+  }
+}
+
+async function deleteSample() {
+  try {
+    await DeleteVoiceSample()
+    hasVoiceSample.value = false
+    sampleMessage.value = 'Muestra borrada.'
+  } catch (error) {
+    sampleMessage.value = String(error)
   }
 }
 
@@ -239,6 +268,7 @@ let offSegment: (() => void) | undefined
 
 onMounted(async () => {
   await refreshMics()
+  hasVoiceSample.value = await HasVoiceSample().catch(() => false)
   applyStatus((await MeetingTranscriptStatus()) as Status)
   offStatus = EventsOn('meeting:status', (next: Status) => applyStatus(next))
   offSegment = EventsOn('meeting:segment', (event: { sessionId: string; segment: Segment }) => {
@@ -275,6 +305,18 @@ watch(() => props.sessionId, (id) => { void load(id) })
         Se graba tu micrófono y el audio de la reunión (Teams o navegador, fuente elegida en ♫). El audio se transcribe con <strong>{{ providerLabel }}</strong> y no se guarda: solo queda el texto. Avisá a los participantes que se transcribe.
         <template v-if="status.diarizeEnabled"> Al terminar, se envía esa pista a Gemini para separar a los participantes (experimental); si falla, quedan como "Participante".</template>
       </p>
+      <div v-if="status.diarizeEnabled" class="meeting-row voice-sample-row">
+        <label>Mi voz <span class="field-hint">(para detectar tu eco si usás altavoces)</span></label>
+        <div class="meeting-mic">
+          <button v-if="!hasVoiceSample" class="meeting-secondary" :disabled="recordingSample || recording || processing" @click="recordSample">{{ recordingSample ? 'Grabando…' : 'Grabar muestra (8s)' }}</button>
+          <template v-else>
+            <span class="sample-status">Muestra grabada ✓</span>
+            <button class="meeting-secondary" :disabled="recordingSample || recording || processing" @click="recordSample">Regrabar</button>
+            <button class="meeting-secondary" :disabled="recordingSample || recording || processing" @click="deleteSample">Borrar</button>
+          </template>
+        </div>
+      </div>
+      <small v-if="sampleMessage" class="meeting-message" role="status">{{ sampleMessage }}</small>
       <div class="meeting-row meeting-actions">
         <button v-if="!recording && !processing" class="record-button" :disabled="!canStart" @click="start"><span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}</button>
         <button v-else class="record-button stop" :disabled="processing" @click="stop"><span>■</span>{{ processing ? 'Procesando…' : 'Detener transcripción' }}</button>
@@ -320,6 +362,9 @@ watch(() => props.sessionId, (id) => { void load(id) })
           <p v-if="segment.status === 'ok'" class="segment" :class="segment.track">
             <time>{{ clock(segment.startMs) }}</time><strong>{{ speaker(segment.track, segment.speakerKey) }}</strong><span>{{ segment.text }}</span>
           </p>
+          <p v-else-if="segment.status === 'echo'" class="segment echo">
+            <time>{{ clock(segment.startMs) }}</time><span>Eco de tu propia voz, omitido como duplicado.</span>
+          </p>
           <p v-else class="segment gap" :class="segment.status">
             <time>{{ clock(segment.startMs) }}–{{ clock(segment.endMs) }}</time>
             <span>{{ segment.status === 'failed' ? 'Sin transcribir: falló la transcripción' : 'Sin transcribir: audio no capturado' }} ({{ speaker(segment.track, segment.speakerKey) }})</span>
@@ -347,6 +392,9 @@ watch(() => props.sessionId, (id) => { void load(id) })
 .meeting-mic button:disabled, .meeting-mic select:disabled { opacity: .45; cursor: default; }
 .meeting-note { margin: 0; color: #747583; font-size: 10px; line-height: 1.55; }
 .meeting-note strong { color: #a9c9bd; font-weight: 600; }
+.voice-sample-row label { display: flex; flex-direction: column; gap: 2px; }
+.field-hint { color: #5f6170; font-weight: 400; font-size: 9px; }
+.sample-status { padding: 0 6px; color: #86d6b0; font-size: 10px; align-self: center; }
 .meeting-actions { flex-wrap: wrap; }
 .record-button { padding: 11px 16px; border-radius: 7px; color: #071711; background: rgb(98 215 179); font-size: 11px; font-weight: 700; }
 .record-button span { margin-right: 8px; font-size: 9px; }
@@ -380,5 +428,6 @@ watch(() => props.sessionId, (id) => { void load(id) })
 .segment span { color: #d4d5dc; }
 .segment.gap { grid-template-columns: 130px minmax(0, 1fr); color: #8d8f9d; font-style: italic; }
 .segment.gap span { color: #b5a37a; }
+.segment.echo { grid-template-columns: 62px minmax(0, 1fr); color: #7c8089; font-style: italic; opacity: .75; }
 @media (max-width: 760px) { .segment { grid-template-columns: 56px minmax(0, 1fr); } .segment strong { grid-column: 2; } .segment span { grid-column: 2; } .meeting-row { flex-wrap: wrap; } }
 </style>

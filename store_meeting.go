@@ -16,6 +16,10 @@ const (
 	segmentOK     = "ok"
 	segmentFailed = "failed"
 	segmentGap    = "gap"
+	// segmentEcho (phase 3): a meeting_output segment that turned out to be
+	// the user's own voice played back through someone else's speakers. Text
+	// is kept, never deleted; it just stops being shown as a participant.
+	segmentEcho = "echo"
 )
 
 const meetingMode = "meeting"
@@ -59,6 +63,14 @@ func (s *store) insertSegment(sessionID string, segment TranscriptSegment) (int6
 
 func (s *store) updateSegment(id int64, text, status string) error {
 	_, err := s.db.Exec("UPDATE transcript_segments SET text = ?, status = ? WHERE id = ?", text, status, id)
+	return err
+}
+
+// setSegmentStatus changes only the status, keeping the stored text exactly
+// as it was transcribed — used to mark a segment as an echo (phase 3)
+// without ever discarding what was actually said.
+func (s *store) setSegmentStatus(id int64, status string) error {
+	_, err := s.db.Exec("UPDATE transcript_segments SET status = ? WHERE id = ?", status, id)
 	return err
 }
 

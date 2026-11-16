@@ -75,6 +75,20 @@ func TestDiarizePCMAccumulationCapsAndStaysAligned(t *testing.T) {
 // the whole diarizer without a real Gemini account.
 func fakeGemini(t *testing.T, spans []diarizedSpan, interactionStatus int, rawOutput string) *diarizer {
 	t.Helper()
+	if rawOutput == "" {
+		encoded, _ := json.Marshal(spans)
+		rawOutput = string(encoded)
+	}
+	return fakeGeminiRaw(t, interactionStatus, rawOutput)
+}
+
+// fakeGeminiRaw is the shared fake behind both fakeGemini (diarization) and
+// fakeGeminiEcho (voicematch_test.go): the three HTTP calls diarize()/
+// detectEcho() make — start the resumable upload, receive the bytes, and
+// answer the interaction with whatever JSON text the caller wants echoed
+// back as the model's output.
+func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *diarizer {
+	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("x-goog-upload-url", "http://"+r.Host+"/upload/bytes")
@@ -88,15 +102,10 @@ func fakeGemini(t *testing.T, spans []diarizedSpan, interactionStatus int, rawOu
 			w.WriteHeader(interactionStatus)
 			return
 		}
-		text := rawOutput
-		if text == "" {
-			encoded, _ := json.Marshal(spans)
-			text = string(encoded)
-		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"status": "completed",
 			"steps": []map[string]any{
-				{"type": "model_output", "content": []map[string]string{{"type": "text", "text": text}}},
+				{"type": "model_output", "content": []map[string]string{{"type": "text", "text": rawOutput}}},
 			},
 		})
 	})
@@ -193,8 +202,8 @@ func TestRunDiarizationLabelsStoredSegments(t *testing.T) {
 	if len(events) != 2 {
 		t.Errorf("expected one meeting:segment event per labeled row, got %d", len(events))
 	}
-	if run.diarizePCM != nil {
-		t.Error("the accumulated audio must be released once diarization has run")
+	if run.diarizePCM == nil {
+		t.Error("runDiarization must not clear the shared buffer itself: runVoiceMatch may still need it")
 	}
 
 	names, err := database.speakerNames("m1")

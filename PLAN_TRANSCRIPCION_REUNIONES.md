@@ -1,6 +1,27 @@
 # Plan: transcripción de reuniones con participantes
 
-Fecha de investigación: 2026-11-16. Estado: fases 1, 1b y 2 (diarización) implementadas en `feat/meeting-transcript`, más sugerencia de nombres por texto; fase 3 (voz propia) pendiente. Rama: `feat/meeting-transcript` desde `develop`.
+Fecha de investigación: 2026-11-16. Estado: fases 1, 1b, 2 y 3 implementadas en `feat/meeting-transcript`, más sugerencia de nombres por texto. Evaluando sumar Azure OpenAI (recurso ya usado por el usuario para transcripción) como proveedor adicional de texto/visión/audio. Rama: `feat/meeting-transcript` desde `develop`.
+
+## Fase 3 implementada (2026-11-16) — detección de eco de la propia voz, vía Gemini
+
+Mismo proveedor y misma estrategia "una sola pasada al terminar" que fase 2, reutilizando su cliente de Gemini y su buffer acumulado de `meeting_output`; no agrega dependencias nuevas.
+
+- **Muestra de voz voluntaria**: botón "Grabar muestra (8s)" en la vista de reunión (visible sólo si hay clave de Gemini), graba desde el micrófono elegido y la guarda en `voice-sample.wav` junto a la base de datos (0600, nunca dentro de una reunión ni se borra sola). Es la única pieza de audio que la app conserva a propósito; todo lo demás se descarta tras usarse.
+- Al terminar una reunión, si hay muestra Y clave de Gemini: se le pide a Gemini (misma llamada `interactions`, ahora con la muestra inline en base64 además del archivo de la reunión subido) que diga en qué tramos de tiempo se escucha esa voz dentro de la pista de la reunión — eco por altavoces, no otra persona que suene parecido.
+- Un segmento de `meeting_output` cuyo solapamiento con esos tramos supera el 50% de su duración (`echoOverlapFraction`, sin calibrar con audio real) pasa a estado `echo` — migración `0006_echo_status.sql`. El texto nunca se borra, sólo cambia el estado; se puede reconstruir a mano si el umbral se equivoca (no hay botón de "deshacer" todavía).
+- Exportación y UI muestran la línea como "eco de tu propia voz, omitido como duplicado" en vez de hacerla desaparecer sin rastro — mismo principio que huecos y fallos: nunca ocultar en silencio.
+- **Sin calibrar con audio real**: el umbral del 50% es un punto de partida razonable, no un valor medido. El propio plan pedía validar esto con 3–5 grabaciones consentidas antes de confiar en él (sección "Prueba de viabilidad" más abajo); eso no se hizo.
+- Verificado con un servidor Gemini simulado: detección de eco feliz, propagación de error, sin clave, sin muestra, sin audio acumulado, el buffer compartido sobrevive a ambas pasadas (diarización y eco) y sólo se libera una vez al final.
+
+## Evaluando: Azure OpenAI como proveedor adicional (2026-11-16, sin implementar)
+
+El usuario tiene un recurso de Azure OpenAI Service, hoy usado para transcribir audio fuera de Sonara. Mismo recurso/clave podría cubrir:
+- **Texto**: sí, sin pasos extra — mismo tipo de endpoint de chat que DeepSeek/OpenAI.
+- **Visión**: sí, pero necesita desplegar un modelo con visión (GPT-4o/GPT-5) como *deployment* aparte bajo el mismo recurso; no se habilita solo por tener ya un deployment de transcripción.
+- **Audio**: sí, si tiene un deployment de transcripción (Whisper/`gpt-4o-transcribe`).
+- **Diarización/eco**: no — Azure OpenAI no lo hace. Haría falta Azure AI Speech (producto distinto, con diarización incluida en transcripción por lote, ~$0.18/hora) o seguir con Gemini.
+
+Pendiente: escribir el adaptador (`backend/internal/adapters/web/integrations/azureopenai/`, mismo tamaño que el de DeepSeek — difiere en autenticación `api-key` en vez de `Authorization: Bearer` y URL con `.../openai/deployments/{deployment}/...?api-version=...`) y decidir si reemplaza a OpenAI, a DeepSeek, o se suma como una tercera opción en el enrutador.
 
 ## Fase 2 implementada (2026-11-16) — revisada el mismo día: de pyannote local a Gemini en la nube
 

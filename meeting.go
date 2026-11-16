@@ -374,9 +374,13 @@ func (a *App) finishMeeting(run *meetingRun) {
 	a.recordTrailingGaps(run)
 	close(run.jobs)
 	run.workers.Wait()
-	// Best-effort and, for a long meeting, possibly slow: "processing" covers
-	// it, and shutdown's own bound (stopMeetingAndWait) still applies on top.
+	// Both best-effort and, for a long meeting, possibly slow: "processing"
+	// covers it, and shutdown's own bound (stopMeetingAndWait) still applies
+	// on top. runVoiceMatch needs the same buffer runDiarization read, so the
+	// release only happens once both have had their chance at it.
 	a.runDiarization(run)
+	a.runVoiceMatch(run)
+	run.releaseDiarizePCM()
 	run.mu.Lock()
 	run.state = meetingIdle
 	run.mu.Unlock()

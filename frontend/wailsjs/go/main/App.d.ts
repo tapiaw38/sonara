@@ -14,6 +14,8 @@ export function CaptureScreen():Promise<main.CaptureStatus>;
 
 export function DeleteSession(arg1:string):Promise<Array<main.SessionSummary>>;
 
+export function DeleteVoiceSample():Promise<void>;
+
 export function DiscardPendingSegment():Promise<boolean>;
 
 export function ExportMeetingTranscript(arg1:string):Promise<string>;
@@ -21,6 +23,8 @@ export function ExportMeetingTranscript(arg1:string):Promise<string>;
 export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
 
 export function GetUIPreferences():Promise<main.UIPreferences>;
+
+export function HasVoiceSample():Promise<boolean>;
 
 export function IsListening():Promise<boolean>;
 
@@ -39,6 +43,8 @@ export function Microphones():Promise<Array<main.AudioSource>>;
 export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
+
+export function RecordVoiceSample():Promise<void>;
 
 export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Record<string, string>>;
 

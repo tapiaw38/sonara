@@ -35,8 +35,8 @@ import (
 //
 // This also means the microphone is never diarized or voice-matched: "Yo" is
 // assigned by which device captured it, not by analyzing the audio. Matching a
-// user's own voice inside the meeting_output mix (phase 3, to catch an echo of
-// themselves through someone else's speakers) is not implemented.
+// user's own voice inside the meeting_output mix, to catch an echo of
+// themselves through someone else's speakers, is phase 3 — see voicematch.go.
 //
 // *** UNVERIFIED AGAINST A REAL KEY ***: this talks to
 // generativelanguage.googleapis.com's Files and Interactions APIs per their
@@ -236,9 +236,12 @@ func (d *diarizer) deleteFile(ctx context.Context, apiKey, fileName string) erro
 }
 
 type geminiInput struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// URI is for Files-API-uploaded audio; Data is inline base64 bytes (small
+	// clips, like a voice sample, can skip the upload round trip entirely).
 	URI      string `json:"uri,omitempty"`
+	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
 }
 
@@ -266,7 +269,7 @@ type geminiInteraction struct {
 }
 
 func (d *diarizer) requestDiarization(ctx context.Context, apiKey, fileURI, mimeType string) ([]diarizedSpan, error) {
-	body, err := json.Marshal(geminiRequest{
+	text, err := d.interact(ctx, apiKey, geminiRequest{
 		Model: geminiModelName(),
 		Input: []geminiInput{
 			{Type: "text", Text: diarizePrompt},
@@ -277,31 +280,46 @@ func (d *diarizer) requestDiarization(ctx context.Context, apiKey, fileURI, mime
 	if err != nil {
 		return nil, err
 	}
+	var spans []diarizedSpan
+	if err := json.Unmarshal([]byte(text), &spans); err != nil {
+		return nil, fmt.Errorf("Gemini no devolvió la lista de hablantes esperada")
+	}
+	return spans, nil
+}
+
+// interact is the shared POST /interactions call: build the request, check
+// the HTTP and interaction status, and concatenate the model's text output.
+// Callers each decode that text into their own expected JSON shape.
+func (d *diarizer) interact(ctx context.Context, apiKey string, request geminiRequest) (string, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiBaseURL+"/interactions", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Api-Revision", geminiAPIRevision)
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Gemini respondió con estado %d", resp.StatusCode)
+		return "", fmt.Errorf("Gemini respondió con estado %d", resp.StatusCode)
 	}
 	var decoded geminiInteraction
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("Gemini devolvió una respuesta inválida")
+		return "", fmt.Errorf("Gemini devolvió una respuesta inválida")
 	}
 	if decoded.Status != "completed" {
-		return nil, fmt.Errorf("Gemini no completó la solicitud (estado %q)", decoded.Status)
+		return "", fmt.Errorf("Gemini no completó la solicitud (estado %q)", decoded.Status)
 	}
 	var text strings.Builder
 	for _, step := range decoded.Steps {
@@ -315,13 +333,9 @@ func (d *diarizer) requestDiarization(ctx context.Context, apiKey, fileURI, mime
 		}
 	}
 	if strings.TrimSpace(text.String()) == "" {
-		return nil, fmt.Errorf("Gemini no devolvió resultado")
+		return "", fmt.Errorf("Gemini no devolvió resultado")
 	}
-	var spans []diarizedSpan
-	if err := json.Unmarshal([]byte(text.String()), &spans); err != nil {
-		return nil, fmt.Errorf("Gemini no devolvió la lista de hablantes esperada")
-	}
-	return spans, nil
+	return text.String(), nil
 }
 
 // --- Accumulating the meeting_output track for the final diarization pass ---
@@ -347,6 +361,15 @@ func (r *meetingRun) appendDiarizePCM(frame []byte) {
 	r.diarizePCM = append(r.diarizePCM, frame...)
 }
 
+// releaseDiarizePCM frees the accumulated meeting_output audio. Called once
+// from finishMeeting after both runDiarization and runVoiceMatch have had
+// their chance to read it — never from inside either pass itself.
+func (r *meetingRun) releaseDiarizePCM() {
+	r.diarizeMu.Lock()
+	r.diarizePCM = nil
+	r.diarizeMu.Unlock()
+}
+
 // padDiarizeSilence keeps the accumulator aligned to the shared clock across a
 // gap in capture: without this, a reconnect would shift every later speaker
 // span out of sync with the segments it is matched against.
@@ -358,6 +381,16 @@ func (r *meetingRun) padDiarizeSilence(durationMS int64) {
 	r.appendDiarizePCM(silence)
 }
 
+// overlapMS is how much of [startMS, endMS) a span covers — zero when they
+// don't overlap at all.
+func overlapMS(spanStart, spanEnd, startMS, endMS int64) int64 {
+	from, to := max(spanStart, startMS), min(spanEnd, endMS)
+	if to <= from {
+		return 0
+	}
+	return to - from
+}
+
 // overlapSpeaker returns the raw speaker label covering the most time inside
 // [startMS, endMS) — a segment is attributed to whoever spoke the most during
 // it, the same block-level granularity transcription already uses.
@@ -365,11 +398,7 @@ func overlapSpeaker(spans []diarizedSpan, startMS, endMS int64) string {
 	totals := map[string]int64{}
 	best, bestMS := "", int64(0)
 	for _, span := range spans {
-		from, to := max(span.StartMS, startMS), min(span.EndMS, endMS)
-		if to <= from {
-			continue
-		}
-		totals[span.Speaker] += to - from
+		totals[span.Speaker] += overlapMS(span.StartMS, span.EndMS, startMS, endMS)
 		if totals[span.Speaker] > bestMS {
 			best, bestMS = span.Speaker, totals[span.Speaker]
 		}
@@ -399,9 +428,10 @@ func (a *App) runDiarization(run *meetingRun) {
 	if !a.diarizer.Configured() {
 		return
 	}
+	// Only a snapshot: runVoiceMatch (phase 3) may still need the same buffer
+	// right after this. finishMeeting releases it once, after both have run.
 	run.diarizeMu.Lock()
 	pcm := run.diarizePCM
-	run.diarizePCM = nil // release it whether or not diarization succeeds
 	run.diarizeMu.Unlock()
 	if len(pcm) == 0 {
 		return

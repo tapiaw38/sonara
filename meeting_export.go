@@ -44,6 +44,12 @@ func formatMeetingTranscript(startedAt time.Time, language string, segments []Tr
 		case segmentFailed:
 			fmt.Fprintf(&out, "[%s–%s] (sin transcribir: falló la transcripción, %s)\n",
 				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, segment.SpeakerKey, speakers))
+		case segmentEcho:
+			// Not missing audio, not a failure: deliberately excluded because
+			// it is the user's own voice (already in the "Yo" lines) echoed
+			// back through someone else's speakers — kept here as a note
+			// rather than silently vanishing, same as every other status.
+			fmt.Fprintf(&out, "[%s] (eco de tu propia voz, omitido como duplicado)\n", clock(segment.StartMS))
 		default:
 			fmt.Fprintf(&out, "[%s–%s] (sin transcribir: audio no capturado, %s)\n",
 				clock(segment.StartMS), clock(segment.EndMS), trackLabel(segment.Track, segment.SpeakerKey, speakers))
