@@ -6,28 +6,36 @@ import (
 	"strings"
 	"sync"
 
+	"sonara/backend/internal/adapters/web/integrations/azureopenai"
 	"sonara/backend/internal/adapters/web/integrations/deepseek"
 	"sonara/backend/internal/adapters/web/integrations/openai"
-	"sonara/backend/internal/adapters/web/integrations/router"
+	"sonara/backend/internal/adapters/web/integrations/providers"
 	"sonara/backend/internal/domain"
 	"sonara/backend/internal/platform/config"
 	"sonara/backend/internal/usecases/assistant"
 )
 
+// Client wires one Strategy per capability (text, vision, live-copilot
+// transcription, meeting transcription): each resolves to exactly one named
+// provider, chosen in Settings and persisted there — never an automatic
+// fallback chain. See providers.Registry/Selector/Transcriber.
 type Client struct {
-	mu         sync.RWMutex
-	cfg        config.Config
-	provider   openai.Gateway
-	deepseek   *deepseek.Gateway
-	respond    assistant.RespondUsecase
-	screen     assistant.AnalyzeScreenUsecase
-	transcribe assistant.TranscribeUsecase
-	// meeting transcribes meeting recordings; it may use a different provider
-	// from the live copilot's transcribe.
-	meeting         assistant.TranscribeUsecase
-	meetingProvider *router.Transcriber
-	title           assistant.TitleUsecase
-	suggestNames    assistant.SuggestSpeakerNamesUsecase
+	mu       sync.RWMutex
+	cfg      config.Config
+	provider openai.Gateway
+	deepseek *deepseek.Gateway
+	azure    *azureopenai.Gateway
+
+	textVision        *providers.Selector
+	liveTranscribe    *providers.Transcriber
+	meetingTranscribe *providers.Transcriber
+
+	respond      assistant.RespondUsecase
+	screen       assistant.AnalyzeScreenUsecase
+	transcribe   assistant.TranscribeUsecase
+	meeting      assistant.TranscribeUsecase
+	title        assistant.TitleUsecase
+	suggestNames assistant.SuggestSpeakerNamesUsecase
 }
 
 type Response struct {
@@ -45,23 +53,42 @@ type Transcript struct {
 	TotalMS      int
 }
 
+// AzureConfig mirrors azureopenai.Config: kept as its own type here so
+// callers outside this module (main package) never import the integration
+// package directly.
+type AzureConfig struct {
+	APIKey               string
+	Endpoint             string
+	APIVersion           string
+	ChatDeployment       string
+	TranscribeDeployment string
+}
+
 func New() *Client {
 	cfg := config.Load()
 	provider := openai.NewGateway(cfg)
 	cheap := deepseek.NewGateway(cfg)
-	// Text and audio go to DeepSeek when preferred and keyed; anything with an
-	// image, and any DeepSeek failure, goes to OpenAI.
-	routed := router.New(provider, cheap, cheap.Configured, cfg.TextProvider)
-	meeting := routed.Transcriber(cfg.MeetingProvider)
+	azure := azureopenai.NewGateway()
+	registry := providers.NewRegistry(map[string]providers.Provider{
+		providers.OpenAI:   provider,
+		providers.DeepSeek: cheap,
+		providers.Azure:    azure,
+	})
+	// Every capability defaults to OpenAI until Settings says otherwise —
+	// one explicit choice each, loaded from the database at startup
+	// (main package's App), never from the environment.
+	textVision := providers.NewSelector(registry, providers.OpenAI, providers.OpenAI)
+	liveTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
+	meetingTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
 	return &Client{
-		cfg: cfg, provider: provider, deepseek: cheap,
-		respond:         assistant.NewRespondUsecase(routed, cfg),
-		screen:          assistant.NewAnalyzeScreenUsecase(routed, cfg),
-		transcribe:      assistant.NewTranscribeUsecase(routed.Transcriber(cfg.TranscribeProvider), cfg.TranscribeModel),
-		meeting:         assistant.NewTranscribeUsecase(meeting, cfg.TranscribeModel),
-		meetingProvider: meeting,
-		title:           assistant.NewTitleUsecase(routed, cfg),
-		suggestNames:    assistant.NewSuggestSpeakerNamesUsecase(routed, cfg),
+		cfg: cfg, provider: provider, deepseek: cheap, azure: azure,
+		textVision: textVision, liveTranscribe: liveTranscribe, meetingTranscribe: meetingTranscribe,
+		respond:      assistant.NewRespondUsecase(textVision, cfg),
+		screen:       assistant.NewAnalyzeScreenUsecase(textVision, cfg),
+		transcribe:   assistant.NewTranscribeUsecase(liveTranscribe, cfg.TranscribeModel),
+		meeting:      assistant.NewTranscribeUsecase(meetingTranscribe, cfg.TranscribeModel),
+		title:        assistant.NewTitleUsecase(textVision, cfg),
+		suggestNames: assistant.NewSuggestSpeakerNamesUsecase(textVision, cfg),
 	}
 }
 
@@ -70,10 +97,10 @@ func (c *Client) Title(ctx context.Context, exchange string) (string, error) {
 	return c.title.Execute(ctx, exchange)
 }
 
-// SuggestSpeakerNames reads a meeting transcript (see assistant.SuggestSpeakerNamesUsecase
-// for the token format) and returns real names found in the conversation
-// itself, never invented. Routed the same as any other text request: DeepSeek
-// when configured, OpenAI otherwise.
+// SuggestSpeakerNames reads a meeting transcript (see
+// assistant.SuggestSpeakerNamesUsecase for the token format) and returns
+// real names found in the conversation itself, never invented. Uses
+// whichever provider TextProvider currently names.
 func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (map[string]string, error) {
 	return c.suggestNames.Execute(ctx, transcript)
 }
@@ -87,8 +114,8 @@ func (c *Client) Status() string {
 	return "API key configurada"
 }
 
-// SetDeepSeekKey is SetAPIKey for the cheaper provider; an empty key turns
-// DeepSeek off and everything falls back to OpenAI.
+// SetDeepSeekKey is SetAPIKey for the DeepSeek provider. Does not change
+// which capability uses DeepSeek — see SetTextProvider et al.
 func (c *Client) SetDeepSeekKey(key string) error {
 	key = strings.TrimSpace(key)
 	if key != "" && (len(key) < 20 || len(key) > 500 || strings.ContainsAny(key, " \t\r\n")) {
@@ -98,9 +125,81 @@ func (c *Client) SetDeepSeekKey(key string) error {
 	return nil
 }
 
-// MeetingProvider names who transcribes meeting audio right now, so the UI can
-// say where the audio is going before recording starts.
-func (c *Client) MeetingProvider() string { return c.meetingProvider.Provider() }
+// SetAzureOpenAIConfig sets every Azure setting as one unit (Settings has a
+// single save action for the whole form). An empty APIKey turns Azure off:
+// Get will then report it unconfigured to any capability still pointed at it.
+func (c *Client) SetAzureOpenAIConfig(cfg AzureConfig) error {
+	key := strings.TrimSpace(cfg.APIKey)
+	if key != "" && (len(key) < 10 || len(key) > 500 || strings.ContainsAny(key, " \t\r\n")) {
+		return fmt.Errorf("clave de Azure OpenAI inválida")
+	}
+	c.azure.SetConfig(azureopenai.Config{
+		APIKey: key, Endpoint: cfg.Endpoint, APIVersion: cfg.APIVersion,
+		ChatDeployment: cfg.ChatDeployment, TranscribeDeployment: cfg.TranscribeDeployment,
+	})
+	return nil
+}
+
+// validProviderName rejects anything but the three providers Settings can
+// offer: a typo must error, never silently land on a default.
+func validProviderName(name string) error {
+	switch name {
+	case providers.OpenAI, providers.DeepSeek, providers.Azure:
+		return nil
+	default:
+		return fmt.Errorf("proveedor desconocido: %q", name)
+	}
+}
+
+// SetTextProvider chooses who answers a text request. Never a chain: from
+// now on, exactly this provider, until changed again.
+func (c *Client) SetTextProvider(name string) error {
+	if err := validProviderName(name); err != nil {
+		return err
+	}
+	c.textVision.SetTextProvider(name)
+	return nil
+}
+
+func (c *Client) TextProvider() string { return c.textVision.TextProvider() }
+
+// SetVisionProvider chooses who answers a request that carries a screen
+// capture. DeepSeek is accepted here (Settings may still offer it), but it
+// will error on every vision call, since it only serves text.
+func (c *Client) SetVisionProvider(name string) error {
+	if err := validProviderName(name); err != nil {
+		return err
+	}
+	c.textVision.SetVisionProvider(name)
+	return nil
+}
+
+func (c *Client) VisionProvider() string { return c.textVision.VisionProvider() }
+
+// SetLiveTranscribeProvider chooses who transcribes the interview copilot's
+// audio, independently of meeting transcription.
+func (c *Client) SetLiveTranscribeProvider(name string) error {
+	if err := validProviderName(name); err != nil {
+		return err
+	}
+	c.liveTranscribe.SetProvider(name)
+	return nil
+}
+
+func (c *Client) LiveTranscribeProvider() string { return c.liveTranscribe.Provider() }
+
+// SetMeetingProvider chooses who transcribes meeting recordings.
+func (c *Client) SetMeetingProvider(name string) error {
+	if err := validProviderName(name); err != nil {
+		return err
+	}
+	c.meetingTranscribe.SetProvider(name)
+	return nil
+}
+
+// MeetingProvider names who transcribes meeting audio right now, so the UI
+// can say where the audio is going before recording starts.
+func (c *Client) MeetingProvider() string { return c.meetingTranscribe.Provider() }
 
 // TranscribeMeeting is Transcribe for meeting recordings.
 func (c *Client) TranscribeMeeting(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {

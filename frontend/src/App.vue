@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetDeepSeekAPIKey, SetGeminiAPIKey, SetManualSend, SetOpenAIAPIKey, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetAzureOpenAISettings, GetCapabilityProviders, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetAzureOpenAIConfig, SetDeepSeekAPIKey, SetGeminiAPIKey, SetLiveTranscribeProvider, SetManualSend, SetMeetingProvider, SetOpenAIAPIKey, SetTextProvider, SetVisionProvider, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import MeetingTranscript from './components/MeetingTranscript.vue'
 
@@ -17,6 +17,21 @@ const deepseekKey = ref('')
 const deepseekMessage = ref('')
 const geminiKey = ref('')
 const geminiMessage = ref('')
+const azureEndpoint = ref('')
+const azureApiVersion = ref('')
+const azureChatDeployment = ref('')
+const azureTranscribeDeployment = ref('')
+const azureKey = ref('')
+const azureHasKey = ref(false)
+const azureMessage = ref('')
+const savingAzure = ref(false)
+// One explicit provider per capability, no fallback chain — see
+// providers_settings.go. Each dropdown change takes effect immediately.
+const providerText = ref('openai')
+const providerVision = ref('openai')
+const providerLiveTranscribe = ref('openai')
+const providerMeeting = ref('openai')
+const providersMessage = ref('')
 const draft = ref('')
 const transcript = ref('Esperando audio de la reunión…')
 const messages = ref<Message[]>([])
@@ -496,8 +511,35 @@ async function loadState() {
     await refreshAudioSources()
     await refreshSessions()
     await refreshCapture()
+    await loadAzureSettings()
+    await loadProviders()
   } catch {
     endpoint.value = 'Servicio local no disponible'
+  }
+}
+
+async function loadAzureSettings() {
+  try {
+    const form = await GetAzureOpenAISettings()
+    azureEndpoint.value = form.endpoint
+    azureApiVersion.value = form.apiVersion
+    azureChatDeployment.value = form.chatDeployment
+    azureTranscribeDeployment.value = form.transcribeDeployment
+    azureHasKey.value = form.hasKey
+  } catch {
+    // Settings dialog just shows blank fields; not worth a user-facing error.
+  }
+}
+
+async function loadProviders() {
+  try {
+    const providers = await GetCapabilityProviders()
+    providerText.value = providers.text
+    providerVision.value = providers.vision
+    providerLiveTranscribe.value = providers.liveTranscribe
+    providerMeeting.value = providers.meeting
+  } catch {
+    // Keep the "openai" defaults the refs already have.
   }
 }
 
@@ -525,11 +567,40 @@ async function saveDeepSeekKey() {
     const removing = !deepseekKey.value
     await SetDeepSeekAPIKey(deepseekKey.value)
     deepseekKey.value = ''
-    deepseekMessage.value = removing ? 'Clave quitada: se usa OpenAI.' : 'Clave guardada: las reuniones se transcriben con DeepSeek.'
+    deepseekMessage.value = removing ? 'Clave quitada.' : 'Clave guardada. Elegí DeepSeek en "Proveedores" para usarla.'
   } catch (error) {
     deepseekMessage.value = String(error || 'No se pudo guardar la clave')
   } finally {
     savingApiKey.value = false
+  }
+}
+
+async function saveAzureConfig(clearKey: boolean) {
+  if (savingAzure.value) return
+  savingAzure.value = true
+  azureMessage.value = ''
+  try {
+    await SetAzureOpenAIConfig(azureEndpoint.value, azureApiVersion.value, azureChatDeployment.value, azureTranscribeDeployment.value, azureKey.value, clearKey)
+    azureKey.value = ''
+    await loadAzureSettings() // reload hasKey from the backend rather than guess it here
+    azureMessage.value = clearKey ? 'Clave quitada.' : 'Guardado. Elegí Azure en "Proveedores" para usarlo.'
+  } catch (error) {
+    azureMessage.value = String(error || 'No se pudo guardar')
+  } finally {
+    savingAzure.value = false
+  }
+}
+
+async function setProvider(capability: 'text' | 'vision' | 'liveTranscribe' | 'meeting', name: string) {
+  providersMessage.value = ''
+  try {
+    if (capability === 'text') { await SetTextProvider(name); providerText.value = name }
+    else if (capability === 'vision') { await SetVisionProvider(name); providerVision.value = name }
+    else if (capability === 'liveTranscribe') { await SetLiveTranscribeProvider(name); providerLiveTranscribe.value = name }
+    else { await SetMeetingProvider(name); providerMeeting.value = name }
+  } catch (error) {
+    providersMessage.value = String(error || 'No se pudo cambiar el proveedor')
+    await loadProviders() // revert the dropdown to what is actually active
   }
 }
 
@@ -815,8 +886,30 @@ async function sendMessage() {
         <header class="dialog-header"><div><p class="eyebrow">SONARA</p><h2 id="settings-title">Configuración</h2></div><button class="dialog-close" aria-label="Cerrar configuración" @click="showSettings = false">×</button></header>
         <div class="settings-section"><h3>Audio</h3><label for="settings-audio-source">Fuente de captura</label><div class="audio-source-controls"><select id="settings-audio-source" :value="selectedAudioSource" @change="selectAudioSource(($event.target as HTMLSelectElement).value)"><option value="">Automática</option><option v-for="source in audioSources" :key="source.target" :value="source.target">{{ source.label }} · #{{ source.target }}{{ source.running ? ' · activo' : '' }}</option></select><button title="Actualizar fuentes" aria-label="Actualizar fuentes de audio" @click="refreshAudioSources">↻</button></div><small v-if="audioGuessing" class="audio-source-hint guessing">Hay {{ audioCandidates }} fuentes posibles; revisa cuál corresponde a la reunión.</small><small v-if="audioSourceMessage" class="audio-source-hint">{{ audioSourceMessage }}</small><label>Idioma hablado</label><div class="language-switch"><button :class="{ active: audioLanguage === 'es' }" @click="setAudioLanguage('es')">Español</button><button :class="{ active: audioLanguage === 'en' }" @click="setAudioLanguage('en')">English</button></div></div>
         <div class="settings-section"><h3>OpenAI</h3><form class="api-key-form" @submit.prevent="saveApiKey"><label for="openai-key">API key</label><input id="openai-key" v-model="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Se guarda localmente en la configuración de Sonara.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !apiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="apiKey = ''; saveApiKey()">Quitar</button></div><small v-if="apiKeyMessage" role="status">{{ apiKeyMessage }}</small><small class="endpoint-status">{{ endpoint || 'Sin conectar' }}</small></form></div>
-        <div class="settings-section"><h3>DeepSeek</h3><form class="api-key-form" @submit.prevent="saveDeepSeekKey"><label for="deepseek-key">API key</label><input id="deepseek-key" v-model="deepseekKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Transcribe las reuniones con un modelo más barato: el audio se envía a DeepSeek. Sin clave, se usa OpenAI. Las capturas de pantalla siempre van a OpenAI.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !deepseekKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="deepseekKey = ''; saveDeepSeekKey()">Quitar</button></div><small v-if="deepseekMessage" role="status">{{ deepseekMessage }}</small></form></div>
+        <div class="settings-section"><h3>DeepSeek</h3><form class="api-key-form" @submit.prevent="saveDeepSeekKey"><label for="deepseek-key">API key</label><input id="deepseek-key" v-model="deepseekKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /><small>Modelo más barato para texto, visión o transcripción. Guardar la clave no cambia nada por sí solo: elegí DeepSeek en "Proveedores" para cada capacidad donde lo quieras usar.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !deepseekKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="deepseekKey = ''; saveDeepSeekKey()">Quitar</button></div><small v-if="deepseekMessage" role="status">{{ deepseekMessage }}</small></form></div>
+        <div class="settings-section"><h3>Azure OpenAI</h3><form class="api-key-form" @submit.prevent="saveAzureConfig(false)">
+          <label for="azure-endpoint">Endpoint</label><input id="azure-endpoint" v-model="azureEndpoint" autocomplete="off" spellcheck="false" placeholder="https://tu-recurso.openai.azure.com" />
+          <label for="azure-api-version">Versión de API</label><input id="azure-api-version" v-model="azureApiVersion" autocomplete="off" spellcheck="false" placeholder="2024-06-01" />
+          <label for="azure-chat-deployment">Deployment de chat/visión</label><input id="azure-chat-deployment" v-model="azureChatDeployment" autocomplete="off" spellcheck="false" placeholder="Nombre del deployment" />
+          <label for="azure-transcribe-deployment">Deployment de transcripción</label><input id="azure-transcribe-deployment" v-model="azureTranscribeDeployment" autocomplete="off" spellcheck="false" placeholder="Nombre del deployment (opcional)" />
+          <label for="azure-key">API key</label><input id="azure-key" v-model="azureKey" type="password" autocomplete="off" spellcheck="false" :placeholder="azureHasKey ? 'Ya guardada — dejar en blanco para mantenerla' : 'Clave del recurso'" />
+          <small>Mismo recurso que ya usás para transcribir. La visión sólo funciona si el deployment de chat tiene un modelo con visión (GPT-4o o similar). Nada de esto se manda a OpenAI/DeepSeek/Gemini.</small>
+          <div class="api-key-actions"><button type="submit" :disabled="savingAzure">{{ savingAzure ? 'Guardando…' : 'Guardar' }}</button><button type="button" :disabled="savingAzure || !azureHasKey" @click="saveAzureConfig(true)">Quitar clave</button></div>
+          <small v-if="azureMessage" role="status">{{ azureMessage }}</small>
+        </form></div>
         <div class="settings-section"><h3>Gemini (experimental)</h3><form class="api-key-form" @submit.prevent="saveGeminiKey"><label for="gemini-key">API key</label><input id="gemini-key" v-model="geminiKey" type="password" autocomplete="off" spellcheck="false" placeholder="AI…" /><small>Separa a los participantes de una reunión al terminar de grabarla: el audio de esa pista se envía a Gemini. Sin clave, quedan como "Participante". No instala nada en tu máquina.</small><div class="api-key-actions"><button type="submit" :disabled="savingApiKey || !geminiKey">{{ savingApiKey ? 'Guardando…' : 'Guardar clave' }}</button><button type="button" :disabled="savingApiKey" @click="geminiKey = ''; saveGeminiKey()">Quitar</button></div><small v-if="geminiMessage" role="status">{{ geminiMessage }}</small></form></div>
+        <div class="settings-section"><h3>Proveedores</h3>
+          <small class="provider-hint">Un proveedor exacto por capacidad. Si falla, se muestra el error — nunca se prueba otro en silencio.</small>
+          <label for="provider-text">Texto (copiloto)</label>
+          <select id="provider-text" :value="providerText" @change="setProvider('text', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="azure">Azure OpenAI</option></select>
+          <label for="provider-vision">Visión (capturas de pantalla)</label>
+          <select id="provider-vision" :value="providerVision" @change="setProvider('vision', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek (no soporta visión)</option><option value="azure">Azure OpenAI</option></select>
+          <label for="provider-live-transcribe">Transcripción en vivo (copiloto)</label>
+          <select id="provider-live-transcribe" :value="providerLiveTranscribe" @change="setProvider('liveTranscribe', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="azure">Azure OpenAI</option></select>
+          <label for="provider-meeting">Transcripción de reuniones</label>
+          <select id="provider-meeting" :value="providerMeeting" @change="setProvider('meeting', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="azure">Azure OpenAI</option></select>
+          <small v-if="providersMessage" role="status" class="provider-error">{{ providersMessage }}</small>
+        </div>
       </section>
     </div>
 

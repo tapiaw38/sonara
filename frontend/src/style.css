@@ -194,6 +194,10 @@ button { color: inherit; border: 0; cursor: pointer; }
 .settings-dialog .api-key-form input, .session-setup-form input, .session-setup-form textarea, .session-setup-form select { padding: 10px 11px; border: 1px solid #353b42; border-radius: 8px; outline: none; color: #eceef1; background: #0d1014; font: 11px Manrope, sans-serif; }
 .settings-dialog .api-key-form input:focus, .session-setup-form input:focus, .session-setup-form textarea:focus, .session-setup-form select:focus { border-color: #418c79; box-shadow: 0 0 0 3px rgb(72 180 148 / .09); }
 .settings-dialog .api-key-form small, .profile-hint { color: #818892; }
+.settings-section select { width: 100%; padding: 10px 11px; border: 1px solid #353b42; border-radius: 8px; outline: none; color: #eceef1; background: #0d1014; font: 11px Manrope, sans-serif; }
+.settings-section select:focus { border-color: #418c79; box-shadow: 0 0 0 3px rgb(72 180 148 / .09); }
+.provider-hint { display: block; margin-bottom: 4px; color: #818892; font-size: 10px; line-height: 1.4; }
+.provider-error { display: block; margin-top: 10px; color: #e0a0a0; }
 .endpoint-status { padding-top: 5px; color: #8dd9bd !important; }
 .session-setup-form { display: grid; gap: 7px; }
 .session-setup-form > label { margin: 5px 0 0; }

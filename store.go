@@ -40,6 +40,14 @@ const (
 	settingMicrophone = "preferred_microphone"
 	// settingGeminiKey is the Gemini key used for phase-2 diarization.
 	settingGeminiKey = "gemini_api_key"
+	// settingAzureOpenAI holds the whole Azure OpenAI form as one JSON blob
+	// (key, endpoint, API version, both deployment names): one save action
+	// in Settings, one row here.
+	settingAzureOpenAI = "azure_openai_config"
+	// settingProviders holds which named provider (openai/deepseek/azure)
+	// serves each capability — an explicit choice, never an automatic
+	// fallback chain. See the providers package.
+	settingProviders = "capability_providers"
 )
 
 func storePath() (string, error) {
@@ -153,6 +161,66 @@ func (s *store) saveUIPreferences(preferences UIPreferences) error {
 		return err
 	}
 	return s.setSetting(settingUIPreferences, string(encoded))
+}
+
+// AzureOpenAISettings is the whole Azure OpenAI form, saved and loaded as one
+// unit. APIKey is never read back by the UI (same policy as the OpenAI key);
+// it is only ever written here.
+type AzureOpenAISettings struct {
+	APIKey               string `json:"apiKey"`
+	Endpoint             string `json:"endpoint"`
+	APIVersion           string `json:"apiVersion"`
+	ChatDeployment       string `json:"chatDeployment"`
+	TranscribeDeployment string `json:"transcribeDeployment"`
+}
+
+func (s *store) azureOpenAISettings() (AzureOpenAISettings, error) {
+	encoded := s.setting(settingAzureOpenAI)
+	if encoded == "" {
+		return AzureOpenAISettings{}, nil
+	}
+	var settings AzureOpenAISettings
+	if err := json.Unmarshal([]byte(encoded), &settings); err != nil {
+		return AzureOpenAISettings{}, fmt.Errorf("configuración de Azure OpenAI inválida: %w", err)
+	}
+	return settings, nil
+}
+
+func (s *store) saveAzureOpenAISettings(settings AzureOpenAISettings) error {
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	return s.setSetting(settingAzureOpenAI, string(encoded))
+}
+
+// CapabilityProviders is which named provider serves each capability — one
+// explicit choice each, no fallback chain. Empty fields default to "openai".
+type CapabilityProviders struct {
+	Text            string `json:"text"`
+	Vision          string `json:"vision"`
+	LiveTranscribe  string `json:"liveTranscribe"`
+	MeetingProvider string `json:"meeting"`
+}
+
+func (s *store) capabilityProviders() (CapabilityProviders, error) {
+	encoded := s.setting(settingProviders)
+	if encoded == "" {
+		return CapabilityProviders{}, nil
+	}
+	var providers CapabilityProviders
+	if err := json.Unmarshal([]byte(encoded), &providers); err != nil {
+		return CapabilityProviders{}, fmt.Errorf("selección de proveedores inválida: %w", err)
+	}
+	return providers, nil
+}
+
+func (s *store) saveCapabilityProviders(providers CapabilityProviders) error {
+	encoded, err := json.Marshal(providers)
+	if err != nil {
+		return err
+	}
+	return s.setSetting(settingProviders, string(encoded))
 }
 
 // saveSession records a session before its first message, so a session that

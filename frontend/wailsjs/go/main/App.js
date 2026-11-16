@@ -38,6 +38,14 @@ export function ExportMeetingTranscript(arg1) {
   return window['go']['main']['App']['ExportMeetingTranscript'](arg1);
 }
 
+export function GetAzureOpenAISettings() {
+  return window['go']['main']['App']['GetAzureOpenAISettings']();
+}
+
+export function GetCapabilityProviders() {
+  return window['go']['main']['App']['GetCapabilityProviders']();
+}
+
 export function GetSessionProfile(arg1) {
   return window['go']['main']['App']['GetSessionProfile'](arg1);
 }
@@ -134,6 +142,10 @@ export function SetAudioSource(arg1) {
   return window['go']['main']['App']['SetAudioSource'](arg1);
 }
 
+export function SetAzureOpenAIConfig(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['SetAzureOpenAIConfig'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function SetDeepSeekAPIKey(arg1) {
   return window['go']['main']['App']['SetDeepSeekAPIKey'](arg1);
 }
@@ -142,8 +154,16 @@ export function SetGeminiAPIKey(arg1) {
   return window['go']['main']['App']['SetGeminiAPIKey'](arg1);
 }
 
+export function SetLiveTranscribeProvider(arg1) {
+  return window['go']['main']['App']['SetLiveTranscribeProvider'](arg1);
+}
+
 export function SetManualSend(arg1) {
   return window['go']['main']['App']['SetManualSend'](arg1);
+}
+
+export function SetMeetingProvider(arg1) {
+  return window['go']['main']['App']['SetMeetingProvider'](arg1);
 }
 
 export function SetMicrophone(arg1) {
@@ -152,6 +172,14 @@ export function SetMicrophone(arg1) {
 
 export function SetOpenAIAPIKey(arg1) {
   return window['go']['main']['App']['SetOpenAIAPIKey'](arg1);
+}
+
+export function SetTextProvider(arg1) {
+  return window['go']['main']['App']['SetTextProvider'](arg1);
+}
+
+export function SetVisionProvider(arg1) {
+  return window['go']['main']['App']['SetVisionProvider'](arg1);
 }
 
 export function StartListening() {

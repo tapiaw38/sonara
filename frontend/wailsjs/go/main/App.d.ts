@@ -20,6 +20,10 @@ export function DiscardPendingSegment():Promise<boolean>;
 
 export function ExportMeetingTranscript(arg1:string):Promise<string>;
 
+export function GetAzureOpenAISettings():Promise<main.AzureOpenAIForm>;
+
+export function GetCapabilityProviders():Promise<main.CapabilityProviders>;
+
 export function GetSessionProfile(arg1:string):Promise<main.SessionProfile>;
 
 export function GetUIPreferences():Promise<main.UIPreferences>;
@@ -68,15 +72,25 @@ export function SetAudioLanguage(arg1:string):Promise<string>;
 
 export function SetAudioSource(arg1:string):Promise<string>;
 
+export function SetAzureOpenAIConfig(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:boolean):Promise<void>;
+
 export function SetDeepSeekAPIKey(arg1:string):Promise<void>;
 
 export function SetGeminiAPIKey(arg1:string):Promise<void>;
 
+export function SetLiveTranscribeProvider(arg1:string):Promise<void>;
+
 export function SetManualSend(arg1:boolean):Promise<boolean>;
+
+export function SetMeetingProvider(arg1:string):Promise<void>;
 
 export function SetMicrophone(arg1:string):Promise<string>;
 
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
+
+export function SetTextProvider(arg1:string):Promise<void>;
+
+export function SetVisionProvider(arg1:string):Promise<void>;
 
 export function StartListening():Promise<boolean>;
 

@@ -1,6 +1,18 @@
 # Plan: transcripción de reuniones con participantes
 
-Fecha de investigación: 2026-11-16. Estado: fases 1, 1b, 2 y 3 implementadas en `feat/meeting-transcript`, más sugerencia de nombres por texto. Evaluando sumar Azure OpenAI (recurso ya usado por el usuario para transcripción) como proveedor adicional de texto/visión/audio. Rama: `feat/meeting-transcript` desde `develop`.
+Fecha de investigación: 2026-11-16. Estado: fases 1, 1b, 2 y 3 implementadas en `feat/meeting-transcript`, más sugerencia de nombres por texto y Azure OpenAI como proveedor adicional. **Se reemplazó el enrutamiento con fallback automático (DeepSeek→OpenAI) por selección explícita sin cadena** — ver abajo. Rama: `feat/meeting-transcript` desde `develop`.
+
+## Azure OpenAI y selección de proveedores sin fallback (2026-11-16) — implementado
+
+El usuario pidió explícitamente **sacar los fallbacks automáticos** (DeepSeek→OpenAI incluido, ya commiteado antes) y que la configuración de Azure vaya por la interfaz, nunca por variable de entorno.
+
+- **Patrón:** Strategy + registro de proveedores (`backend/internal/adapters/web/integrations/providers/providers.go`), reemplaza por completo al paquete `router` anterior (eliminado). `Registry.Get(nombre)` devuelve exactamente ese proveedor o un error — nunca intenta otro. `Selector` resuelve texto/visión por nombre explícito (visión según si la petición trae imagen); `Transcriber` queda atado a un solo nombre. Sin reintento, sin cadena, en ningún punto del código.
+- **Cuatro capacidades, cuatro elecciones independientes:** texto, visión, transcripción en vivo (copiloto) y transcripción de reuniones. Cada una con su proveedor elegido a mano en Configuración → "Proveedores", persistido en la base (`capability_providers`, JSON), por defecto `openai` hasta que se cambie. Cambiar una no toca las otras tres.
+- **Azure OpenAI** (`backend/internal/adapters/web/integrations/azureopenai/`): mismo patrón que DeepSeek, pero autenticación `api-key` (no `Authorization: Bearer`) y URL `{endpoint}/openai/deployments/{deployment}/...?api-version=...`. Un solo *deployment* de chat sirve texto y visión (Azure despliega modelos por nombre; visión sólo funciona si ese deployment tiene un modelo con visión); *deployment* de transcripción aparte y opcional.
+- **Nada por variable de entorno.** Endpoint, versión de API, nombres de *deployment* y clave se escriben en Configuración → "Azure OpenAI" y se guardan en la base como un solo JSON (`azure_openai_config`). La clave nunca se devuelve a la interfaz (mismo criterio que OpenAI/DeepSeek/Gemini); editar el endpoint sin volver a escribir la clave la conserva. "Quitar clave" la borra explícitamente.
+- **No verificado con un recurso real de Azure**: igual que Gemini, construido contra la documentación pública de Microsoft (`learn.microsoft.com/azure/ai-services/openai/reference`, consultada 2026-11-16), nunca probado con una clave real. Verificado con un servidor Azure simulado: mensaje de texto plano vs. partes de contenido con imagen, error de Azure propagado, sin "model" en el formulario de transcripción (lo fija el *deployment*), ambos `Configured()`/`TranscribeConfigured()` independientes.
+- El registro completo (`Registry`/`Selector`/`Transcriber`) se probó con proveedores simulados: selección exacta, nunca prueba otro ante fallo, los setters cambian la elección activa sin tocar las demás.
+- Diarización y eco (Gemini) quedan **fuera** de este sistema de selección: siguen siendo "si hay clave, se intenta; si falla, no pasa nada" — no son una capacidad con alternativas entre sí, son una mejora opcional sobre lo que ya se transcribió.
 
 ## Fase 3 implementada (2026-11-16) — detección de eco de la propia voz, vía Gemini
 

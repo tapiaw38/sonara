@@ -16,21 +16,18 @@ type Config struct {
 	ReasoningModel  string
 	ExpertModel     string
 	TranscribeModel string
-	// DeepSeek is the cheaper provider for text and audio; OpenAI stays the
-	// only one that sees images. A provider setting names the preference, and
-	// the router still falls back to OpenAI when DeepSeek has no key or fails.
+	// DeepSeek is the cheaper provider for text and audio. OpenAI and
+	// DeepSeek are plain gateways; which one actually answers a given
+	// request (and whether Azure OpenAI is in the mix too) is decided at
+	// runtime by the providers package (see client.New), set from Settings
+	// and persisted in the database — never from the environment, and never
+	// as an automatic fallback chain.
 	DeepSeekKey        string
 	DeepSeekBaseURL    string
 	DeepSeekModelFast  string
 	DeepSeekModelThink string
-	TextProvider       string
-	TranscribeProvider string
-	// MeetingProvider is the transcription provider for meeting recordings,
-	// kept apart from the live copilot, which stays on OpenAI until DeepSeek's
-	// latency has been measured there.
-	MeetingProvider string
-	MaxOutputTokens int
-	RequestTimeout  time.Duration
+	MaxOutputTokens    int
+	RequestTimeout     time.Duration
 }
 
 func Load() Config {
@@ -47,22 +44,9 @@ func Load() Config {
 		DeepSeekBaseURL:    strings.TrimRight(value("DEEPSEEK_BASE_URL", "https://api.deepseek.com"), "/"),
 		DeepSeekModelFast:  value("DEEPSEEK_MODEL_FAST", "deepseek-flash"),
 		DeepSeekModelThink: value("DEEPSEEK_MODEL_REASONING", "deepseek-v4-pro"),
-		TextProvider:       providerValue("SONARA_TEXT_PROVIDER", "openai"),
-		TranscribeProvider: providerValue("SONARA_TRANSCRIBE_PROVIDER", "openai"),
-		MeetingProvider:    providerValue("SONARA_MEETING_PROVIDER", "deepseek"),
 		MaxOutputTokens:    intValue("OPENAI_MAX_OUTPUT_TOKENS", 1200),
 		RequestTimeout:     durationValue("OPENAI_TIMEOUT", 90*time.Second),
 	}
-}
-
-// providerValue accepts only the two known providers: a typo must not silently
-// route audio somewhere unintended.
-func providerValue(key, fallback string) string {
-	switch got := strings.ToLower(value(key, fallback)); got {
-	case "openai", "deepseek":
-		return got
-	}
-	return fallback
 }
 
 func listValue(key, fallback string) []string {

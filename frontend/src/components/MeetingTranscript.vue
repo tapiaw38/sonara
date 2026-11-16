@@ -41,7 +41,8 @@ const processing = computed(() => status.value.state === 'processing')
 // The meeting on screen is the one being recorded only when ids match: a saved
 // meeting can be read while another is recording.
 const shownIsLive = computed(() => !!view.value && view.value.sessionId === status.value.sessionId && status.value.state !== 'idle')
-const providerLabel = computed(() => status.value.provider === 'deepseek' ? 'DeepSeek' : 'OpenAI')
+const providerLabels: Record<string, string> = { deepseek: 'DeepSeek', azure: 'Azure OpenAI', openai: 'OpenAI' }
+const providerLabel = computed(() => providerLabels[status.value.provider] || 'OpenAI')
 const selectedMicAvailable = computed(() => mics.value.some((mic) => mic.app === selectedMic.value))
 const canStart = computed(() => !busy.value && status.value.state === 'idle' && !!selectedMic.value && selectedMicAvailable.value)
 const speakers = computed(() => view.value?.speakers ?? { microphone: 'Yo', meeting_output: 'Participante' })

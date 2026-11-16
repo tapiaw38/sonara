@@ -201,6 +201,33 @@ func (a *App) startup(ctx context.Context) {
 		if key := database.setting(settingGeminiKey); key != "" {
 			a.diarizer.SetAPIKey(key)
 		}
+		if azure, err := database.azureOpenAISettings(); err != nil {
+			logf("stored Azure OpenAI settings unreadable: %v", err)
+		} else if azure.APIKey != "" {
+			if err := a.backend.SetAzureOpenAIConfig(sonaraBackend.AzureConfig{
+				APIKey: azure.APIKey, Endpoint: azure.Endpoint, APIVersion: azure.APIVersion,
+				ChatDeployment: azure.ChatDeployment, TranscribeDeployment: azure.TranscribeDeployment,
+			}); err != nil {
+				logf("stored Azure OpenAI settings rejected: %v", err)
+			}
+		}
+		if chosen, err := database.capabilityProviders(); err != nil {
+			logf("stored provider selection unreadable: %v", err)
+		} else {
+			chosen = defaultedProviders(chosen)
+			if err := a.backend.SetTextProvider(chosen.Text); err != nil {
+				logf("stored text provider rejected: %v", err)
+			}
+			if err := a.backend.SetVisionProvider(chosen.Vision); err != nil {
+				logf("stored vision provider rejected: %v", err)
+			}
+			if err := a.backend.SetLiveTranscribeProvider(chosen.LiveTranscribe); err != nil {
+				logf("stored live transcription provider rejected: %v", err)
+			}
+			if err := a.backend.SetMeetingProvider(chosen.MeetingProvider); err != nil {
+				logf("stored meeting provider rejected: %v", err)
+			}
+		}
 		if language == "" {
 			language = "es"
 		}
@@ -629,8 +656,10 @@ func (a *App) SetOpenAIAPIKey(key string) error {
 	return nil
 }
 
-// SetDeepSeekAPIKey configures the cheaper provider for meeting audio and text.
-// An empty key turns it off and everything goes back to OpenAI.
+// SetDeepSeekAPIKey sets the DeepSeek key. Whether DeepSeek actually serves
+// anything depends on SetTextProvider/SetLiveTranscribeProvider/
+// SetMeetingProvider naming it explicitly — this alone does not switch
+// anything over.
 func (a *App) SetDeepSeekAPIKey(key string) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")

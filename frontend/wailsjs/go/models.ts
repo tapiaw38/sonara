@@ -34,6 +34,44 @@ export namespace main {
 	        this.kind = source["kind"];
 	    }
 	}
+	export class AzureOpenAIForm {
+	    hasKey: boolean;
+	    endpoint: string;
+	    apiVersion: string;
+	    chatDeployment: string;
+	    transcribeDeployment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AzureOpenAIForm(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hasKey = source["hasKey"];
+	        this.endpoint = source["endpoint"];
+	        this.apiVersion = source["apiVersion"];
+	        this.chatDeployment = source["chatDeployment"];
+	        this.transcribeDeployment = source["transcribeDeployment"];
+	    }
+	}
+	export class CapabilityProviders {
+	    text: string;
+	    vision: string;
+	    liveTranscribe: string;
+	    meeting: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CapabilityProviders(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.vision = source["vision"];
+	        this.liveTranscribe = source["liveTranscribe"];
+	        this.meeting = source["meeting"];
+	    }
+	}
 	export class CaptureStatus {
 	    path: string;
 	    capturedAt: string;
