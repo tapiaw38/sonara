@@ -104,6 +104,20 @@ const assistantMode = ref(['interview', 'daily', 'coding', 'coaching'].includes(
 const assistantModeLabel = computed(() => ({ interview: 'Entrevista', daily: 'Reunión', coding: 'Coding', coaching: 'Coaching' }[assistantMode.value] || 'Entrevista'))
 const assistantModeTitle = computed(() => ({ interview: 'Copiloto en vivo', daily: 'Copiloto de reunión', coding: 'Copiloto de código', coaching: 'Coach de entrevista' }[assistantMode.value] || 'Copiloto en vivo'))
 const translation = ref('')
+// Past finished turns, oldest first, so a quick back-and-forth doesn't erase
+// the one before it: the panel only ever showed the latest, so a second
+// phrase silently threw the first one away.
+type TranscriptEntry = { text: string; translation: string }
+const transcriptHistory = ref<TranscriptEntry[]>([])
+const MAX_TRANSCRIPT_HISTORY = 50
+const transcriptPanel = ref<HTMLElement | null>(null)
+function archiveCurrentTranscript() {
+  // Only a real, answered turn is worth keeping: idle/status placeholders
+  // ("Esperando audio…", "Sesión reabierta", …) never got a translation.
+  if (!transcript.value || !translation.value) return
+  transcriptHistory.value.push({ text: transcript.value, translation: translation.value })
+  if (transcriptHistory.value.length > MAX_TRANSCRIPT_HISTORY) transcriptHistory.value.shift()
+}
 const streamingIndex = ref<number | null>(null)
 const WAVE_BARS = 18
 const levels = ref<number[]>(Array(WAVE_BARS).fill(0))
@@ -447,6 +461,7 @@ async function openSession(id: string) {
       ? 'Escribe una pregunta o espera la próxima intervención.'
       : 'Esta sesión no tiene mensajes guardados.'
     translation.value = ''
+    transcriptHistory.value = []
     draft.value = ''
     streamingIndex.value = null
     sendingMessage.value = false
@@ -484,6 +499,7 @@ async function newSession() {
   emptyConversationLabel.value = 'Escribe una pregunta o espera la próxima intervención.'
   transcript.value = 'Esperando audio de la reunión…'
   translation.value = ''
+  transcriptHistory.value = []
   draft.value = ''
   lastVoiceSequence.value = (await ListeningStatus()).sequence
   streamingIndex.value = null
@@ -742,8 +758,15 @@ async function refreshListening() {
     droppedSegments.value = state.droppedSegments
     audioGuessing.value = state.audioGuessing
     audioCandidates.value = state.audioCandidates
-    if (state.transcript) transcript.value = state.transcript
+    if (state.transcript && state.transcript !== transcript.value) {
+      archiveCurrentTranscript()
+      transcript.value = state.transcript
+    }
     translation.value = state.translation
+    void nextTick(() => {
+      const panel = transcriptPanel.value
+      if (panel) panel.scrollTop = panel.scrollHeight
+    })
     if (state.sequence > lastVoiceSequence.value) {
       messages.value.push({
         role: 'assistant',
@@ -860,7 +883,7 @@ async function sendMessage() {
         <div class="panels">
           <section ref="transcriptPanelEl" class="panel transcript-panel" :class="{ expanded: listening || droppedSegments > 0, resizing: panelResize?.panel === 'transcript' }" :style="panelHeightStyle(transcriptPanelHeight)">
             <div class="panel-heading"><span>Transcripción</span><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span></div>
-            <div class="transcript-body"><p class="transcript-text">{{ transcript }}</p><p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p><div v-if="listening" class="audio-pulse" :class="{ active: audioDetected }"><span></span><span></span><span></span><small>{{ audioDetected ? listenStatus || 'Sonido detectado' : 'Esperando sonido…' }}</small></div><div v-if="audioDetected" class="wave"><i v-for="(level, index) in levels" :key="index" :class="{ active: level > 0.05 }" :style="{ height: `${3 + level * 42}px` }"></i></div></div>
+            <div ref="transcriptPanel" class="transcript-body"><div v-for="(entry, index) in transcriptHistory" :key="index" class="transcript-turn transcript-turn-past"><p class="transcript-text">{{ entry.text }}</p><p class="transcript-translation"><span>ES</span>{{ entry.translation }}</p></div><div class="transcript-turn"><p class="transcript-text">{{ transcript }}</p><p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p></div><div v-if="listening" class="audio-pulse" :class="{ active: audioDetected }"><span></span><span></span><span></span><small>{{ audioDetected ? listenStatus || 'Sonido detectado' : 'Esperando sonido…' }}</small></div><div v-if="audioDetected" class="wave"><i v-for="(level, index) in levels" :key="index" :class="{ active: level > 0.05 }" :style="{ height: `${3 + level * 42}px` }"></i></div></div>
             <div v-if="pendingSeconds > 0" class="pending-bar"><span>Fragmento de {{ pendingSeconds.toFixed(1) }}s en espera</span><button class="pending-send" @click="sendPending">Enviar</button><button class="pending-discard" @click="discardPending">Descartar</button></div>
             <div v-if="droppedSegments > 0" class="audio-warning" role="status">Audio perdido por cola llena: {{ droppedSegments }} fragmento(s). Revisá la transcripción.</div>
             <div class="listen-row">
