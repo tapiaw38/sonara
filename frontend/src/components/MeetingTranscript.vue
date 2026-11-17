@@ -5,7 +5,7 @@ import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 type Segment = { id: number; track: string; startMs: number; endMs: number; text: string; status: string; speakerKey: string }
 type View = { sessionId: string; startedAt: string; language: string; segments: Segment[]; speakers: Record<string, string> }
-type Status = { state: string; sessionId: string; elapsedMs: number; provider: string; microphoneState: string; outputState: string; pending: number; failed: number; message: string; diarizeEnabled: boolean }
+type Status = { state: string; sessionId: string; elapsedMs: number; provider: string; microphoneState: string; outputState: string; pending: number; failed: number; message: string; diarizeEnabled: boolean; diarizeNote: string; diarizeSessionId: string }
 type Mic = { target: string; label: string; running: boolean; app: string }
 // One renameable entity: the microphone track, the generic meeting_output
 // label, or one diarized participant (track + speakerKey).
@@ -15,7 +15,7 @@ type SpeakerRef = { track: string; speakerKey: string }
 const props = defineProps<{ sessionId: string }>()
 const emit = defineEmits<{ (event: 'sessions-changed'): void; (event: 'opened', id: string): void }>()
 
-const status = ref<Status>({ state: 'idle', sessionId: '', elapsedMs: 0, provider: '', microphoneState: '', outputState: '', pending: 0, failed: 0, message: '', diarizeEnabled: false })
+const status = ref<Status>({ state: 'idle', sessionId: '', elapsedMs: 0, provider: '', microphoneState: '', outputState: '', pending: 0, failed: 0, message: '', diarizeEnabled: false, diarizeNote: '', diarizeSessionId: '' })
 const view = ref<View | null>(null)
 const mics = ref<Mic[]>([])
 const selectedMic = ref('')
@@ -336,6 +336,10 @@ watch(() => props.sessionId, (id) => { void load(id) })
         </span>
       </div>
       <small v-if="suggestMessage" class="meeting-message" role="status">{{ suggestMessage }}</small>
+      <div v-if="!status.diarizeEnabled" class="meeting-warning" role="status">
+        Separación de participantes apagada: sin clave de Gemini, todos los que hablan en la reunión salen como "Participante". Cargala en Configuración → Gemini.
+      </div>
+      <div v-else-if="status.diarizeNote && view && status.diarizeSessionId === view.sessionId" class="meeting-warning" role="status">{{ status.diarizeNote }}</div>
       <div v-if="status.state !== 'idle'" class="track-status" role="status">
         <span class="rec-dot" :class="{ live: recording }"></span><strong>{{ elapsed }}</strong>
         <span>Tu micrófono: <em :class="status.microphoneState">{{ trackLabel(status.microphoneState) }}</em></span>

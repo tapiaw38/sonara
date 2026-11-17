@@ -729,7 +729,7 @@ async function analyzeCapture(capturedAt: string) {
 
 window.setInterval(() => { void refreshCapture() }, 1500)
 // Fast enough that a streamed reply reads as it is written.
-window.setInterval(() => { void refreshListening() }, 300)
+window.setInterval(() => { void refreshListening() }, 100)
 // The backend measures one RMS frame every 100ms, so the wave scrolls at the
 // same rate the audio is actually sampled.
 window.setInterval(() => { void refreshLevel() }, 100)

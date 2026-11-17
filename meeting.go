@@ -176,6 +176,11 @@ type MeetingStatus struct {
 	// DiarizeEnabled reflects whether a Gemini key is configured, not whether
 	// the call will actually succeed: that is only known after a meeting ends.
 	DiarizeEnabled bool `json:"diarizeEnabled"`
+	// DiarizeNote says how the last separation of participants ended
+	// (found N, found none, or why it failed); DiarizeSessionID is the meeting
+	// it belongs to, so a stale note is never shown on another meeting.
+	DiarizeNote      string `json:"diarizeNote"`
+	DiarizeSessionID string `json:"diarizeSessionId"`
 }
 
 // MeetingSegmentEvent is the payload of the "meeting:segment" event.
@@ -202,8 +207,9 @@ func (a *App) emitMeetingStatus() { a.emit("meeting:status", a.MeetingTranscript
 func (a *App) MeetingTranscriptStatus() MeetingStatus {
 	a.mu.RLock()
 	run, backend := a.meeting, a.backend
+	note, noteSession := a.diarizeNote, a.diarizeNoteSession
 	a.mu.RUnlock()
-	status := MeetingStatus{State: meetingIdle, DiarizeEnabled: a.diarizer.Configured()}
+	status := MeetingStatus{State: meetingIdle, DiarizeEnabled: a.diarizer.Configured(), DiarizeNote: note, DiarizeSessionID: noteSession}
 	if backend != nil {
 		status.Provider = backend.MeetingProvider()
 	}

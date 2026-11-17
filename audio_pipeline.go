@@ -90,7 +90,7 @@ func (a *App) runSegmentWorker() {
 			a.setSessionStatus(item.session, "No se entendió la intervención")
 			continue
 		}
-		a.startVoiceResponse(item.session, item.language, turn.transcript)
+		a.startVoiceResponse(item.session, item.language, turn.transcript, item.queuedAt)
 	}
 }
 
@@ -173,7 +173,9 @@ func (a *App) setSessionStatus(session uint64, status string) {
 	a.mu.Unlock()
 }
 
-func (a *App) startVoiceResponse(session uint64, language, transcript string) {
+// queuedAt is when the final segment of the turn left the recorder: the clock
+// for the one number that matters, voice end -> first token.
+func (a *App) startVoiceResponse(session uint64, language, transcript string, queuedAt time.Time) {
 	a.mu.Lock()
 	if a.sessionGeneration != session {
 		a.mu.Unlock()
@@ -201,6 +203,11 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string) {
 			a.finishVoiceResponse(session, replyID, transcript, "", fmt.Errorf("backend no inicializado"))
 			return
 		}
+		if language == "en" {
+			// What they said, in Spanish, runs beside the reply instead of in
+			// front of it. A failure here only loses the translation line.
+			go a.streamTranslation(ctx, backend, session, replyID, transcript, queuedAt)
+		}
 		var streamed strings.Builder
 		asked := time.Now()
 		var firstToken time.Duration
@@ -212,19 +219,60 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string) {
 			translation, reply := splitTranslation(streamed.String())
 			a.mu.Lock()
 			if a.sessionGeneration == session && a.replySequence == replyID {
-				a.translation, a.voiceReply = translation, reply
+				if translation != "" {
+					a.translation = translation
+				}
+				a.voiceReply = reply
 			}
 			a.mu.Unlock()
 		})
 		if err == nil {
 			// Time to first token is the number the user actually feels; the
 			// total only says how long the full answer took to finish writing.
-			logf("reply for session %d reply %d (%s/%s): first token %dms, complete %dms, %d chars, %d ctx chars",
+			logf("reply for session %d reply %d (%s/%s): first token %dms, complete %dms, %d chars, %d ctx chars, voice end -> first token %dms",
 				session, replyID, mode, language, firstToken.Milliseconds(),
-				time.Since(asked).Milliseconds(), len(output.Text), len(contextText))
+				time.Since(asked).Milliseconds(), len(output.Text), len(contextText),
+				sinceMS(queuedAt, asked.Add(firstToken)))
 		}
 		a.finishVoiceResponse(session, replyID, transcript, output.Text, err)
 	}()
+}
+
+// sinceMS is end-start in ms, or -1 when start was never recorded (manual
+// sends and tests have no queue time).
+func sinceMS(start, end time.Time) int64 {
+	if start.IsZero() {
+		return -1
+	}
+	return end.Sub(start).Milliseconds()
+}
+
+// streamTranslation fills a.translation with the Spanish version of what the
+// other person said. Guarded by session and reply id like the reply itself, so
+// a late translation can never land on the next turn.
+func (a *App) streamTranslation(ctx context.Context, backend *sonaraBackend.Client, session, replyID uint64, transcript string, queuedAt time.Time) {
+	asked := time.Now()
+	var first time.Duration
+	var streamed strings.Builder
+	_, err := backend.TranslateStream(ctx, transcript, func(delta string) {
+		streamed.WriteString(delta)
+		if first == 0 {
+			first = time.Since(asked)
+		}
+		a.mu.Lock()
+		if a.sessionGeneration == session && a.replySequence == replyID {
+			a.translation = strings.TrimSpace(streamed.String())
+		}
+		a.mu.Unlock()
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			logf("translation failed for turn %d reply %d: %v", session, replyID, err)
+		}
+		return
+	}
+	logf("translation for session %d reply %d: first token %dms, voice end -> first token %dms",
+		session, replyID, first.Milliseconds(), sinceMS(queuedAt, asked.Add(first)))
 }
 
 func (a *App) finishVoiceResponse(session, replyID uint64, transcript, response string, err error) {
@@ -241,7 +289,12 @@ func (a *App) finishVoiceResponse(session, replyID uint64, transcript, response 
 		return
 	}
 	translation, reply := splitTranslation(response)
-	a.translation, a.voiceReply = translation, reply
+	// The translation of what they said arrives on its own request now; only a
+	// model that still emitted the old marker line may overwrite it here.
+	if translation != "" {
+		a.translation = translation
+	}
+	a.voiceReply = reply
 	a.appendSessionMessageLocked("user", transcript)
 	a.appendSessionMessageLocked("assistant", reply)
 	a.listenStatus = "Respuesta sugerida lista"

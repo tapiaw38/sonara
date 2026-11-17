@@ -143,6 +143,8 @@ export namespace main {
 	    failed: number;
 	    message: string;
 	    diarizeEnabled: boolean;
+	    diarizeNote: string;
+	    diarizeSessionId: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new MeetingStatus(source);
@@ -160,6 +162,8 @@ export namespace main {
 	        this.failed = source["failed"];
 	        this.message = source["message"];
 	        this.diarizeEnabled = source["diarizeEnabled"];
+	        this.diarizeNote = source["diarizeNote"];
+	        this.diarizeSessionId = source["diarizeSessionId"];
 	    }
 	}
 	export class TranscriptSegment {

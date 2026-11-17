@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -257,5 +258,28 @@ func TestRunDiarizationFailureLeavesSegmentsUntouched(t *testing.T) {
 		if s.ID == segID && s.SpeakerKey != "" {
 			t.Errorf("a failed diarization pass must not touch segments: %+v", s)
 		}
+	}
+}
+
+// The UI must be able to say why everyone is still "Participante": a failure
+// and a success both leave a note tied to that meeting.
+func TestRunDiarizationLeavesANoteForTheUI(t *testing.T) {
+	a, database := testMeetingApp(t)
+	run := testRun(t, a, database)
+	database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 0, EndMS: 4000, Text: "hola", Status: segmentOK})
+
+	a.diarizer = fakeGemini(t, nil, http.StatusInternalServerError, "")
+	run.diarizePCM = []byte{1, 2, 3}
+	a.runDiarization(run)
+	status := a.MeetingTranscriptStatus()
+	if status.DiarizeSessionID != "m1" || !strings.Contains(status.DiarizeNote, "No se pudieron separar") {
+		t.Fatalf("failure note = %q (session %q)", status.DiarizeNote, status.DiarizeSessionID)
+	}
+
+	a.diarizer = fakeGemini(t, []diarizedSpan{{StartMS: 0, EndMS: 4000, Speaker: "A"}}, http.StatusOK, "")
+	run.diarizePCM = []byte{1, 2, 3}
+	a.runDiarization(run)
+	if note := a.MeetingTranscriptStatus().DiarizeNote; note != "Participantes detectados: 1." {
+		t.Fatalf("success note = %q", note)
 	}
 }

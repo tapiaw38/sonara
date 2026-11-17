@@ -424,6 +424,12 @@ func stableSpeakerKeys(spans []diarizedSpan) map[string]string {
 // runDiarization is the final pass: best-effort, and the only place that reads
 // run.diarizePCM. It never fails the meeting — every error is logged and
 // swallowed, leaving segments with their generic track label.
+func (a *App) setDiarizeNote(sessionID, note string) {
+	a.mu.Lock()
+	a.diarizeNote, a.diarizeNoteSession = note, sessionID
+	a.mu.Unlock()
+}
+
 func (a *App) runDiarization(run *meetingRun) {
 	if !a.diarizer.Configured() {
 		return
@@ -434,6 +440,7 @@ func (a *App) runDiarization(run *meetingRun) {
 	pcm := run.diarizePCM
 	run.diarizeMu.Unlock()
 	if len(pcm) == 0 {
+		a.setDiarizeNote(run.sessionID, "No se capturó audio de la reunión: no hay nada que separar.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), diarizeFinalTimeout)
@@ -441,9 +448,11 @@ func (a *App) runDiarization(run *meetingRun) {
 	spans, err := a.diarizer.diarize(ctx, wavFromPCM(pcm))
 	if err != nil {
 		logf("meeting %s: diarization skipped: %v", run.sessionID, err)
+		a.setDiarizeNote(run.sessionID, "No se pudieron separar los participantes: "+err.Error())
 		return
 	}
 	if len(spans) == 0 {
+		a.setDiarizeNote(run.sessionID, "Gemini no detectó hablantes en el audio de la reunión.")
 		return
 	}
 	a.mu.RLock()
@@ -475,4 +484,5 @@ func (a *App) runDiarization(run *meetingRun) {
 		a.emit("meeting:segment", MeetingSegmentEvent{SessionID: run.sessionID, Segment: segment})
 	}
 	logf("meeting %s: diarization found %d participant(s)", run.sessionID, len(keys))
+	a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", len(keys)))
 }

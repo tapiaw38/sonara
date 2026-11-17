@@ -36,6 +36,7 @@ type Client struct {
 	meeting      assistant.TranscribeUsecase
 	title        assistant.TitleUsecase
 	suggestNames assistant.SuggestSpeakerNamesUsecase
+	translate    assistant.TranslateUsecase
 }
 
 type Response struct {
@@ -90,6 +91,7 @@ func New() *Client {
 		meeting:      assistant.NewTranscribeUsecase(meetingTranscribe, cfg.TranscribeModel),
 		title:        assistant.NewTitleUsecase(textVision, cfg),
 		suggestNames: assistant.NewSuggestSpeakerNamesUsecase(textVision, cfg),
+		translate:    assistant.NewTranslateUsecase(textVision, cfg),
 	}
 }
 
@@ -104,6 +106,13 @@ func (c *Client) Title(ctx context.Context, exchange string) (string, error) {
 // whichever provider TextProvider currently names.
 func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (map[string]string, error) {
 	return c.suggestNames.Execute(ctx, transcript)
+}
+
+// TranslateStream translates what the other person said into Spanish on the
+// fast tier, token by token. Independent of RespondStream so a reply and its
+// translation can run at the same time.
+func (c *Client) TranslateStream(ctx context.Context, text string, onDelta func(string)) (string, error) {
+	return c.translate.ExecuteStream(ctx, text, onDelta)
 }
 
 func (c *Client) Status() string {

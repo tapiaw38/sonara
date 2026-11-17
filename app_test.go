@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -296,8 +297,8 @@ func TestVoicePromptAsksForASuggestionNotAnAnswer(t *testing.T) {
 		}
 	}
 	english := voicePrompt("en", "hi")
-	if !strings.Contains(english, translationMarker) {
-		t.Error("English prompt must ask for the marked translation line")
+	if strings.Contains(english, translationMarker) {
+		t.Error("the translation of what they said is its own parallel request now; the reply prompt must not ask for it")
 	}
 	if !strings.Contains(english, replyTranslationMarker) {
 		t.Error("English prompt must ask for the suggested answer to be translated too")
@@ -458,5 +459,30 @@ func TestSegmentCloseBoundsUnbrokenAudio(t *testing.T) {
 	// A pause always wins over the cap: it is a genuine end of turn.
 	if final, hold := segmentClose(true, meetMaxParts+5); !final || hold {
 		t.Errorf("a pause past the cap = (final %v, hold %v), want (true, false)", final, hold)
+	}
+}
+
+// The translation of what they said streams on its own request. Finishing the
+// reply (which carries no translation line any more) must not blank it.
+func TestFinishVoiceResponseKeepsTheParallelTranslation(t *testing.T) {
+	app := NewApp()
+	app.replySequence = 1
+	app.translation = "¿Qué edad tenés?"
+	app.finishVoiceResponse(app.sessionGeneration, 1, "How old are you", "I'm 30.\n\nES: Tengo 30.", nil)
+	if app.translation != "¿Qué edad tenés?" {
+		t.Errorf("translation = %q, the reply finishing must not clobber it", app.translation)
+	}
+	if !strings.HasPrefix(app.voiceReply, "I'm 30.") {
+		t.Errorf("voiceReply = %q", app.voiceReply)
+	}
+}
+
+func TestSinceMS(t *testing.T) {
+	if got := sinceMS(time.Time{}, time.Now()); got != -1 {
+		t.Errorf("unrecorded start = %d, want -1", got)
+	}
+	start := time.Now()
+	if got := sinceMS(start, start.Add(1500*time.Millisecond)); got != 1500 {
+		t.Errorf("got %d, want 1500", got)
 	}
 }

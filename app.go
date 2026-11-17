@@ -70,6 +70,10 @@ type App struct {
 	saveDialog        func(ctx context.Context, filename string) (string, error)
 	// diarizer is phase 2 (speaker diarization): one per App, started lazily.
 	diarizer *diarizer
+	// diarizeNote is how the last separation of participants ended, and for
+	// which meeting, so the UI can say why everyone is still "Participante"
+	// instead of leaving it to look like a bug. Guarded by mu.
+	diarizeNote, diarizeNoteSession string
 	// suggestNamesHook is the test seam for name_suggestions.go's backend call.
 	suggestNamesHook func(ctx context.Context, transcript string) (map[string]string, error)
 	// microphonesHook is the test seam for Microphones(), so SetMicrophone can
@@ -90,6 +94,9 @@ type meetSegment struct {
 	language string
 	manual   bool
 	final    bool
+	// queuedAt is when the recorder handed the segment over; set by
+	// queueMeetSegment, used only to time voice end -> first token.
+	queuedAt time.Time
 }
 
 type AudioSource struct {
@@ -499,15 +506,16 @@ const suggestionBrief = "Estás asistiendo en vivo a la persona que usa Sonara d
 
 // voicePrompt wraps a transcription with what the assistant should do with it. The
 // reply is always Spanish, so an English call also has to be translated. The
-// translation is asked for on a marked first line so it can be lifted out of
-// the reply and shown under the transcript, which costs no extra round trip.
+// translation of what the other person said is NOT part of this prompt any more:
+// it runs as its own, parallel request (translatePrompt / backend.TranslateStream),
+// because asking for it on the first line made the suggested answer wait for a
+// translation nobody was blocked on.
 func voicePrompt(language, transcript string) string {
 	if language == "en" {
 		// The call is in English, so the answer has to be sayable in English;
 		// the Spanish version is there for the person reading it, not to say.
 		return suggestionBrief +
 			"\n\nLo siguiente es lo que acaba de decir la otra persona, en inglés. Respondé exactamente con este formato, sin encabezados extra:\n" +
-			translationMarker + " <lo que dijo, traducido al español>\n\n" +
 			"<la respuesta sugerida, en inglés, lista para decir en voz alta>\n\n" +
 			replyTranslationMarker + " <esa misma respuesta traducida al español>\n\n" +
 			transcript
@@ -1033,6 +1041,7 @@ func (a *App) nextMeetTurn() meetSegment {
 }
 
 func (a *App) queueMeetSegment(item meetSegment) bool {
+	item.queuedAt = time.Now()
 	if queueSegment(a.segments, item) {
 		return true
 	}
