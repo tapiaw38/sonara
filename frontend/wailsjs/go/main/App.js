@@ -22,6 +22,10 @@ export function CaptureScreen() {
   return window['go']['main']['App']['CaptureScreen']();
 }
 
+export function ClaimWindowFocus() {
+  return window['go']['main']['App']['ClaimWindowFocus']();
+}
+
 export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }

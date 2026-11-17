@@ -12,6 +12,8 @@ export function AudioSources():Promise<Array<main.AudioSource>>;
 
 export function CaptureScreen():Promise<main.CaptureStatus>;
 
+export function ClaimWindowFocus():Promise<void>;
+
 export function DeleteSession(arg1:string):Promise<Array<main.SessionSummary>>;
 
 export function DeleteVoiceSample():Promise<void>;

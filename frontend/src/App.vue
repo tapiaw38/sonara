@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetAzureOpenAISettings, GetCapabilityProviders, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetAzureOpenAIConfig, SetDeepSeekAPIKey, SetGeminiAPIKey, SetLiveTranscribeMode, SetLiveTranscribeProvider, SetManualSend, SetMeetingProvider, SetOpenAIAPIKey, SetTextProvider, SetVisionProvider, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, ClaimWindowFocus, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetAzureOpenAISettings, GetCapabilityProviders, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetAzureOpenAIConfig, SetDeepSeekAPIKey, SetGeminiAPIKey, SetLiveTranscribeMode, SetLiveTranscribeProvider, SetManualSend, SetMeetingProvider, SetOpenAIAPIKey, SetTextProvider, SetVisionProvider, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import MeetingTranscript from './components/MeetingTranscript.vue'
 
@@ -652,6 +652,14 @@ async function saveGeminiKey() {
     savingApiKey.value = false
   }
 }
+
+// Real bug, not cosmetic: this window is translucent (needed for ghost
+// mode's actual see-through effect), which at least on mango leaves it out
+// of focus-follows-mouse — hovering it never gives it keyboard focus, so the
+// compositor's own close keybind (bound to "whatever is focused") silently
+// misses it. Asking for focus on every real mouse entry into the window
+// fixes that without touching the transparency ghost mode depends on.
+window.addEventListener('mouseenter', () => { void ClaimWindowFocus() })
 
 loadState()
 
