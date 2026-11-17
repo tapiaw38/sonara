@@ -369,3 +369,48 @@ func TestTrailingGapsCoverTracksThatNeverCaptured(t *testing.T) {
 		t.Fatalf("only the track that never captured needs a gap: %+v", segments)
 	}
 }
+
+// TestFindMicrophoneAppMatchesByStableNameNotSerial is a regression test for
+// a real bug: SetMicrophone used to compare against AudioSource.Target (the
+// PipeWire serial), but the UI's <option> sends AudioSource.App (the stable
+// node name) — so the match never succeeded and every selection reported
+// "el micrófono ya no está disponible" even with the microphone present.
+func TestFindMicrophoneAppMatchesByStableNameNotSerial(t *testing.T) {
+	sources := []AudioSource{
+		{Target: "2152", App: "alsa_input.pci-0000_00_1f.3.analog-stereo", Label: "Micrófono interno"},
+	}
+	got, err := findMicrophoneApp(sources, "alsa_input.pci-0000_00_1f.3.analog-stereo")
+	if err != nil || got != "alsa_input.pci-0000_00_1f.3.analog-stereo" {
+		t.Fatalf("matching by App (the UI's actual value) failed: got %q, %v", got, err)
+	}
+	if _, err := findMicrophoneApp(sources, "2152"); err == nil {
+		t.Fatal("the ephemeral serial must never match: it is not what the UI sends")
+	}
+	if _, err := findMicrophoneApp(sources, "unplugged-mic"); err == nil {
+		t.Fatal("a microphone no longer present must error")
+	}
+}
+
+func TestSetMicrophoneEndToEnd(t *testing.T) {
+	a, database := testMeetingApp(t)
+	a.microphonesHook = func(context.Context) ([]AudioSource, error) {
+		return []AudioSource{{Target: "2152", App: "alsa_input.mic", Label: "Mic"}}, nil
+	}
+	got, err := a.SetMicrophone("alsa_input.mic")
+	if err != nil || got != "alsa_input.mic" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if a.SelectedMicrophone() != "alsa_input.mic" {
+		t.Errorf("SelectedMicrophone() = %q", a.SelectedMicrophone())
+	}
+	stored := database.setting(settingMicrophone)
+	if stored != "alsa_input.mic" {
+		t.Errorf("stored microphone = %q, want it persisted", stored)
+	}
+	if _, err := a.SetMicrophone("gone"); err == nil {
+		t.Fatal("selecting an unavailable microphone must error")
+	}
+	if _, err := a.SetMicrophone(""); err != nil || a.SelectedMicrophone() != "" {
+		t.Errorf("an empty target must clear the selection, got %q, %v", a.SelectedMicrophone(), err)
+	}
+}

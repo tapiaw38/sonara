@@ -72,6 +72,9 @@ type App struct {
 	diarizer *diarizer
 	// suggestNamesHook is the test seam for name_suggestions.go's backend call.
 	suggestNamesHook func(ctx context.Context, transcript string) (map[string]string, error)
+	// microphonesHook is the test seam for Microphones(), so SetMicrophone can
+	// be tested end to end without a real pw-dump call.
+	microphonesHook func(ctx context.Context) ([]AudioSource, error)
 }
 
 type sessionMessage struct {

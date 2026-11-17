@@ -242,14 +242,9 @@ func (a *App) SetMicrophone(target string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		for _, source := range sources {
-			if source.Target == target {
-				name = source.App
-				break
-			}
-		}
-		if name == "" {
-			return "", fmt.Errorf("el micrófono ya no está disponible")
+		name, err = findMicrophoneApp(sources, target)
+		if err != nil {
+			return "", err
 		}
 	}
 	a.mu.Lock()
@@ -262,6 +257,20 @@ func (a *App) SetMicrophone(target string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+// findMicrophoneApp looks up target (the stable node name, AudioSource.App)
+// among the microphones PipeWire currently reports. target is never the
+// ephemeral AudioSource.Target serial — that gets recreated on every boot or
+// reconnect, so a match on it would never stick; the UI's <option> sends App
+// for exactly this reason.
+func findMicrophoneApp(sources []AudioSource, target string) (string, error) {
+	for _, source := range sources {
+		if source.App == target {
+			return source.App, nil
+		}
+	}
+	return "", fmt.Errorf("el micrófono ya no está disponible")
 }
 
 // StartMeetingTranscript begins recording a new meeting. It never touches the

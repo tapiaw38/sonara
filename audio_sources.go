@@ -28,6 +28,12 @@ func availableMicrophones(ctx context.Context) ([]AudioSource, error) {
 // Microphones lists capture devices (PipeWire Audio/Source nodes), kept apart
 // from AudioSources so the UI can never offer an output stream as a microphone.
 func (a *App) Microphones() ([]AudioSource, error) {
+	a.mu.RLock()
+	hook := a.microphonesHook
+	a.mu.RUnlock()
+	if hook != nil {
+		return hook(a.requestContext())
+	}
 	return availableMicrophones(a.requestContext())
 }
 
