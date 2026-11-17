@@ -18,3 +18,5 @@ frontend/dist/
 *.log
 /sonara
 __pycache__/
+
+/docs
