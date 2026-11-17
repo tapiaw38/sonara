@@ -74,6 +74,14 @@ type App struct {
 	// which meeting, so the UI can say why everyone is still "Participante"
 	// instead of leaving it to look like a bug. Guarded by mu.
 	diarizeNote, diarizeNoteSession string
+	// Live copilot transcription (live_transcribe.go).
+	live          *liveRuntime
+	liveStreaming bool
+	openLive      func(ctx context.Context, language string) (liveConn, error)
+	replyHook     func(session uint64, language, transcript string, queuedAt time.Time)
+	// voiceRetractions counts replies taken back (speculation that did not
+	// hold); the UI drops the message it started for each one.
+	voiceRetractions uint64
 	// suggestNamesHook is the test seam for name_suggestions.go's backend call.
 	suggestNamesHook func(ctx context.Context, transcript string) (map[string]string, error)
 	// microphonesHook is the test seam for Microphones(), so SetMicrophone can
@@ -144,6 +152,10 @@ type ListeningState struct {
 	SessionID       string  `json:"sessionId"`
 	AudioGuessing   bool    `json:"audioGuessing"`
 	AudioCandidates int     `json:"audioCandidates"`
+	// Retractions counts replies taken back (anticipated replies that did not
+	// hold); the UI removes the message it started for each.
+	Retractions uint64 `json:"retractions"`
+	LiveMode    string `json:"liveMode"`
 }
 
 // NewApp creates a new App application struct
@@ -238,6 +250,9 @@ func (a *App) startup(ctx context.Context) {
 			if err := a.backend.SetMeetingProvider(chosen.MeetingProvider); err != nil {
 				logf("stored meeting provider rejected: %v", err)
 			}
+			a.mu.Lock()
+			a.liveStreaming = chosen.LiveMode == liveModeStream
+			a.mu.Unlock()
 		}
 		if language == "" {
 			language = "es"
@@ -311,6 +326,8 @@ func (a *App) ListeningStatus() ListeningState {
 		Streaming:       a.streaming,
 		Language:        a.audioLanguage,
 		Translation:     a.translation,
+		Retractions:     a.voiceRetractions,
+		LiveMode:        liveModeOf(a.liveStreaming),
 		DroppedSegments: a.droppedSegments,
 		AudioSource:     a.selectedAudioSource,
 		SessionID:       a.sessionID,
@@ -1094,6 +1111,13 @@ func trimTrailingSilence(segment []byte, silenceFrames int) []byte {
 
 // listenMeetAudio captures PipeWire output from meeting browsers and Teams.
 // It never falls back to the default system monitor, excluding unrelated audio.
+func liveModeOf(stream bool) string {
+	if stream {
+		return liveModeStream
+	}
+	return liveModeBatch
+}
+
 func (a *App) listenMeetAudio(ctx context.Context) {
 	target, err := a.audioTarget(ctx)
 	if err != nil {
@@ -1135,11 +1159,27 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	// until a genuinely quiet frame proves the stream actually paused.
 	awaitingSilence := false
 	var turn meetSegment
+	// liveRT is the streaming session of the turn being recorded (live mode only).
+	var liveRT *liveRuntime
+	liveOn := a.liveStreamingEnabled()
+	// abortLive gives up the current live turn after a streaming error: the
+	// failure is shown and nothing is recorded until real silence returns —
+	// there is no fallback to batch transcription.
+	abortLive := func(err error) {
+		logDedup("live-stream", "live transcription: %v", err)
+		a.setListenStatus("Transcripción en vivo: " + err.Error())
+		liveRT, recording, awaitingSilence = nil, false, true
+		startFrames, voicedFrames, silenceFrames = 0, 0, 0
+		speaking.Store(false)
+		segment = segment[:0]
+	}
 	for {
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			// Pausing cancels the context and kills the recorder, so this is
 			// also where a segment cut short by the user gets sent.
-			if recording && voicedFrames >= meetVoiceFrames {
+			if recording && liveRT != nil {
+				liveRT.end(time.Now(), voicedFrames < meetVoiceFrames)
+			} else if recording && voicedFrames >= meetVoiceFrames {
 				turn.pcm, turn.final = segment, true
 				turn.part++
 				a.queueMeetSegment(turn)
@@ -1179,6 +1219,17 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 					turn = a.nextMeetTurn()
 					speaking.Store(true)
 					a.setListenStatus("Intervención detectada…")
+					if liveOn {
+						rt, err := a.ensureLive(ctx)
+						if err == nil {
+							err = rt.begin(turn, segment)
+						}
+						if err != nil {
+							abortLive(err)
+							continue
+						}
+						liveRT = rt
+					}
 				}
 			} else {
 				startFrames, segment = 0, segment[:0]
@@ -1193,6 +1244,38 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 			silenceFrames++
 		}
 		ended := silenceFrames >= meetSilenceFrames
+		if liveRT != nil {
+			if err := liveRT.frame(frame); err != nil {
+				abortLive(err)
+				continue
+			}
+			switch {
+			case voice:
+				liveRT.cancelSpeculation()
+			case silenceFrames == meetSpecFrames:
+				liveRT.speculate()
+			}
+			long := len(segment)/meetFrameBytes >= liveMaxFrames
+			if !ended && !long {
+				continue
+			}
+			voiceEnd := time.Now().Add(-time.Duration(silenceFrames) * 100 * time.Millisecond)
+			if err := liveRT.end(voiceEnd, voicedFrames < meetVoiceFrames); err != nil {
+				abortLive(err)
+				continue
+			}
+			if !ended {
+				logf("live turn %d/%d stopped after %ds without a pause; waiting for silence", turn.session, turn.turn, liveMaxFrames/10)
+				a.setListenStatus("Audio continuo: esperando una pausa real")
+				awaitingSilence = true
+			} else {
+				a.setListenStatus("Escuchando audio de la reunión")
+			}
+			liveRT, recording, startFrames, voicedFrames, silenceFrames = nil, false, 0, 0, 0
+			speaking.Store(false)
+			segment = segment[:0]
+			continue
+		}
 		if !ended && len(segment)/meetFrameBytes < meetMaximumFrames {
 			continue
 		}

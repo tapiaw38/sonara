@@ -154,6 +154,10 @@ export function SetGeminiAPIKey(arg1) {
   return window['go']['main']['App']['SetGeminiAPIKey'](arg1);
 }
 
+export function SetLiveTranscribeMode(arg1) {
+  return window['go']['main']['App']['SetLiveTranscribeMode'](arg1);
+}
+
 export function SetLiveTranscribeProvider(arg1) {
   return window['go']['main']['App']['SetLiveTranscribeProvider'](arg1);
 }

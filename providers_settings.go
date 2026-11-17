@@ -30,6 +30,9 @@ func defaultedProviders(p CapabilityProviders) CapabilityProviders {
 	if p.MeetingProvider == "" {
 		p.MeetingProvider = "openai"
 	}
+	if p.LiveMode == "" {
+		p.LiveMode = liveModeBatch
+	}
 	return p
 }
 

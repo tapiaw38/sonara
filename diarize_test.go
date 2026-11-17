@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestOverlapSpeakerPicksMostTimeInWindow(t *testing.T) {
@@ -281,5 +283,58 @@ func TestRunDiarizationLeavesANoteForTheUI(t *testing.T) {
 	a.runDiarization(run)
 	if note := a.MeetingTranscriptStatus().DiarizeNote; note != "Participantes detectados: 1." {
 		t.Fatalf("success note = %q", note)
+	}
+}
+
+// While the meeting is still recording, participants get labeled without
+// waiting for it to end, and a pass that changes nothing announces nothing.
+func TestPeriodicDiarizationLabelsDuringTheMeeting(t *testing.T) {
+	saved := diarizePeriod
+	diarizePeriod = 20 * time.Millisecond
+	t.Cleanup(func() { diarizePeriod = saved })
+
+	a, database := testMeetingApp(t)
+	run := testRun(t, a, database)
+	id, _ := database.insertSegment("m1", TranscriptSegment{Track: trackOutput, StartMS: 0, EndMS: 4000, Text: "hola", Status: segmentOK})
+	a.diarizer = fakeGemini(t, []diarizedSpan{{StartMS: 0, EndMS: 4000, Speaker: "A"}}, http.StatusOK, "")
+
+	var mu sync.Mutex
+	events := 0
+	a.emitHook = func(_ string, data any) {
+		if _, ok := data.(MeetingSegmentEvent); ok {
+			mu.Lock()
+			events++
+			mu.Unlock()
+		}
+	}
+	run.diarizePCM = make([]byte, diarizeMinGrowth+1) // a minute of audio recorded so far
+
+	ctx, cancel := context.WithCancel(context.Background())
+	run.periodic.Add(1)
+	go a.periodicDiarization(ctx, run)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		segments, _ := database.transcriptSegments("m1")
+		if len(segments) == 1 && segments[0].ID == id && segments[0].SpeakerKey == "spk_0" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond) // several more periods with no new audio
+	cancel()
+	run.periodic.Wait()
+
+	segments, _ := database.transcriptSegments("m1")
+	if segments[0].SpeakerKey != "spk_0" {
+		t.Fatalf("speaker_key = %q: the segment should be labeled before the meeting ends", segments[0].SpeakerKey)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if events != 1 {
+		t.Errorf("%d events: only the first pass changes anything, and unchanged labels must not be re-announced; with no new audio there are no new passes", events)
+	}
+	if note := a.MeetingTranscriptStatus().DiarizeNote; !strings.Contains(note, "hasta ahora") {
+		t.Errorf("a mid-meeting note should say it is partial, got %q", note)
 	}
 }

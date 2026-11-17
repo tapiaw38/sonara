@@ -445,14 +445,71 @@ func (a *App) runDiarization(run *meetingRun) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), diarizeFinalTimeout)
 	defer cancel()
+	a.applyDiarization(ctx, run, pcm, true)
+}
+
+// diarizePeriod is how often the participants are re-separated while the
+// meeting is still being recorded. A var so tests do not wait minutes.
+var diarizePeriod = 3 * time.Minute
+
+const (
+	// diarizeMinGrowth is how much new audio (60 s) a pass needs to be worth
+	// re-uploading the whole recording again.
+	diarizeMinGrowth = 60 * meetSampleRate * 2
+)
+
+// periodicDiarization re-separates the participants while the meeting runs, so
+// names appear during the call and not only after it. Each pass uploads the
+// whole recording so far (a fresh Gemini call has no memory of the last one),
+// which is why it only runs when a minute of new audio has accumulated, and
+// why the cost of a long meeting grows with every pass.
+//
+// Every pass relabels every segment it covers, and numbering follows who
+// speaks first in the audio: it is stable while the early speakers stay the
+// same, but a later pass can reassign a number, and a name typed for a number
+// (RenameMeetingSpeaker) follows the number, not the person. The final pass
+// after the meeting always has the last word.
+func (a *App) periodicDiarization(ctx context.Context, run *meetingRun) {
+	defer run.periodic.Done()
+	lastBytes := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(diarizePeriod):
+		}
+		if !a.diarizer.Configured() {
+			continue
+		}
+		run.diarizeMu.Lock()
+		pcm := run.diarizePCM // append only ever writes past len, so this prefix is stable
+		run.diarizeMu.Unlock()
+		if len(pcm)-lastBytes < diarizeMinGrowth {
+			continue
+		}
+		lastBytes = len(pcm)
+		passCtx, cancel := context.WithTimeout(ctx, diarizeFinalTimeout)
+		a.applyDiarization(passCtx, run, pcm, false)
+		cancel()
+	}
+}
+
+// applyDiarization separates the speakers in pcm and labels the stored
+// meeting_output segments it covers. final marks the pass after capture
+// stopped; mid-meeting passes word their note as partial.
+func (a *App) applyDiarization(ctx context.Context, run *meetingRun, pcm []byte, final bool) {
 	spans, err := a.diarizer.diarize(ctx, wavFromPCM(pcm))
 	if err != nil {
-		logf("meeting %s: diarization skipped: %v", run.sessionID, err)
-		a.setDiarizeNote(run.sessionID, "No se pudieron separar los participantes: "+err.Error())
+		if ctx.Err() == nil {
+			logf("meeting %s: diarization skipped: %v", run.sessionID, err)
+			a.setDiarizeNote(run.sessionID, "No se pudieron separar los participantes: "+err.Error())
+		}
 		return
 	}
 	if len(spans) == 0 {
-		a.setDiarizeNote(run.sessionID, "Gemini no detectó hablantes en el audio de la reunión.")
+		if final {
+			a.setDiarizeNote(run.sessionID, "Gemini no detectó hablantes en el audio de la reunión.")
+		}
 		return
 	}
 	a.mu.RLock()
@@ -476,6 +533,9 @@ func (a *App) runDiarization(run *meetingRun) {
 			continue
 		}
 		key := keys[raw]
+		if segment.SpeakerKey == key {
+			continue // nothing changed: do not re-announce it
+		}
 		if err := database.setSegmentSpeaker(segment.ID, key); err != nil {
 			logf("meeting %s: could not store the speaker for segment %d: %v", run.sessionID, segment.ID, err)
 			continue
@@ -483,6 +543,10 @@ func (a *App) runDiarization(run *meetingRun) {
 		segment.SpeakerKey = key
 		a.emit("meeting:segment", MeetingSegmentEvent{SessionID: run.sessionID, Segment: segment})
 	}
-	logf("meeting %s: diarization found %d participant(s)", run.sessionID, len(keys))
-	a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", len(keys)))
+	logf("meeting %s: diarization (final=%v) found %d participant(s)", run.sessionID, final, len(keys))
+	if final {
+		a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", len(keys)))
+	} else {
+		a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados hasta ahora: %d (se actualiza durante la reunión).", len(keys)))
+	}
 }

@@ -61,6 +61,7 @@ export namespace main {
 	    vision: string;
 	    liveTranscribe: string;
 	    meeting: string;
+	    liveMode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CapabilityProviders(source);
@@ -72,6 +73,7 @@ export namespace main {
 	        this.vision = source["vision"];
 	        this.liveTranscribe = source["liveTranscribe"];
 	        this.meeting = source["meeting"];
+	        this.liveMode = source["liveMode"];
 	    }
 	}
 	export class CaptureStatus {
@@ -108,6 +110,8 @@ export namespace main {
 	    sessionId: string;
 	    audioGuessing: boolean;
 	    audioCandidates: number;
+	    retractions: number;
+	    liveMode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ListeningState(source);
@@ -130,6 +134,8 @@ export namespace main {
 	        this.sessionId = source["sessionId"];
 	        this.audioGuessing = source["audioGuessing"];
 	        this.audioCandidates = source["audioCandidates"];
+	        this.retractions = source["retractions"];
+	        this.liveMode = source["liveMode"];
 	    }
 	}
 	export class MeetingStatus {

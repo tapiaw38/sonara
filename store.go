@@ -205,6 +205,8 @@ type CapabilityProviders struct {
 	Vision          string `json:"vision"`
 	LiveTranscribe  string `json:"liveTranscribe"`
 	MeetingProvider string `json:"meeting"`
+	// LiveMode is how the copilot transcribes: "batch" (default) or "stream".
+	LiveMode string `json:"liveMode"`
 }
 
 func (s *store) capabilityProviders() (CapabilityProviders, error) {

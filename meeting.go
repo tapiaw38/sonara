@@ -136,6 +136,9 @@ type meetingRun struct {
 	diarizeMu     sync.Mutex
 	diarizePCM    []byte
 	diarizeCapped bool
+	// periodic is the mid-meeting separation loop; finishMeeting waits for it
+	// before the final pass so the two never relabel at the same time.
+	periodic sync.WaitGroup
 }
 
 func (r *meetingRun) elapsedMS() int64 { return time.Since(r.started).Milliseconds() }
@@ -336,6 +339,8 @@ func (a *App) StartMeetingTranscript() (MeetingStatus, error) {
 		run.recorders.Add(1)
 		go a.recordTrack(ctx, run, track)
 	}
+	run.periodic.Add(1)
+	go a.periodicDiarization(ctx, run)
 	logf("meeting transcript %s started (provider %s)", sessionID, backend.MeetingProvider())
 	a.emitMeetingStatus()
 	return a.MeetingTranscriptStatus(), nil
@@ -386,6 +391,7 @@ func (a *App) recordTrailingGaps(run *meetingRun) {
 
 func (a *App) finishMeeting(run *meetingRun) {
 	run.recorders.Wait()
+	run.periodic.Wait()
 	a.recordTrailingGaps(run)
 	close(run.jobs)
 	run.workers.Wait()

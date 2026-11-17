@@ -78,6 +78,8 @@ export function SetDeepSeekAPIKey(arg1:string):Promise<void>;
 
 export function SetGeminiAPIKey(arg1:string):Promise<void>;
 
+export function SetLiveTranscribeMode(arg1:string):Promise<void>;
+
 export function SetLiveTranscribeProvider(arg1:string):Promise<void>;
 
 export function SetManualSend(arg1:boolean):Promise<boolean>;

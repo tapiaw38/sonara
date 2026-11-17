@@ -1,6 +1,6 @@
 # Plan: fluidez en inglés y detección de participantes
 
-Fecha: 2026-11-17. Estado: implementado el aviso de participantes y la fase 1 parcial de fluidez (traducción en paralelo, métrica "fin de voz → primer token", sondeo a 100 ms). Pendiente: fase 2 (transcripción en vivo), fase 3, pasada periódica de participantes. Rama actual: `feat/meeting-transcript`.
+Fecha: 2026-11-17. Estado: implementado todo el plan: aviso de participantes, fase 1 (traducción en paralelo, métrica, sondeo a 100 ms), fase 2 (transcripción en vivo por WebSocket), fase 3 (respuesta anticipada) y pasada periódica de participantes. **Sin verificar contra los servicios reales** (ver abajo).
 
 Dos problemas reportados:
 
@@ -94,3 +94,14 @@ Tres cosas que explican la sensación de lentitud:
 - [OpenAI, modelos en retirada](https://developers.openai.com/api/docs/deprecations)
 - [Microsoft, transcripción en vivo con gpt-4o-transcribe por WebSocket](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/real-time-speech-transcription-with-gpt-4o-transcribe-and-gpt-4o-mini-transcribe/4410353)
 - [Microsoft Q&A, gpt-4o-transcribe-diarize en Azure](https://learn.microsoft.com/en-us/answers/questions/5864686/azure-openai-realtime-api-gpt-4o-transcribe-diariz) (fechas de retirada sin confirmar)
+
+## Implementado (2026-11-17)
+
+- **Fase 2, transcripción en vivo** (`backend/.../realtime`, `live_transcribe.go`): modo opt-in en Configuración → Proveedores → "Modo de transcripción en vivo". Streaming a `wss://api.openai.com/v1/realtime?intent=transcription` con `gpt-live-transcribe` (PCM 24 kHz, `delay: minimal`, sin detección de turno del servidor: el corte de turno sigue siendo el de la app, con el commit explícito). Texto parcial en pantalla mientras hablan. Sólo con OpenAI como proveedor de transcripción en vivo; si falla se muestra el error, **no hay vuelta al modo por lotes**. No admite el modo manual.
+- **Fase 3, respuesta anticipada**: a los 300 ms de silencio se empieza la respuesta con el texto parcial; si vuelve la voz antes de los 500 ms se retira; cuando llega la transcripción final, si dice lo mismo (ignorando mayúsculas y puntuación) la respuesta sigue, si no se retira y se reinicia con el texto final. La interfaz borra el mensaje de toda respuesta retirada (`Retractions`). Una respuesta retirada cuesta tokens, nunca deja una respuesta equivocada en pantalla.
+- **Participantes durante la reunión**: cada 3 min, si hay más de 1 min de audio nuevo, se vuelve a separar toda la grabación hasta ese momento y se etiquetan los fragmentos cubiertos. La pasada final al detener sigue teniendo la última palabra. Límite conocido: cada pasada vuelve a subir todo el audio (el costo crece con la duración) y la numeración puede cambiar entre pasadas; un nombre escrito para "Participante 2" sigue al número, no a la persona.
+
+### Verificado y no verificado
+- Verificado con servidores falsos: el protocolo del cliente (sesión, append en 24 kHz, commit, eventos, cierre), la alineación de turnos con los eventos `committed`, la anticipación y su retiro, el reinicio con texto distinto, y la pasada periódica.
+- **No verificado**: ninguna conexión real a OpenAI Realtime. Los nombres de eventos y el `session.update` salen de la documentación oficial; en particular, que lleguen deltas antes del commit y cómo responde el servidor a un commit con poco audio son suposiciones razonables, no hechos comprobados. Probá primero una sesión corta y mirá el log (`live transcription …`).
+- Sin hacer: empujar el texto con eventos en vez de sondear (con 100 ms de sondeo no hace falta), probar Azure como proveedor (faltan las versiones de API en tu configuración).

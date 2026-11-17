@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetAzureOpenAISettings, GetCapabilityProviders, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetAzureOpenAIConfig, SetDeepSeekAPIKey, SetGeminiAPIKey, SetLiveTranscribeProvider, SetManualSend, SetMeetingProvider, SetOpenAIAPIKey, SetTextProvider, SetVisionProvider, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { AIEndpoint, AnalyzeLastCapture, AudioLevel, AudioSources, CaptureScreen, DeleteSession, DiscardPendingSegment, GetAzureOpenAISettings, GetCapabilityProviders, GetSessionProfile, GetUIPreferences, IsListening, LastCapture, ListeningStatus, NewSession, OpenSession, SaveSessionProfile, SaveUIPreferences as SaveUIPreferencesToDB, SendMessage, SendPendingSegment, Sessions, SetAssistantMode, SetAudioLanguage, SetAudioSource, SetAzureOpenAIConfig, SetDeepSeekAPIKey, SetGeminiAPIKey, SetLiveTranscribeMode, SetLiveTranscribeProvider, SetManualSend, SetMeetingProvider, SetOpenAIAPIKey, SetTextProvider, SetVisionProvider, StartListening, StopListening, ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import MeetingTranscript from './components/MeetingTranscript.vue'
 
@@ -32,6 +32,8 @@ const providerText = ref('openai')
 const providerVision = ref('openai')
 const providerLiveTranscribe = ref('openai')
 const providerMeeting = ref('openai')
+const liveMode = ref('batch')
+const lastRetractions = ref(0)
 const providersMessage = ref('')
 const draft = ref('')
 const transcript = ref('Esperando audio de la reunión…')
@@ -468,6 +470,7 @@ async function openSession(id: string) {
     analyzingCapture.value = false
     const state = await ListeningStatus()
     lastVoiceSequence.value = state.sequence
+    lastRetractions.value = state.retractions
     transcript.value = state.transcript
     currentSessionID.value = id
     if (selected?.mode) await setMode(selected.mode)
@@ -556,6 +559,7 @@ async function loadProviders() {
     providerVision.value = providers.vision
     providerLiveTranscribe.value = providers.liveTranscribe
     providerMeeting.value = providers.meeting
+    liveMode.value = providers.liveMode || 'batch'
   } catch {
     // Keep the "openai" defaults the refs already have.
   }
@@ -606,6 +610,17 @@ async function saveAzureConfig(clearKey: boolean) {
     azureMessage.value = String(error || 'No se pudo guardar')
   } finally {
     savingAzure.value = false
+  }
+}
+
+async function setLiveMode(mode: string) {
+  providersMessage.value = ''
+  try {
+    await SetLiveTranscribeMode(mode)
+    liveMode.value = mode
+  } catch (error) {
+    providersMessage.value = String(error || 'No se pudo cambiar el modo')
+    await loadProviders()
   }
 }
 
@@ -767,6 +782,12 @@ async function refreshListening() {
       const panel = transcriptPanel.value
       if (panel) panel.scrollTop = panel.scrollHeight
     })
+    // An anticipated reply that did not hold: drop the message it started.
+    if (state.retractions > lastRetractions.value) {
+      lastRetractions.value = state.retractions
+      if (streamingIndex.value !== null && streamingIndex.value === messages.value.length - 1) messages.value.pop()
+      streamingIndex.value = null
+    }
     if (state.sequence > lastVoiceSequence.value) {
       messages.value.push({
         role: 'assistant',
@@ -934,6 +955,9 @@ async function sendMessage() {
           <select id="provider-live-transcribe" :value="providerLiveTranscribe" @change="setProvider('liveTranscribe', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="azure">Azure OpenAI</option></select>
           <label for="provider-meeting">Transcripción de reuniones</label>
           <select id="provider-meeting" :value="providerMeeting" @change="setProvider('meeting', ($event.target as HTMLSelectElement).value)"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="azure">Azure OpenAI</option></select>
+          <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
+          <select id="live-mode" :value="liveMode" @change="setLiveMode(($event.target as HTMLSelectElement).value)"><option value="batch">Por lotes (grabar, subir, transcribir)</option><option value="stream">En vivo (OpenAI, experimental): texto mientras hablan</option></select>
+          <small class="provider-hint">En vivo requiere OpenAI como proveedor de transcripción en vivo, usa grabación a 24 kHz hacia OpenAI y no admite el modo manual.</small>
           <small v-if="providersMessage" role="status" class="provider-error">{{ providersMessage }}</small>
         </div>
       </section>
