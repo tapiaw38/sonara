@@ -653,12 +653,6 @@ async function saveGeminiKey() {
   }
 }
 
-// Real bug, not cosmetic: this window is translucent (needed for ghost
-// mode's actual see-through effect), which at least on mango leaves it out
-// of focus-follows-mouse — hovering it never gives it keyboard focus, so the
-// compositor's own close keybind (bound to "whatever is focused") silently
-// misses it. Asking for focus on every real mouse entry into the window
-// fixes that without touching the transparency ghost mode depends on.
 window.addEventListener('mouseenter', () => { void ClaimWindowFocus() })
 
 loadState()

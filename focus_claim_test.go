@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// ClaimWindowFocus must never panic or block past its own timeout, on any
-// machine — most CI/dev machines running this test have no wlrctl at all.
 func TestClaimWindowFocusNeverPanics(t *testing.T) {
 	a := NewApp()
 	done := make(chan struct{})
