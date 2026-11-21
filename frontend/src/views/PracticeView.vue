@@ -10,6 +10,8 @@ import {
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { usePanelResize } from '../composables/usePanelResize'
 
+const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
+
 type Phase =
   'idle' | 'listening' | 'speaking' | 'capturing' | 'transcribing' | 'thinking' | 'synthesizing'
 
@@ -247,6 +249,15 @@ onBeforeUnmount(() => {
           Un entrevistador de voz te hace preguntas y responde en el idioma configurado; vos
           respondés hablando, sin tocar nada.
         </p>
+      </div>
+      <div class="content-actions">
+        <button
+          class="session-setup-trigger"
+          title="Tipo de entrevista, empresa, puesto, objetivo y tu experiencia"
+          @click="emit('open-session-setup')"
+        >
+          ＋ Contexto
+        </button>
       </div>
     </div>
 

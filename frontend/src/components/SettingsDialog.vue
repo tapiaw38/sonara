@@ -95,10 +95,11 @@ async function saveApiKey() {
   savingApiKey.value = true
   apiKeyMessage.value = ''
   try {
+    const removing = !apiKey.value
     await SetOpenAIAPIKey(apiKey.value)
     apiKey.value = ''
-    endpoint.value = await AIEndpoint()
-    apiKeyMessage.value = endpoint.value.includes('Falta')
+    await refreshEndpoint()
+    apiKeyMessage.value = removing
       ? 'API key eliminada de esta sesión'
       : 'API key configurada para esta sesión'
   } catch (error) {
@@ -121,6 +122,7 @@ async function saveDeepSeekKey() {
     const removing = !deepseekKey.value
     await SetDeepSeekAPIKey(deepseekKey.value)
     deepseekKey.value = ''
+    await refreshEndpoint()
     deepseekMessage.value = removing
       ? 'Clave quitada.'
       : 'Clave guardada. Elegí DeepSeek en "Proveedores" para usarla.'
@@ -152,6 +154,7 @@ async function saveAzureConfig(clearKey: boolean) {
     )
     azureKey.value = ''
     await loadAzureSettings() // reload hasKey from the backend rather than guess it here
+    await refreshEndpoint()
     azureMessage.value = clearKey
       ? 'Clave quitada.'
       : 'Guardado. Elegí Azure en "Proveedores" para usarlo.'
@@ -173,6 +176,11 @@ async function setLiveMode(mode: string) {
   }
 }
 
+// The footer's "IA: …" names the text provider and whether it is set up.
+async function refreshEndpoint() {
+  endpoint.value = await AIEndpoint()
+}
+
 async function setProvider(
   capability: 'text' | 'vision' | 'liveTranscribe' | 'meeting',
   name: string,
@@ -192,6 +200,7 @@ async function setProvider(
       await SetMeetingProvider(name)
       providerMeeting.value = name
     }
+    await refreshEndpoint()
   } catch (error) {
     providersMessage.value = String(error || 'No se pudo cambiar el proveedor')
     await loadProviders() // revert the dropdown to what is actually active

@@ -101,6 +101,16 @@ const translation = ref('')
 const transcriptHistory = ref<TranscriptEntry[]>([])
 const MAX_TRANSCRIPT_HISTORY = 50
 const transcriptPanel = ref<HTMLElement | null>(null)
+// Follow new text until the user scrolls up to read; scrolling back to the
+// end resumes it. Decided by the user's scrolling, not by measuring after
+// each update: one long line or a late translation would otherwise jump past
+// the "near the end" margin and silently stop the following.
+const followTranscript = ref(true)
+function onTranscriptScroll() {
+  const panel = transcriptPanel.value
+  if (panel)
+    followTranscript.value = panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72
+}
 function archiveCurrentTranscript() {
   // Only a real, answered turn is worth keeping: idle/status placeholders
   // ("Esperando audio…", "Sesión reabierta", …) never got a translation.
@@ -416,10 +426,11 @@ async function refreshListening() {
     }
     transcriptPartial.value = state.partial
     translation.value = state.translation
-    const panel = transcriptPanel.value
-    if (panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72) {
+    if (followTranscript.value) {
       void nextTick(() => {
-        transcriptPanel.value?.scrollTo({ top: transcriptPanel.value.scrollHeight })
+        const panel = transcriptPanel.value
+        if (panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight > 1)
+          panel.scrollTop = panel.scrollHeight
       })
     }
     // An anticipated reply that did not hold: drop the message it started.
@@ -487,6 +498,7 @@ async function resetAfterNewSession() {
   transcript.value = 'Esperando audio de la reunión…'
   translation.value = ''
   transcriptHistory.value = []
+  followTranscript.value = true
   draft.value = ''
   lastVoiceSequence.value = (await ListeningStatus()).sequence
   streamingIndex.value = null
@@ -512,6 +524,7 @@ async function restoreOpenedSession(opened: {
     : 'Esta sesión no tiene mensajes guardados.'
   translation.value = ''
   transcriptHistory.value = []
+  followTranscript.value = true
   draft.value = ''
   streamingIndex.value = null
   sendingMessage.value = false
@@ -585,7 +598,7 @@ onBeforeUnmount(() => {
         <span>Transcripción</span
         ><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span>
       </div>
-      <div ref="transcriptPanel" class="transcript-body">
+      <div ref="transcriptPanel" class="transcript-body" @scroll.passive="onTranscriptScroll">
         <div
           v-for="(entry, index) in transcriptHistory"
           :key="index"

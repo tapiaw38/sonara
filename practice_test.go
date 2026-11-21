@@ -96,3 +96,14 @@ func TestReadPracticeAnswerInterruptsAfterSustainedVoice(t *testing.T) {
 		t.Fatal("expected interruption audio to be captured without the preceding echo")
 	}
 }
+
+func TestFramePracticeAnswerPairsQuestion(t *testing.T) {
+	history := []sessionMessage{{role: "assistant", text: "¿Qué stack usás?"}, {role: "user", text: "old"}}
+	got := framePracticeAnswer(lastInterviewerQuestion(history), "Go y Postgres", "es")
+	if got != "Tu pregunta anterior: ¿Qué stack usás?\nRespuesta del candidato: Go y Postgres" {
+		t.Fatalf("got %q", got)
+	}
+	if framePracticeAnswer("", "hola", "es") != "hola" {
+		t.Fatal("without a previous question the answer goes as is")
+	}
+}

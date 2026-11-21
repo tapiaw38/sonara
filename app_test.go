@@ -145,14 +145,19 @@ func TestNewSessionRejectsLateVoiceResult(t *testing.T) {
 func TestSessionHistoryUsesStoredMessages(t *testing.T) {
 	app := NewApp()
 	app.mu.Lock()
-	for i := range sessionHistoryLimit + 2 {
-		app.appendSessionMessageLocked("user", fmt.Sprintf("message-%d", i))
+	long := strings.Repeat("x", 400)
+	for i := range 20 {
+		app.appendSessionMessageLocked("user", fmt.Sprintf("message-%d %s", i, long))
 	}
+	app.memorySummary = "summary of the early talk"
 	context := app.buildSessionContextLocked()
-	length := len(app.sessionHistory)
+	window, pending := len(app.sessionHistory), len(app.memoryPending)
 	app.mu.Unlock()
-	if length != sessionHistoryLimit || strings.Contains(context, "message-0\n") || !strings.Contains(context, "message-11") {
-		t.Errorf("stored=%d, context=%q", length, context)
+	// The window holds the newest turns, the rest waits for the summary, and the
+	// context carries the summary plus the latest turn, never the oldest.
+	if window >= 20 || window+pending != 20 || strings.Contains(context, "message-0 ") ||
+		!strings.Contains(context, "message-19") || !strings.Contains(context, "summary of the early talk") {
+		t.Errorf("window=%d pending=%d context=%q", window, pending, context)
 	}
 }
 
@@ -484,5 +489,26 @@ func TestSinceMS(t *testing.T) {
 	start := time.Now()
 	if got := sinceMS(start, start.Add(1500*time.Millisecond)); got != 1500 {
 		t.Errorf("got %d, want 1500", got)
+	}
+}
+
+func TestNewSessionInheritsLastProfile(t *testing.T) {
+	app, database := testMeetingApp(t)
+	app.mu.RLock()
+	first := app.sessionID
+	app.mu.RUnlock()
+	if err := database.saveSession(first, "interview", "es"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SaveSessionProfile(first, SessionProfile{Scenario: "Técnica", Company: "Acme", Role: "Go dev"}); err != nil {
+		t.Fatal(err)
+	}
+	app.NewSession()
+	app.mu.RLock()
+	second, profile := app.sessionID, app.sessionProfile
+	app.mu.RUnlock()
+	stored, err := app.GetSessionProfile(second)
+	if second == first || profile.Company != "Acme" || err != nil || stored.Role != "Go dev" {
+		t.Fatalf("new session %q got %+v, stored %+v (%v)", second, profile, stored, err)
 	}
 }

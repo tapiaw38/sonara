@@ -334,7 +334,7 @@ async function toggleAlwaysOnTop() {
           @opened="meetingSessionID = $event"
           @sessions-changed="refreshSessions"
         />
-        <PracticeView v-if="view === 'practice'" />
+        <PracticeView v-if="view === 'practice'" @open-session-setup="showSessionSetup = true" />
         <div v-show="view === 'copilot'" style="display: contents">
           <CopilotView
             ref="copilotRef"
@@ -354,7 +354,11 @@ async function toggleAlwaysOnTop() {
         <footer class="footer">
           <span v-if="view === 'copilot'">{{ captureStatus }} · Ctrl+Alt+C</span
           ><span class="footer-right"
-            ><span class="status-dot is-live"></span> IA: {{ endpoint || 'sin conectar' }}</span
+            ><span
+              class="status-dot"
+              :class="endpoint.includes('Falta') ? 'is-idle' : 'is-live'"
+            ></span>
+            IA: {{ endpoint || 'sin conectar' }}</span
           >
         </footer>
       </div>

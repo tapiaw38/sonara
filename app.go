@@ -67,10 +67,17 @@ type App struct {
 	meeting       *meetingRun
 	preferredMic  string
 	meetingPeople int
+	// Conversation memory (copilot_memory.go).
+	memorySummary     string
+	memoryPending     []sessionMessage
+	memorySummarizing bool
 	// livePartial is the streamed text shown before its turn is final.
-	livePartial       string
-	practiceRec       *practiceRecording
-	practicePlaying   atomic.Bool
+	livePartial     string
+	practiceRec     *practiceRecording
+	practicePlaying atomic.Bool
+	// lastOutputVoice: when the meeting audio last had voice (unix ms), so the
+	// microphone can drop the other person leaking through speakers.
+	lastOutputVoice   atomic.Int64
 	practiceAnswerID  uint64
 	emitHook          func(event string, data any)
 	meetingTranscribe meetingTranscriber
@@ -274,6 +281,7 @@ func (a *App) startup(ctx context.Context) {
 		if err := database.saveSession(sessionID, mode, language); err != nil {
 			logf("could not record session %s: %v", sessionID, err)
 		}
+		a.inheritLastProfile(database, sessionID)
 	}
 	a.mu.RLock()
 	status := a.backend.Status()
@@ -316,6 +324,7 @@ func (a *App) StartListening() bool {
 	a.transcript = "Esperando intervención…"
 	a.mu.Unlock()
 	go a.listenMeetAudio(ctx)
+	go a.listenMicForContext(ctx)
 	return true
 }
 
@@ -437,12 +446,40 @@ func (a *App) SaveSessionProfile(sessionID string, profile SessionProfile) error
 	if err := database.saveSessionProfile(sessionID, profile); err != nil {
 		return err
 	}
+	if encoded, err := json.Marshal(profile); err == nil {
+		if err := database.setSetting(settingLastProfile, string(encoded)); err != nil {
+			logf("could not remember the interview context: %v", err)
+		}
+	}
 	a.mu.Lock()
 	if a.sessionID == sessionID {
 		a.sessionProfile = profile
 	}
 	a.mu.Unlock()
 	return nil
+}
+
+// inheritLastProfile gives a new session the context last saved, so it does
+// not have to be typed again. A reopened session keeps its own.
+func (a *App) inheritLastProfile(database *store, sessionID string) {
+	raw := database.setting(settingLastProfile)
+	if raw == "" {
+		return
+	}
+	var profile SessionProfile
+	if err := json.Unmarshal([]byte(raw), &profile); err != nil {
+		return
+	}
+	profile = normalizeSessionProfile(profile)
+	if err := database.saveSessionProfile(sessionID, profile); err != nil {
+		logf("could not apply the last interview context to %s: %v", sessionID, err)
+		return
+	}
+	a.mu.Lock()
+	if a.sessionID == sessionID {
+		a.sessionProfile = profile
+	}
+	a.mu.Unlock()
 }
 
 // GetSessionProfile loads interview context from SQLite for the selected session.
@@ -494,6 +531,7 @@ func (a *App) NewSession() bool {
 	a.replySequence++
 	a.sessionID = newSessionID()
 	a.sessionHistory = nil
+	a.resetMemoryLocked()
 	a.sessionProfile = SessionProfile{}
 	a.latestVisualContext = ""
 	a.pendingAudio = nil
@@ -515,6 +553,7 @@ func (a *App) NewSession() bool {
 		if err := database.saveSession(sessionID, mode, language); err != nil {
 			logf("could not record session %s: %v", sessionID, err)
 		}
+		a.inheritLastProfile(database, sessionID)
 	}
 	return true
 }
@@ -672,11 +711,14 @@ func (a *App) AIEndpoint() string {
 	if a.backend == nil {
 		return "Backend no inicializado"
 	}
-	status := a.backend.Status()
-	if status == "Falta OPENAI_API_KEY" {
-		return "Falta OPENAI_API_KEY"
+	name := map[string]string{"openai": "OpenAI", "deepseek": "DeepSeek", "azure": "Azure OpenAI", "local": "Whisper local"}[a.backend.TextProvider()]
+	if name == "" {
+		name = a.backend.TextProvider()
 	}
-	return "OpenAI · " + status
+	if !a.backend.TextProviderReady() {
+		return name + " · Falta configurar"
+	}
+	return name + " · API key configurada"
 }
 
 // SetOpenAIAPIKey configures OpenAI and stores the key so it survives a restart.
@@ -908,15 +950,10 @@ func (a *App) requestContext() context.Context {
 	return context.Background()
 }
 
-const sessionHistoryLimit = 10
-
 func (a *App) appendSessionMessageLocked(role, content string) {
-	a.sessionHistory = append(a.sessionHistory, sessionMessage{role: role, text: content})
-	if len(a.sessionHistory) > sessionHistoryLimit {
-		a.sessionHistory = append([]sessionMessage(nil), a.sessionHistory[len(a.sessionHistory)-sessionHistoryLimit:]...)
-	}
-	// In memory we keep only the last few turns because that is all the prompt
-	// carries; the store keeps the whole session so it can be reopened later.
+	a.rememberLocked(role, content)
+	// In memory we keep only recent turns plus a summary (copilot_memory.go);
+	// the store keeps the whole session so it can be reopened later.
 	// Save in conversation order before another session can be opened. Separate
 	// goroutines here could reorder a question and its answer or miss a reopen.
 	if database, id := a.store, a.sessionID; database != nil {
@@ -985,13 +1022,20 @@ func (a *App) buildSessionContextLocked() string {
 		context.WriteString(visual)
 		context.WriteString("\n\n")
 	}
-	for _, message := range a.sessionHistory {
-		context.WriteString(message.role)
-		context.WriteString(": ")
-		context.WriteString(message.text)
-		context.WriteString("\n")
+	if summary := strings.TrimSpace(a.memorySummary); summary != "" {
+		context.WriteString("Conversation so far (summary of older turns):\n")
+		context.WriteString(summary)
+		context.WriteString("\n\n")
 	}
-	return truncateContext(context.String(), 6000)
+	header := truncateContext(context.String(), memoryContextChars/2)
+	var recent strings.Builder
+	for _, message := range a.sessionHistory {
+		recent.WriteString(memoryRole(a.assistantMode, message.role))
+		recent.WriteString(": ")
+		recent.WriteString(message.text)
+		recent.WriteString("\n")
+	}
+	return strings.TrimSpace(header + "\n\n" + truncateKeepingEnd(recent.String(), memoryContextChars-len(header)))
 }
 
 func truncateContext(value string, limit int) string {
@@ -1230,6 +1274,9 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 			ambient.observe(level)
 		}
 		voice := isVoice(speech, frame, loud)
+		if voice {
+			a.lastOutputVoice.Store(time.Now().UnixMilli())
+		}
 		if !recording {
 			if awaitingSilence {
 				// Only a quiet frame clears the hold; while the continuous audio

@@ -33,3 +33,10 @@ func TestMergeMinorSpeakers(t *testing.T) {
 		t.Fatalf("got %+v; want ghost merged into its nearest real speaker", got)
 	}
 }
+
+func TestMemoryRoleInPractice(t *testing.T) {
+	if memoryRole("practice", "user") != "me (what I said out loud)" || memoryRole("practice", "assistant") != "interviewer" ||
+		memoryRole("interview", "user") != "user" || memoryRole("interview", "me") != "me (what I said out loud)" {
+		t.Fatal("practice answers must read as the candidate's own words")
+	}
+}

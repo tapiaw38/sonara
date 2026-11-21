@@ -188,6 +188,22 @@ func (c *Client) SetTextProvider(name string) error {
 
 func (c *Client) TextProvider() string { return c.textVision.TextProvider() }
 
+// TextProviderReady says whether the chosen text provider has what it needs
+// (a key, an endpoint) — not whether that key is valid.
+func (c *Client) TextProviderReady() bool {
+	switch c.textVision.TextProvider() {
+	case providers.OpenAI:
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		return c.cfg.OpenAIKey != ""
+	case providers.DeepSeek:
+		return c.deepseek.Configured()
+	case providers.Azure:
+		return c.azure.Configured()
+	}
+	return true
+}
+
 // SetVisionProvider chooses who answers a request that carries a screen
 // capture. DeepSeek is accepted here (Settings may still offer it), but it
 // will error on every vision call, since it only serves text.

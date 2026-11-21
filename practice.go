@@ -41,9 +41,9 @@ type practiceRecording struct {
 // (SetAudioLanguage), since there is no candidate utterance yet to mirror.
 func practiceKickoff(language string) string {
 	if language == "en" {
-		return "Start the interview with an opening question, in English."
+		return "Start the interview, in English: introduce yourself in one sentence as the interviewer (for the company and role in the profile, if any) and ask the opening question."
 	}
-	return "Arrancá la entrevista con una pregunta inicial, en español."
+	return "Arrancá la entrevista, en español: presentate en una frase como quien entrevista (por la empresa y el puesto del perfil, si los hay) y hacé la pregunta inicial."
 }
 
 func practiceRetryPrompt(language string) string {
@@ -194,11 +194,15 @@ func (a *App) requestPracticeTurn(turnCtx, sessionCtx context.Context, answerID 
 	}
 	a.mu.RLock()
 	sessionContext, generation := a.buildSessionContextLocked(), a.sessionGeneration
+	request := content
+	if storeAnswer {
+		request = framePracticeAnswer(lastInterviewerQuestion(a.sessionHistory), content, language)
+	}
 	a.mu.RUnlock()
 
 	var streamed strings.Builder
 	var speech <-chan practiceSpeech
-	output, err := a.backend.RespondStream(turnCtx, content, "practice-turn", sessionContext, func(delta string) {
+	output, err := a.backend.RespondStream(turnCtx, request, "practice-turn", sessionContext, func(delta string) {
 		streamed.WriteString(delta)
 		if !a.currentPracticeAnswer(sessionCtx, answerID) {
 			return
@@ -516,4 +520,26 @@ func readPracticeAnswer(ctx context.Context, audio io.Reader, playing func() boo
 		keep := practiceLeadFrames * meetFrameBytes
 		segment = append(segment[:0], segment[len(segment)-keep:]...)
 	}
+}
+
+// lastInterviewerQuestion is the question the candidate was just answering.
+func lastInterviewerQuestion(history []sessionMessage) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].role == "assistant" {
+			return history[i].text
+		}
+	}
+	return ""
+}
+
+// framePracticeAnswer pairs the answer with the question it answers, so the
+// next question can build on both instead of on a bare sentence.
+func framePracticeAnswer(question, answer, language string) string {
+	if question == "" {
+		return answer
+	}
+	if language == "en" {
+		return "Your previous question: " + question + "\nCandidate's answer: " + answer
+	}
+	return "Tu pregunta anterior: " + question + "\nRespuesta del candidato: " + answer
 }

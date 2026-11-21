@@ -41,6 +41,9 @@ const (
 	// settingMeetingPeople is how many people share the microphone (0 = let
 	// the separation guess).
 	settingMeetingPeople = "meeting_people"
+	// settingLastProfile is the interview context last saved, which every new
+	// session starts with.
+	settingLastProfile = "last_session_profile"
 	// settingGeminiKey is the Gemini key used for phase-2 diarization.
 	settingGeminiKey = "gemini_api_key"
 	// settingAzureOpenAI holds the whole Azure OpenAI form as one JSON blob
@@ -456,8 +459,8 @@ func (a *App) OpenSession(id string) (OpenSessionResult, error) {
 	if err != nil {
 		return OpenSessionResult{}, err
 	}
-	messages := make([]sessionMessage, 0, sessionHistoryLimit)
-	for _, message := range viewMessages[max(0, len(viewMessages)-sessionHistoryLimit):] {
+	messages := make([]sessionMessage, 0, sessionReopenMessages)
+	for _, message := range viewMessages[max(0, len(viewMessages)-sessionReopenMessages):] {
 		messages = append(messages, sessionMessage{role: message.Role, text: message.Text})
 	}
 	visual := database.visualContext(id)
@@ -483,6 +486,8 @@ func (a *App) OpenSession(id string) (OpenSessionResult, error) {
 	a.replySequence++
 	a.sessionID = id
 	a.sessionHistory = messages
+	a.resetMemoryLocked()
+	a.trimMemoryLocked() // a long reopened session starts with its summary
 	a.sessionProfile = profile
 	a.latestVisualContext = visual
 	a.pendingAudio = nil
