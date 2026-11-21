@@ -32,7 +32,7 @@ const questionResize = usePanelResize('sonara-practice-transcript-height')
 const phaseLabel: Record<Phase, string> = {
   idle: 'Listo para arrancar',
   listening: 'Escuchando…',
-  speaking: 'Hablando…',
+  speaking: 'Hablando… tocá el círculo para interrumpir',
   capturing: 'Voz detectada…',
   transcribing: 'Transcribiendo…',
   thinking: 'Preparando respuesta…',
@@ -187,6 +187,20 @@ async function start() {
   }
 }
 
+// The circle starts the practice, and while the interviewer speaks it cuts
+// it off: the recording is already running, so the answer starts right away.
+function onCircle() {
+  if (active.value && phase.value === 'speaking') {
+    finishPlayback?.()
+    phase.value = 'listening'
+    return
+  }
+  if (!active.value) {
+    prepareAudioContext()
+    void start()
+  }
+}
+
 function stop() {
   run++
   active.value = false
@@ -266,9 +280,16 @@ onBeforeUnmount(() => {
         class="voice-orb"
         :class="[phase, { started }]"
         :style="{ '--level': level.toFixed(3) }"
-        :disabled="busy || (started && phase !== 'idle')"
-        :aria-label="started ? phaseLabel[phase] : 'Empezar práctica'"
-        @click="started && active ? stop() : (prepareAudioContext(), start())"
+        :disabled="busy || (active && phase !== 'speaking')"
+        :title="phase === 'speaking' ? 'Tocá para interrumpir y responder' : undefined"
+        :aria-label="
+          phase === 'speaking'
+            ? 'Interrumpir al entrevistador'
+            : started
+              ? phaseLabel[phase]
+              : 'Empezar práctica'
+        "
+        @click="onCircle"
       >
         <span class="orb-rings" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="orb" aria-hidden="true">

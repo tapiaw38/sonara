@@ -107,3 +107,29 @@ func TestFramePracticeAnswerPairsQuestion(t *testing.T) {
 		t.Fatal("without a previous question the answer goes as is")
 	}
 }
+
+// Natural speech dips between syllables: a dip must not reset an interruption.
+func TestReadPracticeAnswerInterruptsDespiteDips(t *testing.T) {
+	quiet := make([]byte, meetFrameBytes)
+	echo := make([]byte, meetFrameBytes)
+	voice := make([]byte, meetFrameBytes)
+	for offset := 0; offset < meetFrameBytes; offset += 2 {
+		binary.LittleEndian.PutUint16(echo[offset:], 750)
+		binary.LittleEndian.PutUint16(voice[offset:], 3500)
+	}
+	input := bytes.Repeat(echo, 10)
+	for range 3 { // voice, voice, dip — never 6 in a row
+		input = append(input, voice...)
+		input = append(input, voice...)
+		input = append(input, echo...)
+	}
+	input = append(input, bytes.Repeat(voice, 6)...)
+	input = append(input, bytes.Repeat(quiet, practiceSilenceFrames)...)
+	playing, interrupted := true, false
+	_, err := readPracticeAnswer(context.Background(), bytes.NewReader(input), func() bool { return playing }, nil, func([]byte) {
+		interrupted, playing = true, false
+	})
+	if err != nil || !interrupted {
+		t.Fatalf("interrupted=%v err=%v; speech with dips must still cut the interviewer off", interrupted, err)
+	}
+}

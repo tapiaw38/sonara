@@ -23,7 +23,8 @@ const (
 	practiceLeadFrames      = 2
 	practiceVoiceFrames     = 5
 	practiceSilenceFrames   = 10
-	practiceInterruptFrames = 6
+	practiceInterruptFrames = 6 // frames over the echo within the window
+	practiceInterruptWindow = 8
 	practiceInterruptFloor  = 0.012
 	practiceEchoTailFrames  = 8 // 800ms ignored right after the interviewer stops
 	// An empty transcript of less than this was noise or echo, not an answer
@@ -422,7 +423,16 @@ func readPracticeAnswer(ctx context.Context, audio io.Reader, playing func() boo
 	frame := make([]byte, meetFrameBytes)
 	segment := make([]byte, 0, meetSampleRate*2*12)
 	ambient, echo := &noiseFloor{}, &noiseFloor{}
-	var interruption []byte
+	// window holds the last frames heard while the interviewer speaks. Speech
+	// dips between syllables, so an interruption needs most of the window over
+	// the echo, not an unbroken run (that almost never happened on speakers).
+	type bargeFrame struct {
+		pcm  []byte
+		over bool
+	}
+	var window []bargeFrame
+	var bestRun int
+	var peak float64
 	var wasPlaying bool
 	var echoTail int
 	var recording bool
@@ -444,14 +454,30 @@ func readPracticeAnswer(ctx context.Context, audio io.Reader, playing func() boo
 		if !recording && playing() {
 			wasPlaying = true
 			echo.observe(level)
-			if !isVoice(speech, frame, level > math.Max(practiceInterruptFloor, echo.threshold())) {
-				interruption = interruption[:0]
-				continue
+			bar := math.Max(practiceInterruptFloor, echo.threshold())
+			peak = math.Max(peak, level/bar)
+			window = append(window, bargeFrame{pcm: append([]byte(nil), frame...), over: isVoice(speech, frame, level > bar)})
+			if len(window) > practiceInterruptWindow {
+				window = window[1:]
 			}
-			interruption = append(interruption, frame...)
-			if len(interruption) == practiceInterruptFrames*meetFrameBytes {
-				segment = append(segment[:0], interruption...)
-				recording, voicedFrames = true, practiceInterruptFrames
+			over, first := 0, -1
+			for i, f := range window {
+				if f.over {
+					over++
+					if first < 0 {
+						first = i
+					}
+				}
+			}
+			bestRun = max(bestRun, over)
+			if over >= practiceInterruptFrames {
+				segment = segment[:0]
+				for _, f := range window[first:] {
+					segment = append(segment, f.pcm...)
+				}
+				recording, voicedFrames = true, over
+				window = nil
+				logf("practice: interrupted by voice (%.1f× the echo)", peak)
 				onVoice(segment)
 			}
 			continue
@@ -459,9 +485,22 @@ func readPracticeAnswer(ctx context.Context, audio io.Reader, playing func() boo
 		if wasPlaying {
 			wasPlaying = false
 			echoTail = practiceEchoTailFrames
-			if !recording && len(interruption) > 0 {
-				segment = append(segment[:0], interruption...)
-				startFrames = len(interruption) / meetFrameBytes
+			// Voice still going when playback ended: the answer started there.
+			tail := len(window)
+			for tail > 0 && window[tail-1].over {
+				tail--
+			}
+			if !recording {
+				logDedup("practice-barge", "practice: no interruption during playback (best %d/%d frames over the echo, peak %.1f×)", bestRun, practiceInterruptWindow, peak)
+			}
+			trailing := window[tail:]
+			window, bestRun, peak = nil, 0, 0
+			if !recording && len(trailing) > 0 {
+				segment = segment[:0]
+				for _, f := range trailing {
+					segment = append(segment, f.pcm...)
+				}
+				startFrames = len(trailing)
 				if startFrames >= practiceStartFrames {
 					recording, voicedFrames = true, startFrames
 					if voicedFrames >= practiceVoiceFrames {
