@@ -22,11 +22,12 @@ func tone(amplitude int16) []byte {
 
 func TestBlockCutterCutsAtPauseAfterMinimum(t *testing.T) {
 	cutter := &blockCutter{track: trackMicrophone}
+	cutter.ambient.observe(0)
 	var blocks []meetingBlock
-	for i := 0; i < 130; i++ {
-		// Speech for the first 110 frames, then a pause.
+	for i := 0; i < 50; i++ {
+		// Speech for the first 40 frames, then a pause.
 		amp := int16(8000)
-		if i >= 110 {
+		if i >= 40 {
 			amp = 0
 		}
 		if block, ok := cutter.add(tone(amp), int64(i)*meetingFrameMS); ok {
@@ -37,16 +38,17 @@ func TestBlockCutterCutsAtPauseAfterMinimum(t *testing.T) {
 		t.Fatalf("got %d blocks, want 1 cut at the pause", len(blocks))
 	}
 	block := blocks[0]
-	if block.startMS != 0 || block.endMS != 114*meetingFrameMS || !block.voiced {
-		t.Errorf("block = %d-%dms voiced=%v, want 0-11400ms voiced", block.startMS, block.endMS, block.voiced)
+	if block.startMS != 0 || block.endMS != 44*meetingFrameMS || !block.voiced {
+		t.Errorf("block = %d-%dms voiced=%v, want 0-4400ms voiced", block.startMS, block.endMS, block.voiced)
 	}
-	if len(block.pcm) != 114*meetFrameBytes {
+	if len(block.pcm) != 44*meetFrameBytes {
 		t.Errorf("pcm length %d does not match the span", len(block.pcm))
 	}
 }
 
 func TestBlockCutterHardLimitAndNoLostFrames(t *testing.T) {
 	cutter := &blockCutter{track: trackOutput}
+	cutter.ambient.observe(0)
 	total, cuts := 0, 0
 	var lastEnd int64
 	for i := 0; i < 700; i++ {
@@ -62,14 +64,33 @@ func TestBlockCutterHardLimitAndNoLostFrames(t *testing.T) {
 	if block, ok := cutter.flush(); ok {
 		total += len(block.pcm) / meetFrameBytes
 	}
-	if cuts != 2 || total != 700 {
-		t.Errorf("continuous speech: %d cuts, %d frames kept; want 2 cuts and all 700 frames", cuts, total)
+	if cuts != 8 || total != 700 {
+		t.Errorf("continuous speech: %d cuts, %d frames kept; want 8 cuts and all 700 frames", cuts, total)
+	}
+}
+
+// A mic whose hiss sits above meetNoiseFloor must still find the pause after
+// speech instead of treating everything as voice until the hard limit.
+func TestBlockCutterCalibratesOnHissyMicrophone(t *testing.T) {
+	cutter := &blockCutter{track: trackMicrophone}
+	var blocks []meetingBlock
+	for i := 0; i < 80; i++ {
+		amp := int16(600) // ~0.018 RMS hiss
+		if i >= 20 && i < 60 {
+			amp = 8000
+		}
+		if block, ok := cutter.add(tone(amp), int64(i)*meetingFrameMS); ok {
+			blocks = append(blocks, block)
+		}
+	}
+	if len(blocks) != 1 || blocks[0].endMS != 61*meetingFrameMS || !blocks[0].voiced {
+		t.Fatalf("got %d blocks; want one voiced block cut at the pause, ending at 6100ms", len(blocks))
 	}
 }
 
 func TestBlockCutterMarksSilenceUnvoiced(t *testing.T) {
 	cutter := &blockCutter{track: trackMicrophone}
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 20; i++ {
 		cutter.add(tone(0), int64(i)*meetingFrameMS)
 	}
 	block, ok := cutter.flush()

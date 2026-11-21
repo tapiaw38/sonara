@@ -43,3 +43,20 @@ func (c *Client) OpenLive(ctx context.Context, language string) (*LiveSession, e
 	// "minimal" delay: the whole point of this mode is latency.
 	return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, Language: language, Delay: "minimal"})
 }
+
+// OpenMeetingLive is OpenLive for meeting transcription: it needs OpenAI as
+// the meeting provider. Any other provider is not an error the caller shows:
+// it simply keeps uploading blocks.
+func (c *Client) OpenMeetingLive(ctx context.Context, language string) (*LiveSession, error) {
+	if name := c.meetingTranscribe.Provider(); name != providers.OpenAI {
+		return nil, fmt.Errorf("streaming solo con OpenAI (ahora: %s)", name)
+	}
+	c.mu.RLock()
+	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
+	c.mu.RUnlock()
+	endpoint, err := realtime.EndpointFor(base)
+	if err != nil {
+		return nil, err
+	}
+	return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, Language: language, Delay: "minimal"})
+}

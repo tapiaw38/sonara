@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +23,13 @@ import (
 
 const (
 	meetingFrameMS = 100 // one meetFrameBytes frame
-	// A block is cut at a pause once it is at least 10s long, at any quiet frame
-	// once it reaches 20s, and unconditionally at 30s. All of it sits far under
-	// DeepSeek's 120s / 8 MiB limit per request.
-	meetingMinFrames   = 100
-	meetingSoftFrames  = 200
-	meetingHardFrames  = 300
+	// A block is cut at a pause once it is at least 3s long, at any quiet frame
+	// once it reaches 5s, and unconditionally at 8s, so text shows up while
+	// people are still talking. All of it sits far under DeepSeek's 120s /
+	// 8 MiB limit per request.
+	meetingMinFrames   = 30
+	meetingSoftFrames  = 50
+	meetingHardFrames  = 80
 	meetingQuietFrames = 4
 	// meetingQueue bounds blocks waiting for the network (about 20 minutes of
 	// backlog). A full queue records a visible gap; it never drops silently.
@@ -68,14 +71,34 @@ type blockCutter struct {
 	voiced  int
 	quiet   int
 	ambient noiseFloor
+	// recent holds every frame's level until ambient has its first quiet
+	// sample: a mic whose hiss already sits above meetNoiseFloor never yields
+	// one, so after cutterSeedFrames the quietest frame seeds it instead.
+	recent []float64
+	// speech is the voice detector (nil: loudness only, as in tests).
+	speech func([]byte) bool
+}
+
+const cutterSeedFrames = 20
+
+func (c *blockCutter) threshold(level float64) float64 {
+	if len(c.ambient.quiet) == 0 {
+		c.recent = append(c.recent, level)
+		if len(c.recent) >= cutterSeedFrames {
+			c.ambient.observe(slices.Min(c.recent))
+			c.recent = nil
+		}
+	}
+	return c.ambient.threshold()
 }
 
 func (c *blockCutter) add(frame []byte, frameStartMS int64) (meetingBlock, bool) {
 	level := pcmRMS(frame)
-	voice := level >= c.ambient.threshold()
-	if !voice {
+	loud := level >= c.threshold(level)
+	if !loud {
 		c.ambient.observe(level)
 	}
+	voice := isVoice(c.speech, frame, loud)
 	if c.frames == 0 {
 		c.startMS = frameStartMS
 	}
@@ -135,6 +158,7 @@ type meetingRun struct {
 	// See diarize.go.
 	diarizeMu     sync.Mutex
 	diarizePCM    []byte
+	diarizeMicPCM []byte // the microphone, separated too for in-person conversations
 	diarizeCapped bool
 	// periodic is the mid-meeting separation loop; finishMeeting waits for it
 	// before the final pass so the two never relabel at the same time.
@@ -242,7 +266,7 @@ func (a *App) SelectedMicrophone() string {
 }
 
 // SetMicrophone remembers a microphone by its stable node name. An empty target
-// clears the choice. Recording never falls back to another device: a missing
+// clears the choice. Meeting recording never falls back to another device: a missing
 // microphone pauses its track instead of capturing something unexpected.
 func (a *App) SetMicrophone(target string) (string, error) {
 	name := ""
@@ -257,15 +281,18 @@ func (a *App) SetMicrophone(target string) (string, error) {
 		}
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.setMicrophoneLocked(name)
+	return name, nil
+}
+
+func (a *App) setMicrophoneLocked(name string) {
 	a.preferredMic = name
-	database := a.store
-	a.mu.Unlock()
-	if database != nil {
-		if err := database.setSetting(settingMicrophone, name); err != nil {
+	if a.store != nil {
+		if err := a.store.setSetting(settingMicrophone, name); err != nil {
 			logf("could not persist the microphone: %v", err)
 		}
 	}
-	return name, nil
 }
 
 // findMicrophoneApp looks up target (the stable node name, AudioSource.App)
@@ -432,9 +459,10 @@ func (a *App) meetingTarget(ctx context.Context, track string) (string, error) {
 	if track == trackOutput {
 		return a.audioTarget(ctx)
 	}
-	a.mu.RLock()
-	want := a.preferredMic
-	a.mu.RUnlock()
+	want := a.SelectedMicrophone()
+	if want == "" {
+		return "", fmt.Errorf("no se eligió un micrófono")
+	}
 	sources, err := availableMicrophones(ctx)
 	if err != nil {
 		return "", err
@@ -478,7 +506,7 @@ func (a *App) recordTrack(ctx context.Context, run *meetingRun, track string) {
 // audio is lost when the device vanishes or the user stops.
 func (a *App) captureTrack(ctx context.Context, run *meetingRun, track, target string) {
 	capCtx, stop := context.WithCancel(ctx)
-	command := exec.CommandContext(capCtx, "pw-record", "--target", target, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
+	command := exec.CommandContext(capCtx, "pw-record", "--target", target, "--latency", "40ms", "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
 	stdout, err := command.StdoutPipe()
 	if err != nil || command.Start() != nil {
 		stop()
@@ -507,26 +535,38 @@ func (a *App) captureTrack(ctx context.Context, run *meetingRun, track, target s
 	if run.setTrack(track, "ok") {
 		a.emitMeetingStatus()
 	}
-	cutter := &blockCutter{track: track}
+	cutter := &blockCutter{track: track, speech: newSpeechDetector()}
+	stream := a.openMeetingStream(run, track)
+	endBlock := func(block meetingBlock) {
+		if stream == nil || !stream.take(block) {
+			a.enqueueBlock(run, block)
+		}
+	}
 	frame := make([]byte, meetFrameBytes)
 	read := int64(0)
 	for {
 		if _, err := io.ReadFull(stdout, frame); err != nil {
 			break
 		}
-		if track == trackOutput && a.diarizer.Configured() {
+		if stream != nil {
+			stream.append(frame)
+		}
+		if a.diarizer.Configured() {
 			// The raw, continuous signal, not VAD-gated: the model does its own
 			// segmentation and needs the real pauses to find speaker turns.
-			run.appendDiarizePCM(frame)
+			run.appendDiarizePCM(track, frame)
 		}
 		block, ready := cutter.add(frame, origin+read*meetingFrameMS)
 		read++
 		if ready {
-			a.enqueueBlock(run, block)
+			endBlock(block)
 		}
 	}
 	if block, ready := cutter.flush(); ready {
-		a.enqueueBlock(run, block)
+		endBlock(block)
+	}
+	if stream != nil {
+		stream.finish()
 	}
 	run.mu.Lock()
 	run.lastEnd[track] = origin + read*meetingFrameMS
@@ -553,10 +593,10 @@ func (a *App) watchMicrophone(ctx context.Context, stop context.CancelFunc) {
 
 func (a *App) recordGap(run *meetingRun, track string, from, to int64) {
 	a.storeSegment(run, TranscriptSegment{Track: track, StartMS: from, EndMS: to, Status: segmentGap})
-	if track == trackOutput && a.diarizer.Configured() {
+	if a.diarizer.Configured() {
 		// Keeps the accumulator's byte offset aligned to the shared clock
 		// across the gap, including the very first one before capture starts.
-		run.padDiarizeSilence(to - from)
+		run.padDiarizeSilence(track, to-from)
 	}
 }
 
@@ -622,7 +662,14 @@ func (a *App) transcribeOnce(language string, pcm []byte) (string, error) {
 // processBlock transcribes one block and stores the result before anything
 // else can fail: text that arrived is never lost to a later error.
 func (a *App) processBlock(run *meetingRun, block meetingBlock) {
+	began := time.Now()
 	text, err := a.transcribeMeetingBlock(run, block.pcm)
+	// waited: queued behind other blocks; behind: from the last word of the
+	// block being spoken to its text existing.
+	logf("meeting %s: block %s %.1fs audio, transcribed in %dms, %dms behind live (waited %dms)",
+		run.sessionID, block.track, float64(block.endMS-block.startMS)/1000, time.Since(began).Milliseconds(),
+		time.Since(run.started.Add(time.Duration(block.endMS)*time.Millisecond)).Milliseconds(),
+		began.Sub(run.started.Add(time.Duration(block.endMS)*time.Millisecond)).Milliseconds())
 	run.mu.Lock()
 	run.pending--
 	run.mu.Unlock()
@@ -777,4 +824,28 @@ func (a *App) meetingInProgress(id string) bool {
 	run := a.meeting
 	a.mu.RUnlock()
 	return run != nil && run.sessionID == id && run.stateNow() != meetingIdle
+}
+
+// MeetingPeople is how many people share the microphone; 0 lets the
+// separation guess, which tends to split one voice into several.
+func (a *App) MeetingPeople() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.meetingPeople
+}
+
+// SetMeetingPeople fixes the number of people on the microphone (0 = auto).
+// It applies from the next separation pass, also mid-recording.
+func (a *App) SetMeetingPeople(people int) int {
+	people = min(max(people, 0), 10)
+	a.mu.Lock()
+	a.meetingPeople = people
+	database := a.store
+	a.mu.Unlock()
+	if database != nil {
+		if err := database.setSetting(settingMeetingPeople, strconv.Itoa(people)); err != nil {
+			logf("could not persist the number of people: %v", err)
+		}
+	}
+	return people
 }

@@ -50,6 +50,8 @@ const assistantModeTitle = computed(
 
 const draft = ref('')
 const transcript = ref('Esperando audio de la reunión…')
+// The other person is still talking: the text keeps changing.
+const transcriptPartial = ref(false)
 const messages = ref<Message[]>([])
 const messagesPanel = ref<HTMLElement | null>(null)
 // Replies stream in token by token, so the newest one grows past the bottom of
@@ -412,11 +414,14 @@ async function refreshListening() {
       archiveCurrentTranscript()
       transcript.value = state.transcript
     }
+    transcriptPartial.value = state.partial
     translation.value = state.translation
-    void nextTick(() => {
-      const panel = transcriptPanel.value
-      if (panel) panel.scrollTop = panel.scrollHeight
-    })
+    const panel = transcriptPanel.value
+    if (panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72) {
+      void nextTick(() => {
+        transcriptPanel.value?.scrollTo({ top: transcriptPanel.value.scrollHeight })
+      })
+    }
     // An anticipated reply that did not hold: drop the message it started.
     if (state.retractions > lastRetractions.value) {
       lastRetractions.value = state.retractions
@@ -590,7 +595,7 @@ onBeforeUnmount(() => {
           <p class="transcript-translation"><span>ES</span>{{ entry.translation }}</p>
         </div>
         <div class="transcript-turn">
-          <p class="transcript-text">{{ transcript }}</p>
+          <p class="transcript-text" :class="{ partial: transcriptPartial }">{{ transcript }}</p>
           <p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p>
         </div>
         <div v-if="listening" class="audio-pulse" :class="{ active: audioDetected }">
@@ -697,7 +702,7 @@ onBeforeUnmount(() => {
           v-for="(message, index) in messages"
           :key="index"
           class="message"
-          :class="message.role"
+          :class="[message.role, { streaming: index === streamingIndex }]"
         >
           <span class="message-role"
             >{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span

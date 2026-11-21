@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { AudioSourceOption } from '../types'
 
-defineProps<{
-  view: 'copilot' | 'meeting'
+const props = defineProps<{
+  view: 'copilot' | 'meeting' | 'practice'
   assistantMode: string
   statusClass: string
   statusLabel: string
@@ -18,6 +18,7 @@ defineProps<{
 const emit = defineEmits<{
   (event: 'select-mode', mode: string): void
   (event: 'show-meeting'): void
+  (event: 'show-practice'): void
   (event: 'open-settings'): void
   (event: 'toggle-always-on-top'): void
   (event: 'refresh-audio-sources'): void
@@ -29,6 +30,42 @@ const ghost = defineModel<boolean>('ghost', { default: false })
 const opacityPercent = defineModel<number>('opacityPercent', { default: 22 })
 
 const showAudioSources = ref(false)
+
+// The four copilot modes live behind one tab: the bar stays short and the
+// tab still says which mode is on.
+const copilotModes = [
+  { id: 'interview', label: 'En vivo', hint: 'Respuestas para tu entrevista' },
+  { id: 'daily', label: 'Reunión', hint: 'Ayuda en reuniones del día a día' },
+  { id: 'coding', label: 'Coding', hint: 'Problemas técnicos y de código' },
+  { id: 'coaching', label: 'Coaching', hint: 'Feedback sobre tus respuestas' },
+]
+const currentMode = computed(
+  () => copilotModes.find((mode) => mode.id === props.assistantMode) ?? copilotModes[0],
+)
+const modeMenu = ref(false)
+const modeMenuEl = ref<HTMLElement | null>(null)
+
+function chooseMode(id: string) {
+  modeMenu.value = false
+  emit('select-mode', id)
+}
+
+function closeModeMenu(event: Event) {
+  if (
+    event instanceof KeyboardEvent
+      ? event.key === 'Escape'
+      : !modeMenuEl.value?.contains(event.target as Node)
+  )
+    modeMenu.value = false
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', closeModeMenu)
+  document.addEventListener('keydown', closeModeMenu)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', closeModeMenu)
+  document.removeEventListener('keydown', closeModeMenu)
+})
 
 function setOpacity(value: string | number) {
   opacityPercent.value = Number(value)
@@ -47,32 +84,37 @@ function toggleAudioSources() {
       <img class="brand-mark" src="/sonara-logo.png" alt="" /><span>SONARA</span>
     </div>
     <nav class="product-nav" aria-label="Modo de trabajo">
-      <button
-        :class="{ active: view === 'copilot' && assistantMode === 'interview' }"
-        @click="emit('select-mode', 'interview')"
-      >
-        En vivo
-      </button>
-      <button
-        :class="{ active: view === 'copilot' && assistantMode === 'daily' }"
-        @click="emit('select-mode', 'daily')"
-      >
-        Reunión
-      </button>
-      <button
-        :class="{ active: view === 'copilot' && assistantMode === 'coding' }"
-        @click="emit('select-mode', 'coding')"
-      >
-        Coding
-      </button>
-      <button
-        :class="{ active: view === 'copilot' && assistantMode === 'coaching' }"
-        @click="emit('select-mode', 'coaching')"
-      >
-        Coaching
-      </button>
+      <div ref="modeMenuEl" class="nav-copilot" :class="{ active: view === 'copilot' }">
+        <button class="nav-copilot-main" @click="chooseMode(currentMode.id)">
+          Copiloto <span class="nav-mode">{{ currentMode.label }}</span>
+        </button>
+        <button
+          class="nav-copilot-toggle"
+          :aria-expanded="modeMenu"
+          aria-haspopup="menu"
+          title="Cambiar modo del copiloto"
+          @click="modeMenu = !modeMenu"
+        >
+          ▾
+        </button>
+        <div v-if="modeMenu" class="mode-menu" role="menu">
+          <button
+            v-for="mode in copilotModes"
+            :key="mode.id"
+            role="menuitemradio"
+            :aria-checked="view === 'copilot' && mode.id === assistantMode"
+            :class="{ current: mode.id === currentMode.id }"
+            @click="chooseMode(mode.id)"
+          >
+            <strong>{{ mode.label }}</strong><small>{{ mode.hint }}</small>
+          </button>
+        </div>
+      </div>
       <button :class="{ active: view === 'meeting' }" @click="emit('show-meeting')">
         Transcribir
+      </button>
+      <button :class="{ active: view === 'practice' }" @click="emit('show-practice')">
+        Práctica
       </button>
     </nav>
     <div class="meeting-state">

@@ -124,15 +124,30 @@ func (d *diarizer) key() string {
 
 // Configured is also how the rest of the app decides diarization is "on":
 // setting a key in Settings is the opt-in, with no separate feature flag.
-func (d *diarizer) Configured() bool { return d.key() != "" }
+func (d *diarizer) period() time.Duration {
+	if d.key() == "" {
+		return localDiarizePeriod
+	}
+	return diarizePeriod
+}
+
+func (d *diarizer) minGrowth() int {
+	if d.key() == "" {
+		return localMinGrowth
+	}
+	return diarizeMinGrowth
+}
+
+func (d *diarizer) Configured() bool { return d.key() != "" || localDiarizerBin() != "" }
 
 // diarize sends one WAV file (the whole meeting_output track) and returns its
 // speaker spans, each independently labeled by the model — stabilizing those
 // labels across a session is stableSpeakerKeys's job, not this call's.
-func (d *diarizer) diarize(ctx context.Context, wav []byte) ([]diarizedSpan, error) {
+// speakers fixes how many people to find (local engine only); 0 guesses.
+func (d *diarizer) diarize(ctx context.Context, wav []byte, speakers int) ([]diarizedSpan, error) {
 	apiKey := d.key()
 	if apiKey == "" {
-		return nil, fmt.Errorf("falta la clave de Gemini (Configuración)")
+		return localDiarize(ctx, wav, speakers)
 	}
 	fileURI, fileName, mimeType, err := d.uploadFile(ctx, apiKey, wav)
 	if err != nil {
@@ -344,10 +359,26 @@ func (d *diarizer) interact(ctx context.Context, apiKey string, request geminiRe
 // aligned to the recording's shared clock. No-op once diarizeMaxBytes is
 // reached: the rest of the meeting keeps transcribing, just without diarized
 // names past that point.
-func (r *meetingRun) appendDiarizePCM(frame []byte) {
+func (r *meetingRun) diarizeBuffer(track string) *[]byte {
+	if track == trackMicrophone {
+		return &r.diarizeMicPCM
+	}
+	return &r.diarizePCM
+}
+
+// diarizeSnapshot is a stable prefix of a track's buffer: append only ever
+// writes past len.
+func (r *meetingRun) diarizeSnapshot(track string) []byte {
 	r.diarizeMu.Lock()
 	defer r.diarizeMu.Unlock()
-	room := diarizeMaxBytes - int64(len(r.diarizePCM))
+	return *r.diarizeBuffer(track)
+}
+
+func (r *meetingRun) appendDiarizePCM(track string, frame []byte) {
+	r.diarizeMu.Lock()
+	defer r.diarizeMu.Unlock()
+	buffer := r.diarizeBuffer(track)
+	room := diarizeMaxBytes - int64(len(*buffer))
 	if room < int64(len(frame)) {
 		if room < 0 {
 			room = 0
@@ -358,7 +389,7 @@ func (r *meetingRun) appendDiarizePCM(frame []byte) {
 			logDedup("diarize-cap", "meeting output exceeded %s; later audio will not be diarized", diarizeMaxDuration)
 		}
 	}
-	r.diarizePCM = append(r.diarizePCM, frame...)
+	*buffer = append(*buffer, frame...)
 }
 
 // releaseDiarizePCM frees the accumulated meeting_output audio. Called once
@@ -366,19 +397,19 @@ func (r *meetingRun) appendDiarizePCM(frame []byte) {
 // their chance to read it — never from inside either pass itself.
 func (r *meetingRun) releaseDiarizePCM() {
 	r.diarizeMu.Lock()
-	r.diarizePCM = nil
+	r.diarizePCM, r.diarizeMicPCM = nil, nil
 	r.diarizeMu.Unlock()
 }
 
 // padDiarizeSilence keeps the accumulator aligned to the shared clock across a
 // gap in capture: without this, a reconnect would shift every later speaker
 // span out of sync with the segments it is matched against.
-func (r *meetingRun) padDiarizeSilence(durationMS int64) {
+func (r *meetingRun) padDiarizeSilence(track string, durationMS int64) {
 	if durationMS <= 0 {
 		return
 	}
 	silence := make([]byte, durationMS*meetSampleRate*2/1000)
-	r.appendDiarizePCM(silence)
+	r.appendDiarizePCM(track, silence)
 }
 
 // overlapMS is how much of [startMS, endMS) a span covers — zero when they
@@ -434,23 +465,41 @@ func (a *App) runDiarization(run *meetingRun) {
 	if !a.diarizer.Configured() {
 		return
 	}
-	// Only a snapshot: runVoiceMatch (phase 3) may still need the same buffer
-	// right after this. finishMeeting releases it once, after both have run.
-	run.diarizeMu.Lock()
-	pcm := run.diarizePCM
-	run.diarizeMu.Unlock()
-	if len(pcm) == 0 {
-		a.setDiarizeNote(run.sessionID, "No se capturó audio de la reunión: no hay nada que separar.")
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), diarizeFinalTimeout)
 	defer cancel()
-	a.applyDiarization(ctx, run, pcm, true)
+	found, failed := 0, false
+	for _, track := range []string{trackMicrophone, trackOutput} {
+		// Only a snapshot: runVoiceMatch (phase 3) may still need the same buffer
+		// right after this. finishMeeting releases it once, after both have run.
+		if pcm := run.diarizeSnapshot(track); len(pcm) > 0 {
+			count := a.applyDiarization(ctx, run, track, pcm)
+			failed = failed || count < 0
+			found += max(count, 0)
+		}
+	}
+	if found == 0 && failed {
+		return // applyDiarization already left the failure note
+	}
+	if found == 0 {
+		a.setDiarizeNote(run.sessionID, "No se detectaron participantes para separar.")
+		return
+	}
+	a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", found))
+	a.nameParticipants(ctx, run.sessionID)
 }
 
 // diarizePeriod is how often the participants are re-separated while the
 // meeting is still being recorded. A var so tests do not wait minutes.
 var diarizePeriod = 3 * time.Minute
+
+// The local engine costs nothing per pass, so it re-separates far more often:
+// letters show up within seconds instead of minutes. Each pass still reads the
+// whole recording (about 0.1s of CPU per second of audio), so a very long
+// meeting makes each pass slower.
+var (
+	localDiarizePeriod = 20 * time.Second
+	localMinGrowth     = 10 * meetSampleRate * 2
+)
 
 const (
 	// diarizeMinGrowth is how much new audio (60 s) a pass needs to be worth
@@ -471,61 +520,67 @@ const (
 // after the meeting always has the last word.
 func (a *App) periodicDiarization(ctx context.Context, run *meetingRun) {
 	defer run.periodic.Done()
-	lastBytes := 0
+	lastBytes := map[string]int{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(diarizePeriod):
+		case <-time.After(a.diarizer.period()):
 		}
 		if !a.diarizer.Configured() {
 			continue
 		}
-		run.diarizeMu.Lock()
-		pcm := run.diarizePCM // append only ever writes past len, so this prefix is stable
-		run.diarizeMu.Unlock()
-		if len(pcm)-lastBytes < diarizeMinGrowth {
-			continue
+		found := 0
+		for _, track := range []string{trackMicrophone, trackOutput} {
+			pcm := run.diarizeSnapshot(track)
+			if len(pcm)-lastBytes[track] < a.diarizer.minGrowth() {
+				continue
+			}
+			lastBytes[track] = len(pcm)
+			passCtx, cancel := context.WithTimeout(ctx, diarizeFinalTimeout)
+			found += max(a.applyDiarization(passCtx, run, track, pcm), 0)
+			cancel()
 		}
-		lastBytes = len(pcm)
-		passCtx, cancel := context.WithTimeout(ctx, diarizeFinalTimeout)
-		a.applyDiarization(passCtx, run, pcm, false)
-		cancel()
+		if found > 0 {
+			a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados hasta ahora: %d (se actualiza durante la reunión).", found))
+		}
 	}
 }
 
-// applyDiarization separates the speakers in pcm and labels the stored
-// meeting_output segments it covers. final marks the pass after capture
-// stopped; mid-meeting passes word their note as partial.
-func (a *App) applyDiarization(ctx context.Context, run *meetingRun, pcm []byte, final bool) {
-	spans, err := a.diarizer.diarize(ctx, wavFromPCM(pcm))
+// applyDiarization separates the speakers in one track's pcm and labels that
+// track's stored segments. It returns how many participants it found, or -1
+// when the separation itself failed.
+func (a *App) applyDiarization(ctx context.Context, run *meetingRun, track string, pcm []byte) int {
+	speakers := 0
+	if track == trackMicrophone {
+		speakers = a.MeetingPeople()
+	}
+	spans, err := a.diarizer.diarize(ctx, wavFromPCM(pcm), speakers)
 	if err != nil {
 		if ctx.Err() == nil {
-			logf("meeting %s: diarization skipped: %v", run.sessionID, err)
+			logf("meeting %s: diarization of %s skipped: %v", run.sessionID, track, err)
 			a.setDiarizeNote(run.sessionID, "No se pudieron separar los participantes: "+err.Error())
 		}
-		return
+		return -1
 	}
 	if len(spans) == 0 {
-		if final {
-			a.setDiarizeNote(run.sessionID, "Gemini no detectó hablantes en el audio de la reunión.")
-		}
-		return
+		return 0
 	}
+	spans = mergeMinorSpeakers(spans)
 	a.mu.RLock()
 	database := a.store
 	a.mu.RUnlock()
 	if database == nil {
-		return
+		return 0
 	}
 	segments, err := database.transcriptSegments(run.sessionID)
 	if err != nil {
 		logf("meeting %s: could not reload segments for diarization: %v", run.sessionID, err)
-		return
+		return 0
 	}
 	keys := stableSpeakerKeys(spans)
 	for _, segment := range segments {
-		if segment.Track != trackOutput || segment.Status != segmentOK {
+		if segment.Track != track || segment.Status != segmentOK {
 			continue
 		}
 		raw := overlapSpeaker(spans, segment.StartMS, segment.EndMS)
@@ -543,10 +598,51 @@ func (a *App) applyDiarization(ctx context.Context, run *meetingRun, pcm []byte,
 		segment.SpeakerKey = key
 		a.emit("meeting:segment", MeetingSegmentEvent{SessionID: run.sessionID, Segment: segment})
 	}
-	logf("meeting %s: diarization (final=%v) found %d participant(s)", run.sessionID, final, len(keys))
-	if final {
-		a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", len(keys)))
-	} else {
-		a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados hasta ahora: %d (se actualiza durante la reunión).", len(keys)))
+	logf("meeting %s: diarization of %s found %d participant(s)", run.sessionID, track, len(keys))
+	return len(keys)
+}
+
+// Diarization over-splits: one voice at a new distance or pitch becomes a new
+// "speaker". Like the minimum-speaker-duration step in Microsoft's VoxCeleb
+// 2020 system, a label with too little total speech is not a person: its spans
+// go to whichever real speaker talked nearest in time.
+const (
+	minSpeakerMS    = 3000
+	minSpeakerShare = 0.05
+)
+
+func mergeMinorSpeakers(spans []diarizedSpan) []diarizedSpan {
+	totals := map[string]int64{}
+	var all int64
+	for _, span := range spans {
+		totals[span.Speaker] += span.EndMS - span.StartMS
+		all += span.EndMS - span.StartMS
 	}
+	limit := max(int64(minSpeakerMS), int64(float64(all)*minSpeakerShare))
+	major := func(speaker string) bool { return totals[speaker] >= limit }
+	hasMajor := false
+	for speaker := range totals {
+		hasMajor = hasMajor || major(speaker)
+	}
+	if !hasMajor {
+		return spans // nobody spoke long enough to judge: keep what was found
+	}
+	merged := make([]diarizedSpan, 0, len(spans))
+	for _, span := range spans {
+		if !major(span.Speaker) {
+			best, bestGap := "", int64(-1)
+			for _, other := range spans {
+				if !major(other.Speaker) {
+					continue
+				}
+				gap := max(other.StartMS-span.EndMS, span.StartMS-other.EndMS, 0)
+				if bestGap < 0 || gap < bestGap {
+					best, bestGap = other.Speaker, gap
+				}
+			}
+			span.Speaker = best
+		}
+		merged = append(merged, span)
+	}
+	return merged
 }

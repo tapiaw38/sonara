@@ -16,6 +16,7 @@ type TranslateUsecase interface {
 	// ExecuteStream hands each token to onDelta as it arrives and returns the
 	// full translation.
 	ExecuteStream(ctx context.Context, text string, onDelta func(string)) (string, error)
+	ExecuteTo(ctx context.Context, text, language string, onDelta func(string)) (string, error)
 }
 
 type translateUsecase struct {
@@ -27,16 +28,24 @@ func NewTranslateUsecase(gateway responder, cfg config.Config) TranslateUsecase 
 	return &translateUsecase{gateway: gateway, cfg: cfg}
 }
 
-const translateInstructions = "Sos un traductor. Traducís al español, de forma fiel y natural, lo que dijo " +
+const translateInstructions = "Sos un traductor. Traducís al idioma solicitado, de forma fiel y natural, lo que dijo " +
 	"otra persona en una reunión. Devolvés solo la traducción: sin comillas, sin notas, sin explicaciones, " +
 	"y sin responder a lo que dice."
 
 func (u *translateUsecase) ExecuteStream(ctx context.Context, text string, onDelta func(string)) (string, error) {
+	return u.ExecuteTo(ctx, text, "es", onDelta)
+}
+
+func (u *translateUsecase) ExecuteTo(ctx context.Context, text, language string, onDelta func(string)) (string, error) {
+	target := "español"
+	if language == "en" {
+		target = "inglés"
+	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", nil
 	}
-	request := domain.Request{Task: domain.TaskChat, Prompt: "Traducí al español:\n\n" + text}
+	request := domain.Request{Task: domain.TaskChat, Prompt: "Traducí al " + target + ":\n\n" + text}
 	if streamer, ok := u.gateway.(streamResponder); ok {
 		return streamer.RespondStream(ctx, request, u.cfg.FastModel, translateInstructions, onDelta)
 	}

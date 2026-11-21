@@ -48,18 +48,18 @@ func TestStableSpeakerKeysOrderedByFirstAppearance(t *testing.T) {
 
 func TestDiarizePCMAccumulationCapsAndStaysAligned(t *testing.T) {
 	run := &meetingRun{}
-	run.appendDiarizePCM(make([]byte, 100))
-	run.padDiarizeSilence(1000) // 1s of silence at 16kHz*2 bytes = 32000 bytes
+	run.appendDiarizePCM(trackOutput, make([]byte, 100))
+	run.padDiarizeSilence(trackOutput, 1000) // 1s of silence at 16kHz*2 bytes = 32000 bytes
 	if len(run.diarizePCM) != 100+32000 {
 		t.Fatalf("len = %d, want %d", len(run.diarizePCM), 100+32000)
 	}
-	run.padDiarizeSilence(0) // must be a no-op
+	run.padDiarizeSilence(trackOutput, 0) // must be a no-op
 	if len(run.diarizePCM) != 100+32000 {
 		t.Fatalf("padding 0ms changed the buffer: %d", len(run.diarizePCM))
 	}
 
 	capped := &meetingRun{diarizePCM: make([]byte, diarizeMaxBytes-10)}
-	capped.appendDiarizePCM(make([]byte, 100)) // only 10 bytes of room left
+	capped.appendDiarizePCM(trackOutput, make([]byte, 100)) // only 10 bytes of room left
 	if int64(len(capped.diarizePCM)) != diarizeMaxBytes {
 		t.Errorf("len = %d, want exactly the cap %d (10 bytes of room, truncated)", len(capped.diarizePCM), diarizeMaxBytes)
 	}
@@ -67,7 +67,7 @@ func TestDiarizePCMAccumulationCapsAndStaysAligned(t *testing.T) {
 		t.Error("exceeding the cap must be recorded")
 	}
 	beforeSecondCall := len(capped.diarizePCM)
-	capped.appendDiarizePCM(make([]byte, 100)) // now fully at the cap: nothing more fits
+	capped.appendDiarizePCM(trackOutput, make([]byte, 100)) // now fully at the cap: nothing more fits
 	if len(capped.diarizePCM) != beforeSecondCall {
 		t.Errorf("a full buffer grew further: %d -> %d", beforeSecondCall, len(capped.diarizePCM))
 	}
@@ -129,32 +129,33 @@ func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *diari
 
 func TestDiarizeHappyPath(t *testing.T) {
 	d := fakeGemini(t, []diarizedSpan{{StartMS: 0, EndMS: 1000, Speaker: "Speaker 1"}}, http.StatusOK, "")
-	spans, err := d.diarize(context.Background(), []byte("RIFF....WAVEfmt "))
+	spans, err := d.diarize(context.Background(), []byte("RIFF....WAVEfmt "), 0)
 	if err != nil || len(spans) != 1 || spans[0].Speaker != "Speaker 1" {
 		t.Fatalf("spans = %+v, err = %v", spans, err)
 	}
 }
 
 func TestDiarizeNoKeyConfigured(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no local sherpa-onnx either
 	d := newDiarizer()
 	if d.Configured() {
 		t.Fatal("a fresh diarizer must not be configured")
 	}
-	if _, err := d.diarize(context.Background(), nil); err == nil {
+	if _, err := d.diarize(context.Background(), nil, 0); err == nil {
 		t.Fatal("calling without a key must error")
 	}
 }
 
 func TestDiarizePropagatesInteractionFailure(t *testing.T) {
 	d := fakeGemini(t, nil, http.StatusInternalServerError, "")
-	if _, err := d.diarize(context.Background(), []byte("x")); err == nil {
+	if _, err := d.diarize(context.Background(), []byte("x"), 0); err == nil {
 		t.Fatal("a failing interaction must error")
 	}
 }
 
 func TestDiarizeRejectsMalformedModelOutput(t *testing.T) {
 	d := fakeGemini(t, nil, http.StatusOK, "not a json array")
-	if _, err := d.diarize(context.Background(), []byte("x")); err == nil {
+	if _, err := d.diarize(context.Background(), []byte("x"), 0); err == nil {
 		t.Fatal("non-JSON model output must error, not silently produce zero speakers")
 	}
 }

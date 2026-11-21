@@ -192,7 +192,7 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 	a.translation, a.voiceReply = "", ""
 	a.voiceSequence++
 	a.streaming = true
-	a.listenStatus = "Sonara respondiendo…"
+	a.listenStatus = "Escuchando audio de la reunión" // the reply itself shows it is being written
 	mode := a.assistantMode
 	contextText := a.buildSessionContextLocked()
 	backend := a.backend

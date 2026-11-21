@@ -161,6 +161,11 @@ func (s *Session) Commit() error {
 	return s.send(map[string]any{"type": "input_audio_buffer.commit"})
 }
 
+// Clear drops what was appended since the last commit (silence, mostly).
+func (s *Session) Clear() error {
+	return s.send(map[string]any{"type": "input_audio_buffer.clear"})
+}
+
 func (s *Session) Events() <-chan Event { return s.events }
 
 func (s *Session) Close() error {

@@ -44,6 +44,16 @@ type TranscriptSegment struct {
 // alone when it has no diarized speaker, or track+speakerKey when it does.
 // Export and the UI both resolve a name through this same key so they never
 // disagree on who said what.
+func participantLabel(track string, index int) string {
+	if track == trackMicrophone {
+		if index < 26 {
+			return "Participante " + string(rune('A'+index))
+		}
+		return fmt.Sprintf("Participante A%d", index)
+	}
+	return fmt.Sprintf("Participante %d", index+1)
+}
+
 func speakerDisplayKey(track, speakerKey string) string {
 	if speakerKey == "" {
 		return track
@@ -104,14 +114,11 @@ func (s *store) transcriptSegments(sessionID string) ([]TranscriptSegment, error
 }
 
 // saveSpeakerName renames one track (speakerKey "") or one diarized
-// participant within the meeting_output track (speakerKey "spk_N").
+// participant within it (speakerKey "spk_N").
 func (s *store) saveSpeakerName(sessionID, track, speakerKey, name string) error {
 	name = strings.TrimSpace(name)
 	if track != trackMicrophone && track != trackOutput {
 		return fmt.Errorf("pista desconocida %q", track)
-	}
-	if speakerKey != "" && track != trackOutput {
-		return fmt.Errorf("sólo la pista de la reunión tiene participantes diarizados")
 	}
 	if name == "" {
 		_, err := s.db.Exec("DELETE FROM transcript_speakers WHERE session_id = ? AND track = ? AND speaker_key = ?", sessionID, track, speakerKey)
@@ -133,29 +140,33 @@ func (s *store) saveSpeakerName(sessionID, track, speakerKey, name string) error
 // first spoke before any manual rename is applied on top.
 func (s *store) speakerNames(sessionID string) (map[string]string, error) {
 	names := map[string]string{trackMicrophone: "Yo", trackOutput: "Participante"}
-	rows, err := s.db.Query(`
-		SELECT speaker_key FROM transcript_segments
-		WHERE session_id = ? AND track = ? AND speaker_key != '' AND status = ?
-		GROUP BY speaker_key ORDER BY MIN(start_ms)`,
-		sessionID, trackOutput, segmentOK)
-	if err != nil {
-		return nil, err
-	}
-	number := 1
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
+	// The microphone's people are lettered (A, B…) and the call's numbered
+	// (1, 2…), so the two tracks never share a label.
+	for _, track := range []string{trackMicrophone, trackOutput} {
+		rows, err := s.db.Query(`
+			SELECT speaker_key FROM transcript_segments
+			WHERE session_id = ? AND track = ? AND speaker_key != '' AND status = ?
+			GROUP BY speaker_key ORDER BY MIN(start_ms)`,
+			sessionID, track, segmentOK)
+		if err != nil {
+			return nil, err
+		}
+		index := 0
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			names[speakerDisplayKey(track, key)] = participantLabel(track, index)
+			index++
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		names[speakerDisplayKey(trackOutput, key)] = fmt.Sprintf("Participante %d", number)
-		number++
-	}
-	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, err
 	}
-	rows.Close()
 
 	overrides, err := s.db.Query("SELECT track, speaker_key, name FROM transcript_speakers WHERE session_id = ?", sessionID)
 	if err != nil {

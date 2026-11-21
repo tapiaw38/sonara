@@ -25,6 +25,11 @@ button {
   border: 0;
   cursor: pointer;
 }
+button:focus-visible,
+[role='separator']:focus-visible {
+  outline: 2px solid rgb(98 215 179 / 0.55);
+  outline-offset: 2px;
+}
 .shell {
   --surface-opacity: 1;
   min-height: 100vh;
@@ -317,8 +322,9 @@ button {
   margin: 0 16px 10px;
   padding: 8px;
   border-radius: 6px;
+  border: 1px solid rgb(122 103 60 / var(--surface-opacity));
   color: #eed39a;
-  background: #392c20;
+  background: rgb(57 44 32 / var(--surface-opacity));
   font-size: 10px;
 }
 .audio-source-top-control,
@@ -385,6 +391,9 @@ button {
   border-radius: 7px;
   background: rgb(23 19 34 / var(--surface-opacity));
   font-size: 11px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 .panels {
   display: grid;
@@ -1310,9 +1319,11 @@ button {
   letter-spacing: -0.045em;
 }
 .workspace-subtitle {
-  margin: 7px 0 0;
+  margin: 9px 0 0;
+  max-width: 60ch;
   color: #828691;
   font-size: 11px;
+  line-height: 1.5;
 }
 .eyebrow {
   color: #78a99c;
@@ -1402,6 +1413,10 @@ button {
   height: 28px;
   color: #071711;
   background: #62d7b3;
+  transition: background 0.15s ease;
+}
+.send-button:not(:disabled):hover {
+  background: #7fe0c4;
 }
 .ghost-button {
   color: #b9f2df;
@@ -1415,14 +1430,24 @@ button {
   color: #071711;
   background: rgb(98 215 179 / var(--surface-opacity));
 }
+.listen-button:not(:disabled):hover {
+  background: rgb(118 230 196 / var(--surface-opacity));
+}
 .listen-button.stop {
   color: #f5e1e5;
   background: rgb(101 56 69 / var(--surface-opacity));
+}
+.listen-button.stop:not(:disabled):hover {
+  background: rgb(122 70 85 / var(--surface-opacity));
 }
 .mode-toggle {
   color: #a6e9d3;
   border-color: rgb(62 126 108 / var(--surface-opacity));
   background: rgb(19 37 32 / var(--surface-opacity));
+  transition: background 0.15s ease;
+}
+.mode-toggle:hover {
+  background: rgb(27 50 43 / var(--surface-opacity));
 }
 .audio-pulse {
   color: #67d6b1;
@@ -1632,6 +1657,10 @@ button {
   font:
     600 10px Manrope,
     sans-serif;
+  transition: background 0.15s ease;
+}
+.font-tools button:not(:disabled):hover {
+  background: #242b2f;
 }
 .font-tools button:disabled {
   opacity: 0.35;
@@ -1887,4 +1916,114 @@ button {
   .kbd {
     display: none;
   }
+}
+
+/* Streamed text still being spoken: it keeps changing until the turn ends. */
+.transcript-text.partial {
+  color: #8d8f9d;
+  font-style: italic;
+}
+.transcript-text.partial::after {
+  content: '▍';
+  margin-left: 2px;
+  color: #62d7b3;
+  animation: partial-blink 1s steps(1) infinite;
+}
+@keyframes partial-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Suggested reply still being written by the model. */
+.message.streaming .message-content {
+  color: #a3a5b1;
+}
+.message.streaming .message-content::after {
+  content: '▍';
+  margin-left: 2px;
+  color: #62d7b3;
+  animation: partial-blink 1s steps(1) infinite;
+}
+
+/* Panels with a drag handle at the bottom edge (usePanelResize). */
+.resizable-panel {
+  position: relative;
+}
+
+/* Copilot tab with its mode menu. */
+.nav-copilot {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.product-nav .nav-copilot button.nav-copilot-main {
+  padding-right: 6px;
+}
+.nav-copilot.active .nav-copilot-main {
+  color: #f0f4f5;
+}
+.nav-copilot.active::after {
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  content: '';
+  border-radius: 2px 2px 0 0;
+  background: #55d6b0;
+  box-shadow: 0 0 12px rgb(85 214 176 / 0.28);
+}
+.nav-mode {
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #9fe7cf;
+  background: rgb(85 214 176 / 0.1);
+  font-size: 10px;
+  font-weight: 600;
+}
+.product-nav .nav-copilot button.nav-copilot-toggle {
+  padding: 0 10px 0 4px;
+  font-size: 10px;
+}
+.mode-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 6px;
+  min-width: 250px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #2d2f3a;
+  border-radius: 10px;
+  background: #15161d;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.45);
+}
+.product-nav .mode-menu button {
+  height: auto;
+  padding: 8px 10px;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  border-radius: 7px;
+  text-align: left;
+}
+.mode-menu strong {
+  color: #e6e9ed;
+  font-size: 12px;
+  font-weight: 600;
+}
+.mode-menu small {
+  color: #7d808d;
+  font-size: 10px;
+  font-weight: 400;
+}
+.product-nav .mode-menu button.current {
+  background: rgb(85 214 176 / 0.08);
+}
+.product-nav .mode-menu button.current strong {
+  color: #9fe7cf;
 }

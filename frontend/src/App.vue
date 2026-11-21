@@ -19,6 +19,7 @@ import {
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import CopilotView from './views/CopilotView.vue'
 import MeetingView from './views/MeetingView.vue'
+import PracticeView from './views/PracticeView.vue'
 import TopBar from './components/TopBar.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
@@ -29,7 +30,7 @@ const copilotRef = ref<InstanceType<typeof CopilotView> | null>(null)
 
 // 'meeting' is the transcription view; the four copilot modes share 'copilot'.
 // It is UI-only: the copilot keeps its own mode and session underneath.
-const view = ref<'copilot' | 'meeting'>('copilot')
+const view = ref<'copilot' | 'meeting' | 'practice'>('copilot')
 const meetingSessionID = ref('')
 const storedMode = localStorage.getItem('sonara-mode') || 'interview'
 const assistantMode = ref(
@@ -298,6 +299,7 @@ async function toggleAlwaysOnTop() {
       v-model:opacity-percent="opacityPercent"
       @select-mode="selectMode"
       @show-meeting="view = 'meeting'"
+      @show-practice="view = 'practice'"
       @open-settings="showSettings = true"
       @toggle-always-on-top="toggleAlwaysOnTop"
       @refresh-audio-sources="refreshAudioSources"
@@ -332,20 +334,22 @@ async function toggleAlwaysOnTop() {
           @opened="meetingSessionID = $event"
           @sessions-changed="refreshSessions"
         />
-        <CopilotView
-          v-show="view === 'copilot'"
-          ref="copilotRef"
-          :assistant-mode="assistantMode"
-          v-model:listening="listening"
-          v-model:started-at="startedAt"
-          v-model:capture-status="captureStatus"
-          v-model:analyzing-capture="analyzingCapture"
-          v-model:audio-guessing="audioGuessing"
-          v-model:audio-candidates="audioCandidates"
-          v-model:code-font-size="codeFontSize"
-          v-model:panels-resizing="panelsResizing"
-          @open-session-setup="showSessionSetup = true"
-        />
+        <PracticeView v-if="view === 'practice'" />
+        <div v-show="view === 'copilot'" style="display: contents">
+          <CopilotView
+            ref="copilotRef"
+            :assistant-mode="assistantMode"
+            v-model:listening="listening"
+            v-model:started-at="startedAt"
+            v-model:capture-status="captureStatus"
+            v-model:analyzing-capture="analyzingCapture"
+            v-model:audio-guessing="audioGuessing"
+            v-model:audio-candidates="audioCandidates"
+            v-model:code-font-size="codeFontSize"
+            v-model:panels-resizing="panelsResizing"
+            @open-session-setup="showSessionSetup = true"
+          />
+        </div>
 
         <footer class="footer">
           <span v-if="view === 'copilot'">{{ captureStatus }} · Ctrl+Alt+C</span

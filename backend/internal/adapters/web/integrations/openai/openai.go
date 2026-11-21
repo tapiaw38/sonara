@@ -23,6 +23,7 @@ type Gateway interface {
 	Respond(context.Context, domain.Request, string, string) (string, error)
 	RespondStream(context.Context, domain.Request, string, string, func(string)) (string, error)
 	Transcribe(context.Context, []byte, string, string) (domain.Transcript, error)
+	Speak(context.Context, string, string, string) ([]byte, error)
 }
 
 type gateway struct {
@@ -256,11 +257,15 @@ func readResponseStream(body io.Reader, onDelta func(string)) (string, error) {
 // timings are split because a single total cannot tell a slow upload apart from
 // a queue wait on OpenAI's side, and those have opposite fixes.
 func (g *gateway) Transcribe(ctx context.Context, audio []byte, filename, language string) (domain.Transcript, error) {
+	return g.TranscribeWithPrompt(ctx, audio, filename, language, "")
+}
+
+func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filename, language, prompt string) (domain.Transcript, error) {
 	apiKey := g.configuredKey()
 	if apiKey == "" {
 		return domain.Transcript{}, fmt.Errorf("OpenAI is not configured")
 	}
-	body, contentType, err := transcriptionBody(audio, filename, language, g.cfg.TranscribeModel)
+	body, contentType, err := transcriptionBody(audio, filename, language, g.cfg.TranscribeModel, prompt)
 	if err != nil {
 		return domain.Transcript{}, err
 	}
@@ -305,7 +310,56 @@ func (g *gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	return out, nil
 }
 
-func transcriptionBody(audio []byte, filename, language, model string) (bytes.Buffer, string, error) {
+// Speak turns text into spoken audio (wav) using OpenAI's TTS endpoint.
+func (g *gateway) Speak(ctx context.Context, text, voice, model string) ([]byte, error) {
+	apiKey := g.configuredKey()
+	if apiKey == "" {
+		return nil, fmt.Errorf("OpenAI is not configured")
+	}
+	instructions := ""
+	if strings.HasPrefix(model, "gpt-4o-mini-tts") {
+		instructions = "Sound like a person having a one-on-one conversation. Speak with warm, understated curiosity, natural contractions where written, and subtle changes in pitch and pace. Pause briefly between thoughts, link words naturally, and make the final question sound genuinely inquisitive. Use the language, dialect, and exact words of the input."
+	}
+	body, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Voice          string `json:"voice"`
+		Input          string `json:"input"`
+		ResponseFormat string `json:"response_format"`
+		Instructions   string `json:"instructions,omitempty"`
+	}{Model: model, Voice: voice, Input: text, ResponseFormat: "wav", Instructions: instructions})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.OpenAIBaseURL+"/audio/speech", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		var result responseResult
+		if json.Unmarshal(errorBody, &result) == nil && result.Error != nil && result.Error.Message != "" {
+			return nil, fmt.Errorf("OpenAI TTS request failed: %s", result.Error.Message)
+		}
+		return nil, fmt.Errorf("OpenAI TTS request failed with status %d", resp.StatusCode)
+	}
+	audio, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	if len(audio) == 0 {
+		return nil, fmt.Errorf("OpenAI TTS returned no audio")
+	}
+	return audio, nil
+}
+
+func transcriptionBody(audio []byte, filename, language, model, prompt string) (bytes.Buffer, string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	file, err := writer.CreateFormFile("file", safeFilename(filename))
@@ -320,6 +374,11 @@ func transcriptionBody(audio []byte, filename, language, model string) (bytes.Bu
 	}
 	if language == "es" || language == "en" {
 		if err := writer.WriteField("language", language); err != nil {
+			return body, "", err
+		}
+	}
+	if prompt != "" && !strings.HasPrefix(model, "gpt-4o-transcribe-diarize") {
+		if err := writer.WriteField("prompt", prompt); err != nil {
 			return body, "", err
 		}
 	}

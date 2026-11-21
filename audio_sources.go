@@ -26,13 +26,17 @@ func availableMicrophones(ctx context.Context) ([]AudioSource, error) {
 }
 
 func (a *App) Microphones() ([]AudioSource, error) {
+	return a.microphones(a.requestContext())
+}
+
+func (a *App) microphones(ctx context.Context) ([]AudioSource, error) {
 	a.mu.RLock()
 	hook := a.microphonesHook
 	a.mu.RUnlock()
 	if hook != nil {
-		return hook(a.requestContext())
+		return hook(ctx)
 	}
-	return availableMicrophones(a.requestContext())
+	return availableMicrophones(ctx)
 }
 
 func (a *App) AudioSources() ([]AudioSource, error) {

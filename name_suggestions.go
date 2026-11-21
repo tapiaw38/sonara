@@ -12,6 +12,10 @@ import (
 // a literal blank label as a JSON key is a bad bet, this isn't.
 const genericSpeakerToken = "generico"
 
+// micSpeakerTokenPrefix marks a participant separated within the microphone,
+// so its token never collides with a meeting_output key.
+const micSpeakerTokenPrefix = "mic_"
+
 // buildNameInferenceTranscript lists what was actually said, one line per
 // spoken segment, labeled by speaker token. The microphone is always "Yo" —
 // context for the model, never something it gets asked to rename.
@@ -22,6 +26,9 @@ func buildNameInferenceTranscript(segments []TranscriptSegment) string {
 			continue
 		}
 		token := "Yo"
+		if segment.Track == trackMicrophone && segment.SpeakerKey != "" {
+			token = micSpeakerTokenPrefix + segment.SpeakerKey
+		}
 		if segment.Track == trackOutput {
 			token = segment.SpeakerKey
 			if token == "" {
@@ -87,4 +94,52 @@ func (a *App) SuggestMeetingSpeakerNames(sessionID string) (map[string]string, e
 		suggestions[key] = name
 	}
 	return suggestions, nil
+}
+
+// nameParticipants runs after the final separation: it asks the model for the
+// names the conversation itself mentions and turns "Participante B" into
+// "Participante B (David)". Best-effort and never over a name the user typed.
+func (a *App) nameParticipants(ctx context.Context, sessionID string) {
+	a.mu.RLock()
+	database, backend := a.store, a.backend
+	a.mu.RUnlock()
+	if database == nil || backend == nil {
+		return
+	}
+	segments, err := database.transcriptSegments(sessionID)
+	if err != nil {
+		return
+	}
+	transcript := buildNameInferenceTranscript(segments)
+	if strings.TrimSpace(transcript) == "" {
+		return
+	}
+	raw, err := backend.SuggestSpeakerNames(ctx, transcript)
+	if err != nil {
+		logf("meeting %s: naming participants failed: %v", sessionID, err)
+		return
+	}
+	labels, err := database.speakerNames(sessionID)
+	if err != nil {
+		return
+	}
+	for token, name := range raw {
+		track, key := trackOutput, token
+		switch {
+		case token == "Yo":
+			continue
+		case token == genericSpeakerToken:
+			key = ""
+		case strings.HasPrefix(token, micSpeakerTokenPrefix):
+			track, key = trackMicrophone, strings.TrimPrefix(token, micSpeakerTokenPrefix)
+		}
+		label, ok := labels[speakerDisplayKey(track, key)]
+		if !ok || !strings.HasPrefix(label, "Participante") || strings.Contains(label, "(") {
+			continue // unknown token, or already named by hand
+		}
+		if err := database.saveSpeakerName(sessionID, track, key, label+" ("+name+")"); err != nil {
+			logf("meeting %s: could not store the name for %s: %v", sessionID, token, err)
+		}
+	}
+	a.emitMeetingStatus()
 }

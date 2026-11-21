@@ -7,7 +7,7 @@ defineProps<{
   startedAt: string
   sessions: SessionRow[]
   currentSessionId: string
-  view: 'copilot' | 'meeting'
+  view: 'copilot' | 'meeting' | 'practice'
   meetingSessionId: string
   sessionMessage: string
 }>()

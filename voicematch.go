@@ -119,16 +119,14 @@ func isEcho(spans []echoSpan, startMS, endMS int64) bool {
 // buffer runDiarization does (not released until finishMeeting calls
 // releaseDiarizePCM, after both passes). Never fails the meeting.
 func (a *App) runVoiceMatch(run *meetingRun) {
-	if !a.diarizer.Configured() {
-		return
+	if a.diarizer.key() == "" {
+		return // voice matching needs Gemini; the local engine only separates
 	}
 	sample, err := readVoiceSample()
 	if err != nil {
 		return // no voluntary sample recorded: this feature is simply off
 	}
-	run.diarizeMu.Lock()
-	pcm := run.diarizePCM
-	run.diarizeMu.Unlock()
+	pcm := run.diarizeSnapshot(trackOutput)
 	if len(pcm) == 0 {
 		return
 	}

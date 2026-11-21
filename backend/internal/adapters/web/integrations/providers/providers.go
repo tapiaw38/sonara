@@ -40,6 +40,7 @@ const (
 	OpenAI   = "openai"
 	DeepSeek = "deepseek"
 	Azure    = "azure"
+	Local    = "local"
 )
 
 // Registry is a fixed set of named strategies, built once at startup.
@@ -126,9 +127,18 @@ func (t *Transcriber) SetProvider(name string) { t.mu.Lock(); t.name = name; t.m
 func (t *Transcriber) Provider() string { t.mu.RLock(); defer t.mu.RUnlock(); return t.name }
 
 func (t *Transcriber) Transcribe(ctx context.Context, audio []byte, filename, language string) (domain.Transcript, error) {
+	return t.TranscribeWithPrompt(ctx, audio, filename, language, "")
+}
+
+func (t *Transcriber) TranscribeWithPrompt(ctx context.Context, audio []byte, filename, language, prompt string) (domain.Transcript, error) {
 	provider, err := t.registry.Get(t.Provider())
 	if err != nil {
 		return domain.Transcript{}, err
+	}
+	if prompted, ok := provider.(interface {
+		TranscribeWithPrompt(context.Context, []byte, string, string, string) (domain.Transcript, error)
+	}); ok && prompt != "" {
+		return prompted.TranscribeWithPrompt(ctx, audio, filename, language, prompt)
 	}
 	return provider.Transcribe(ctx, audio, filename, language)
 }

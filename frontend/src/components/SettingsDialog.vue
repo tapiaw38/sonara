@@ -476,6 +476,7 @@ onMounted(async () => {
           <option value="openai">OpenAI</option>
           <option value="deepseek">DeepSeek</option>
           <option value="azure">Azure OpenAI</option>
+          <option value="local">Whisper local (gratis)</option>
         </select>
         <label for="provider-meeting">Transcripción de reuniones</label>
         <select
@@ -486,6 +487,7 @@ onMounted(async () => {
           <option value="openai">OpenAI</option>
           <option value="deepseek">DeepSeek</option>
           <option value="azure">Azure OpenAI</option>
+          <option value="local">Whisper local (gratis)</option>
         </select>
         <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
         <select

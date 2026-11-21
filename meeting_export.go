@@ -108,7 +108,24 @@ func (a *App) exportMeetingTo(sessionID, path string) error {
 	if err != nil {
 		started = time.Now()
 	}
-	return writeFileAtomic(path, []byte(formatMeetingTranscript(started.Local(), view.Language, view.Segments, view.Speakers)))
+	text := formatMeetingTranscript(started.Local(), view.Language, view.Segments, view.Speakers)
+	return writeFileAtomic(path, []byte(text+a.meetingSummary(text)))
+}
+
+// meetingSummary never fails the export: a missing summary is noted, the
+// transcript is still written.
+func (a *App) meetingSummary(transcript string) string {
+	if a.backend == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(a.requestContext(), 90*time.Second)
+	defer cancel()
+	output, err := a.backend.Respond(ctx, "Resumí esta reunión:\n\n"+transcript, "summary", "")
+	if err != nil {
+		logf("meeting summary failed: %v", err)
+		return "\n\n===== RESUMEN =====\n(no se pudo generar el resumen)\n"
+	}
+	return "\n\n===== RESUMEN =====\n" + strings.TrimSpace(output.Text) + "\n"
 }
 
 func exportFilename(startedAt string) string {

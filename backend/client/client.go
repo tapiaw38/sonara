@@ -8,6 +8,7 @@ import (
 
 	"sonara/backend/internal/adapters/web/integrations/azureopenai"
 	"sonara/backend/internal/adapters/web/integrations/deepseek"
+	"sonara/backend/internal/adapters/web/integrations/localwhisper"
 	"sonara/backend/internal/adapters/web/integrations/openai"
 	"sonara/backend/internal/adapters/web/integrations/providers"
 	"sonara/backend/internal/domain"
@@ -25,6 +26,7 @@ type Client struct {
 	provider openai.Gateway
 	deepseek *deepseek.Gateway
 	azure    *azureopenai.Gateway
+	local    *localwhisper.Gateway
 
 	textVision        *providers.Selector
 	liveTranscribe    *providers.Transcriber
@@ -37,6 +39,7 @@ type Client struct {
 	title        assistant.TitleUsecase
 	suggestNames assistant.SuggestSpeakerNamesUsecase
 	translate    assistant.TranslateUsecase
+	speak        assistant.SpeakUsecase
 }
 
 type Response struct {
@@ -71,10 +74,12 @@ func New() *Client {
 	provider := openai.NewGateway(cfg)
 	cheap := deepseek.NewGateway(cfg)
 	azure := azureopenai.NewGateway()
+	local := localwhisper.NewGateway()
 	registry := providers.NewRegistry(map[string]providers.Provider{
 		providers.OpenAI:   provider,
 		providers.DeepSeek: cheap,
 		providers.Azure:    azure,
+		providers.Local:    local,
 	})
 	// Every capability defaults to OpenAI until Settings says otherwise —
 	// one explicit choice each, loaded from the database at startup
@@ -83,7 +88,7 @@ func New() *Client {
 	liveTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
 	meetingTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
 	return &Client{
-		cfg: cfg, provider: provider, deepseek: cheap, azure: azure,
+		cfg: cfg, provider: provider, deepseek: cheap, azure: azure, local: local,
 		textVision: textVision, liveTranscribe: liveTranscribe, meetingTranscribe: meetingTranscribe,
 		respond:      assistant.NewRespondUsecase(textVision, cfg),
 		screen:       assistant.NewAnalyzeScreenUsecase(textVision, cfg),
@@ -92,6 +97,7 @@ func New() *Client {
 		title:        assistant.NewTitleUsecase(textVision, cfg),
 		suggestNames: assistant.NewSuggestSpeakerNamesUsecase(textVision, cfg),
 		translate:    assistant.NewTranslateUsecase(textVision, cfg),
+		speak:        assistant.NewSpeakUsecase(provider, cfg.TTSModel, cfg.TTSVoice),
 	}
 }
 
@@ -114,6 +120,14 @@ func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (ma
 func (c *Client) TranslateStream(ctx context.Context, text string, onDelta func(string)) (string, error) {
 	return c.translate.ExecuteStream(ctx, text, onDelta)
 }
+
+// TranslateTo returns a translation into Spanish or English.
+func (c *Client) TranslateTo(ctx context.Context, text, language string) (string, error) {
+	return c.translate.ExecuteTo(ctx, text, language, func(string) {})
+}
+
+// Close stops the local Whisper server if Sonara started it.
+func (c *Client) Close() { c.local.Stop() }
 
 func (c *Client) Status() string {
 	c.mu.RLock()
@@ -155,7 +169,7 @@ func (c *Client) SetAzureOpenAIConfig(cfg AzureConfig) error {
 // offer: a typo must error, never silently land on a default.
 func validProviderName(name string) error {
 	switch name {
-	case providers.OpenAI, providers.DeepSeek, providers.Azure:
+	case providers.OpenAI, providers.DeepSeek, providers.Azure, providers.Local:
 		return nil
 	default:
 		return fmt.Errorf("proveedor desconocido: %q", name)
@@ -260,6 +274,23 @@ func (c *Client) AnalyzeScreen(ctx context.Context, imageData, prompt string) (R
 
 func (c *Client) Transcribe(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {
 	return toTranscript(c.transcribe.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language}))
+}
+
+// TranscribePractice gives the selected transcriber context for spoken interview answers.
+func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language string) (Transcript, error) {
+	prompt := "Respuesta espontánea de una persona en una entrevista. Transcribí lo que realmente se oye, con puntuación natural. Conservá nombres, siglas, vocabulario técnico y cambios de idioma. No completes palabras dudosas ni agregues texto durante el silencio."
+	if language == "en" {
+		prompt = "A candidate speaking spontaneously in an interview. Transcribe only what is audible, with natural punctuation. Preserve names, acronyms, technical terms, and language switches. Do not fill in unclear words or add text during silence."
+	}
+	output, err := c.liveTranscribe.TranscribeWithPrompt(ctx, audio, "answer.wav", language, prompt)
+	return toTranscript(&output, err)
+}
+
+// Speak turns text into spoken audio (wav bytes) for the practice mode's
+// interviewer voice. Always OpenAI, by design: unlike text/vision/transcribe,
+// this capability has no Settings-level provider choice.
+func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
+	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
 }
 
 func toTranscript(output *domain.Transcript, err error) (Transcript, error) {

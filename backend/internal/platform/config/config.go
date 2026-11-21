@@ -16,6 +16,8 @@ type Config struct {
 	ReasoningModel  string
 	ExpertModel     string
 	TranscribeModel string
+	TTSModel        string
+	TTSVoice        string
 	// DeepSeek is the cheaper provider for text and audio. OpenAI and
 	// DeepSeek are plain gateways; which one actually answers a given
 	// request (and whether Azure OpenAI is in the mix too) is decided at
@@ -31,6 +33,11 @@ type Config struct {
 }
 
 func Load() Config {
+	ttsModel := value("OPENAI_MODEL_TTS", "gpt-4o-mini-tts")
+	ttsVoice := "marin"
+	if ttsModel == "tts-1" || ttsModel == "tts-1-hd" {
+		ttsVoice = "alloy"
+	}
 	return Config{
 		Address:            value("SONARA_ADDR", "127.0.0.1:8777"),
 		AllowedOrigins:     listValue("SONARA_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://wails.localhost"),
@@ -40,6 +47,8 @@ func Load() Config {
 		ReasoningModel:     value("OPENAI_MODEL_REASONING", "gpt-6.1-sol"),
 		ExpertModel:        value("OPENAI_MODEL_EXPERT", "gpt-6-astra"),
 		TranscribeModel:    value("OPENAI_MODEL_TRANSCRIBE", "gpt-transcribe"),
+		TTSModel:           ttsModel,
+		TTSVoice:           value("OPENAI_TTS_VOICE", ttsVoice),
 		DeepSeekKey:        strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
 		DeepSeekBaseURL:    strings.TrimRight(value("DEEPSEEK_BASE_URL", "https://api.deepseek.com"), "/"),
 		DeepSeekModelFast:  value("DEEPSEEK_MODEL_FAST", "deepseek-flash"),

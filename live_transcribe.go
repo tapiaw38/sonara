@@ -358,7 +358,7 @@ func (a *App) setLivePartial(session uint64, text string, first bool) {
 	if a.sessionGeneration != session || !a.listening {
 		return
 	}
-	a.transcript = text
+	a.transcript, a.livePartial = text, text
 	if first {
 		a.translation = ""
 	}
@@ -368,7 +368,7 @@ func (a *App) setLiveFinalText(session uint64, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.sessionGeneration == session {
-		a.transcript = text
+		a.transcript, a.livePartial = text, ""
 	}
 }
 

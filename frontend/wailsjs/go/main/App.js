@@ -74,6 +74,10 @@ export function ListeningStatus() {
   return window['go']['main']['App']['ListeningStatus']();
 }
 
+export function MeetingPeople() {
+  return window['go']['main']['App']['MeetingPeople']();
+}
+
 export function MeetingProvider() {
   return window['go']['main']['App']['MeetingProvider']();
 }
@@ -96,6 +100,10 @@ export function NewSession() {
 
 export function OpenSession(arg1) {
   return window['go']['main']['App']['OpenSession'](arg1);
+}
+
+export function PracticeListen() {
+  return window['go']['main']['App']['PracticeListen']();
 }
 
 export function RecordVoiceSample() {
@@ -170,6 +178,10 @@ export function SetManualSend(arg1) {
   return window['go']['main']['App']['SetManualSend'](arg1);
 }
 
+export function SetMeetingPeople(arg1) {
+  return window['go']['main']['App']['SetMeetingPeople'](arg1);
+}
+
 export function SetMeetingProvider(arg1) {
   return window['go']['main']['App']['SetMeetingProvider'](arg1);
 }
@@ -180,6 +192,10 @@ export function SetMicrophone(arg1) {
 
 export function SetOpenAIAPIKey(arg1) {
   return window['go']['main']['App']['SetOpenAIAPIKey'](arg1);
+}
+
+export function SetPracticePlayback(arg1) {
+  return window['go']['main']['App']['SetPracticePlayback'](arg1);
 }
 
 export function SetTextProvider(arg1) {
@@ -198,12 +214,20 @@ export function StartMeetingTranscript() {
   return window['go']['main']['App']['StartMeetingTranscript']();
 }
 
+export function StartPractice() {
+  return window['go']['main']['App']['StartPractice']();
+}
+
 export function StopListening() {
   return window['go']['main']['App']['StopListening']();
 }
 
 export function StopMeetingTranscript() {
   return window['go']['main']['App']['StopMeetingTranscript']();
+}
+
+export function StopPractice() {
+  return window['go']['main']['App']['StopPractice']();
 }
 
 export function SuggestMeetingSpeakerNames(arg1) {

@@ -32,7 +32,7 @@ func NewSuggestSpeakerNamesUsecase(gateway responder, cfg config.Config) Suggest
 const suggestNamesInstructions = "Leés la transcripción de una reunión. Cada línea empieza con una etiqueta " +
 	"de hablante (por ejemplo \"spk_0\" o \"generico\") seguida de lo que dijo. Buscá únicamente nombres " +
 	"propios que la propia conversación menciona de forma explícita: alguien que se presenta (\"soy María\"), " +
-	"o es saludado o nombrado por otro (\"Hola Pedro\", \"gracias Juan\"). Nunca inventes ni deduzcas un " +
+	"o es saludado o nombrado por otro (\"Hola Pedro\", \"gracias Juan\"). Cuando alguien saluda o le habla a un nombre, ese nombre es de quien responde a continuación, no de quien lo dijo. Nunca inventes ni deduzcas un " +
 	"nombre que no esté dicho en el texto; ante la duda, omitilo. Respondé solo un objeto JSON plano donde " +
 	"cada clave es exactamente una etiqueta que aparece en la transcripción y el valor es el nombre propio " +
 	"encontrado, con mayúscula inicial. Omití toda etiqueta sin un nombre claro: no incluyas la clave en ese " +

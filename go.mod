@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
+	github.com/maxhawkins/go-webrtcvad v0.0.0-20210121163624-be60036f3083
 	github.com/wailsapp/wails/v2 v2.15.0
 	modernc.org/sqlite v1.60.1
 )

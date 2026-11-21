@@ -38,6 +38,8 @@ export function LastCapture():Promise<main.CaptureStatus>;
 
 export function ListeningStatus():Promise<main.ListeningState>;
 
+export function MeetingPeople():Promise<number>;
+
 export function MeetingProvider():Promise<string>;
 
 export function MeetingTranscriptSegments(arg1:string):Promise<main.MeetingView>;
@@ -49,6 +51,8 @@ export function Microphones():Promise<Array<main.AudioSource>>;
 export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<main.OpenSessionResult>;
+
+export function PracticeListen():Promise<main.PracticeTurn>;
 
 export function RecordVoiceSample():Promise<void>;
 
@@ -86,11 +90,15 @@ export function SetLiveTranscribeProvider(arg1:string):Promise<void>;
 
 export function SetManualSend(arg1:boolean):Promise<boolean>;
 
+export function SetMeetingPeople(arg1:number):Promise<number>;
+
 export function SetMeetingProvider(arg1:string):Promise<void>;
 
 export function SetMicrophone(arg1:string):Promise<string>;
 
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
+
+export function SetPracticePlayback(arg1:boolean):Promise<void>;
 
 export function SetTextProvider(arg1:string):Promise<void>;
 
@@ -100,9 +108,13 @@ export function StartListening():Promise<boolean>;
 
 export function StartMeetingTranscript():Promise<main.MeetingStatus>;
 
+export function StartPractice():Promise<main.PracticeTurn>;
+
 export function StopListening():Promise<boolean>;
 
 export function StopMeetingTranscript():Promise<main.MeetingStatus>;
+
+export function StopPractice():Promise<void>;
 
 export function SuggestMeetingSpeakerNames(arg1:string):Promise<Record<string, string>>;
 

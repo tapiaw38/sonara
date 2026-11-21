@@ -97,6 +97,7 @@ export namespace main {
 	export class ListeningState {
 	    listening: boolean;
 	    transcript: string;
+	    partial: boolean;
 	    status: string;
 	    response: string;
 	    sequence: number;
@@ -121,6 +122,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.listening = source["listening"];
 	        this.transcript = source["transcript"];
+	        this.partial = source["partial"];
 	        this.status = source["status"];
 	        this.response = source["response"];
 	        this.sequence = source["sequence"];
@@ -305,6 +307,22 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class PracticeTurn {
+	    Text: string;
+	    ReplyText: string;
+	    Audio: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PracticeTurn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Text = source["Text"];
+	        this.ReplyText = source["ReplyText"];
+	        this.Audio = source["Audio"];
+	    }
 	}
 	export class SessionProfile {
 	    scenario: string;

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,8 +64,14 @@ type App struct {
 	translation         string
 	floatedForOverlay   bool
 	// Meeting transcription state, independent of the copilot's listening.
-	meeting           *meetingRun
-	preferredMic      string
+	meeting       *meetingRun
+	preferredMic  string
+	meetingPeople int
+	// livePartial is the streamed text shown before its turn is final.
+	livePartial       string
+	practiceRec       *practiceRecording
+	practicePlaying   atomic.Bool
+	practiceAnswerID  uint64
 	emitHook          func(event string, data any)
 	meetingTranscribe meetingTranscriber
 	saveDialog        func(ctx context.Context, filename string) (string, error)
@@ -137,8 +144,10 @@ type AnalysisResult struct {
 }
 
 type ListeningState struct {
-	Listening       bool    `json:"listening"`
-	Transcript      string  `json:"transcript"`
+	Listening  bool   `json:"listening"`
+	Transcript string `json:"transcript"`
+	// Partial: Transcript is still being spoken (streaming), not final yet.
+	Partial         bool    `json:"partial"`
 	Status          string  `json:"status"`
 	Response        string  `json:"response"`
 	Sequence        uint64  `json:"sequence"`
@@ -220,6 +229,11 @@ func (a *App) startup(ctx context.Context) {
 			a.preferredMic = mic
 			a.mu.Unlock()
 		}
+		if people, err := strconv.Atoi(database.setting(settingMeetingPeople)); err == nil {
+			a.mu.Lock()
+			a.meetingPeople = people
+			a.mu.Unlock()
+		}
 		if key := database.setting(settingGeminiKey); key != "" {
 			a.diarizer.SetAPIKey(key)
 		}
@@ -273,6 +287,9 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	// Before the store closes: pending meeting blocks still have to be written.
 	a.stopMeetingAndWait(15 * time.Second)
+	if a.backend != nil {
+		a.backend.Close()
+	}
 	a.mu.Lock()
 	database := a.store
 	a.store = nil
@@ -320,6 +337,7 @@ func (a *App) ListeningStatus() ListeningState {
 	defer a.mu.RUnlock()
 	return ListeningState{
 		Listening: a.listening, Transcript: a.transcript, Status: a.listenStatus,
+		Partial:  a.livePartial != "" && a.livePartial == a.transcript,
 		Response: a.voiceReply, Sequence: a.voiceSequence,
 		ManualSend:      a.manualSend,
 		PendingSeconds:  float64(len(a.pendingAudio)) / float64(meetSampleRate*2),
@@ -396,7 +414,7 @@ func (a *App) SetAudioLanguage(language string) string {
 
 func (a *App) SetAssistantMode(mode string) string {
 	switch mode {
-	case "daily", "coding", "coaching":
+	case "daily", "coding", "coaching", "practice":
 	default:
 		mode = "interview"
 	}
@@ -849,28 +867,38 @@ func (a *App) SendMessage(content string) (AnalysisResult, error) {
 	if content == "" {
 		return AnalysisResult{}, fmt.Errorf("message is empty")
 	}
+	reply, err := a.requestAssistantReply(content, true)
+	if err != nil {
+		return AnalysisResult{}, err
+	}
+	return AnalysisResult{Response: reply}, nil
+}
+
+// requestAssistantReply asks the backend for a reply in the current session's mode and context.
+func (a *App) requestAssistantReply(content string, storeUserMessage bool) (string, error) {
 	a.mu.RLock()
 	mode := a.assistantMode
 	contextText := a.buildSessionContextLocked()
 	ctx, generation := a.voiceContext, a.sessionGeneration
 	a.mu.RUnlock()
 	if a.backend == nil {
-		return AnalysisResult{}, fmt.Errorf("Sonara backend is not initialized")
+		return "", fmt.Errorf("Sonara backend is not initialized")
 	}
 	output, err := a.backend.Respond(ctx, content, mode, contextText)
 	if err != nil {
 		logf("chat reply failed (mode %s, %d chars of context): %v", mode, len(contextText), err)
-		return AnalysisResult{}, err
+		return "", err
 	}
-	result := AnalysisResult{Response: output.Text}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.sessionGeneration != generation {
-		return AnalysisResult{}, fmt.Errorf("la sesión cambió durante la respuesta")
+		return "", fmt.Errorf("la sesión cambió durante la respuesta")
 	}
-	a.appendSessionMessageLocked("user", content)
-	a.appendSessionMessageLocked("assistant", result.Response)
-	return result, nil
+	if storeUserMessage {
+		a.appendSessionMessageLocked("user", content)
+	}
+	a.appendSessionMessageLocked("assistant", output.Text)
+	return output.Text, nil
 }
 
 func (a *App) requestContext() context.Context {
@@ -1154,6 +1182,7 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	frame := make([]byte, meetFrameBytes)
 	segment := make([]byte, 0, meetSampleRate*2*12)
 	ambient := &noiseFloor{}
+	speech := newSpeechDetector()
 	recording, startFrames, voicedFrames, silenceFrames := false, 0, 0, 0
 	// Set when a run of unbroken audio was cut off: nothing new is recorded
 	// until a genuinely quiet frame proves the stream actually paused.
@@ -1196,10 +1225,11 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 		}
 		level := pcmRMS(frame)
 		a.setAudioLevel(level)
-		voice := level >= ambient.threshold()
-		if !voice {
+		loud := level >= ambient.threshold()
+		if !loud {
 			ambient.observe(level)
 		}
+		voice := isVoice(speech, frame, loud)
 		if !recording {
 			if awaitingSilence {
 				// Only a quiet frame clears the hold; while the continuous audio

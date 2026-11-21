@@ -38,6 +38,9 @@ const (
 	// settingMicrophone remembers the microphone by PipeWire node name: the
 	// serial is recreated on every boot, the name is stable.
 	settingMicrophone = "preferred_microphone"
+	// settingMeetingPeople is how many people share the microphone (0 = let
+	// the separation guess).
+	settingMeetingPeople = "meeting_people"
 	// settingGeminiKey is the Gemini key used for phase-2 diarization.
 	settingGeminiKey = "gemini_api_key"
 	// settingAzureOpenAI holds the whole Azure OpenAI form as one JSON blob

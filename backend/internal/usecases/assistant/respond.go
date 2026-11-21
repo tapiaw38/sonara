@@ -80,7 +80,7 @@ func (u *respondUsecase) ExecuteStream(ctx context.Context, input RespondInput, 
 
 func normalizeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "coding", "coaching", "interview", "daily":
+	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "summary":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return "interview"
@@ -88,6 +88,19 @@ func normalizeMode(mode string) string {
 }
 
 func chooseAgent(message, mode string) (string, string, string) {
+	if mode == "practice" || mode == "practice-turn" {
+		instructions := "Sos quien entrevista en una conversación hablada. Escuchá la última respuesta y seguí con una sola pregunta corta y concreta, basada en algo que la persona dijo o en su perfil al comenzar. Variá cómo enlazás las preguntas: a veces alcanza con preguntar directamente. Si te piden aclarar o repetir, hacelo antes de avanzar. Usá lenguaje cotidiano, frases breves y el idioma del candidato. Sin listas ni marcas de estilo."
+		if mode == "practice-turn" {
+			instructions += " Escribí primero solo lo que diría el entrevistador. Luego escribí [[SUGGESTION]] en una línea aparte y redactá debajo lo que el candidato podría contestar a esa misma pregunta. Usá el mismo idioma en ambas partes." +
+				" Empezá la sugerencia con una respuesta directa y desarrollala en dos a cuatro frases naturales cuando haga falta. Si preguntan por una experiencia, elegí un caso del perfil o de lo que la persona contó y conectá en pocas palabras el contexto, su aporte concreto y el resultado conocido." +
+				" Si la pregunta es técnica, explicá un enfoque concreto y por qué sirve, con un ejemplo o una limitación pertinente. Si preguntan por una motivación, vinculá un interés concreto del candidato con el puesto." +
+				" Escribí en primera persona, con lenguaje hablado y sin frases hechas. No inventes experiencia, cargos, métricas ni resultados. Si falta un dato esencial que solo el candidato puede aportar, dejá un marcador específico y breve entre corchetes. Si se puede responder con un enfoque hipotético útil, usalo. Entregá solo la respuesta lista para decir, sin títulos ni explicaciones."
+		}
+		return "interviewer", "fast", instructions
+	}
+	if mode == "summary" {
+		return "summary", "fast", "Resumís la transcripción de una reunión en el idioma en que está escrita. Empezá con un párrafo corto de qué se trató, después los temas principales, las decisiones y acuerdos, y los pendientes con su responsable si se menciona. Usá solo lo que está en la transcripción; si algo no quedó claro, decilo. Texto plano, con guiones para las listas, sin markdown."
+	}
 	if mode == "coding" || containsAny(strings.ToLower(message), "algoritmo", "complexity", "complejidad", "leetcode", "debug", "código", "code", "implement") {
 		return "coding", "reasoning", "Actuás como agente técnico de Sonara. Resolvés problemas de programación con precisión y explicás brevemente la solución, complejidad temporal y espacial."
 	}
