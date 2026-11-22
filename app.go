@@ -1015,12 +1015,13 @@ func (a *App) nameSession(database *store, sessionID, exchange string) {
 }
 
 func (a *App) buildSessionContextLocked() string {
-	var context strings.Builder
+	// The profile is bounded on its own (normalizeSessionProfile) and stays
+	// out of the shared budget: long notes must not crowd out the summary.
+	var profile string
 	if brief := a.sessionProfile.promptContext(); strings.TrimSpace(brief) != "" {
-		context.WriteString("Interview profile and goals:\n")
-		context.WriteString(brief)
-		context.WriteString("\n\n")
+		profile = "Interview profile and goals:\n" + brief + "\n\n"
 	}
+	var context strings.Builder
 	if visual := strings.TrimSpace(a.latestVisualContext); visual != "" {
 		context.WriteString("Recent screenshot analysis:\n")
 		context.WriteString(visual)
@@ -1039,7 +1040,7 @@ func (a *App) buildSessionContextLocked() string {
 		recent.WriteString(message.text)
 		recent.WriteString("\n")
 	}
-	return strings.TrimSpace(header + "\n\n" + truncateKeepingEnd(recent.String(), memoryContextChars-len(header)))
+	return strings.TrimSpace(profile + header + "\n\n" + truncateKeepingEnd(recent.String(), memoryContextChars-len(header)))
 }
 
 func truncateContext(value string, limit int) string {

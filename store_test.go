@@ -3,7 +3,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // openTestStore builds a store in a temp directory instead of the real config
@@ -155,5 +157,18 @@ func TestStoreListsAndDeletesSessions(t *testing.T) {
 	}
 	if err := database.deleteSession("missing"); err == nil {
 		t.Error("deleting an unknown session must report an error")
+	}
+}
+
+// A full notes field, accents included, reaches the prompt whole: neither the
+// profile's own limit nor the shared context budget cuts it.
+func TestSessionNotesKeepFullLengthInContext(t *testing.T) {
+	notes := strings.Repeat("á", sessionNotesMaxChars-4) + " fin"
+	if got := normalizeSessionProfile(SessionProfile{Notes: notes}).Notes; got != notes {
+		t.Fatalf("notes truncated to %d characters", utf8.RuneCountInString(got))
+	}
+	a := &App{sessionProfile: SessionProfile{Notes: notes}}
+	if !strings.Contains(a.buildSessionContextLocked(), notes) {
+		t.Fatal("notes cut from the session context")
 	}
 }

@@ -8,6 +8,8 @@ const sessionCompany = defineModel<string>('sessionCompany', { default: '' })
 const sessionRole = defineModel<string>('sessionRole', { default: '' })
 const sessionObjective = defineModel<string>('sessionObjective', { default: '' })
 const sessionNotes = defineModel<string>('sessionNotes', { default: '' })
+// Same as sessionNotesMaxChars in store.go.
+const notesMaxChars = 4000
 </script>
 
 <template>
@@ -46,16 +48,19 @@ const sessionNotes = defineModel<string>('sessionNotes', { default: '' })
           v-model="sessionObjective"
           placeholder="Ej. entrevista técnica, primera ronda…"
         />
-        <label for="session-notes">Tu experiencia o instrucciones</label
+        <label for="session-notes"
+          >Tu experiencia o instrucciones
+          <span>{{ sessionNotes.length }}/{{ notesMaxChars }}</span></label
         ><textarea
           id="session-notes"
           v-model="sessionNotes"
-          rows="4"
-          placeholder="Logros relevantes, tecnologías, tono y datos que Sonara debe tener en cuenta…"
+          rows="10"
+          :maxlength="notesMaxChars"
+          placeholder="Trabajos y proyectos (qué era, tu rol, tecnologías, resultado), logros, tono y datos que Sonara debe tener en cuenta…"
         ></textarea>
         <small class="profile-hint"
-          >Este contexto se agrega al prompt de la sesión y queda guardado localmente para volver a
-          abrirla.</small
+          >Este contexto se agrega al prompt de la sesión y las sesiones nuevas lo heredan, así no
+          hace falta volver a cargarlo.</small
         >
         <div class="dialog-actions">
           <span role="status">{{ sessionSetupMessage }}</span><button
