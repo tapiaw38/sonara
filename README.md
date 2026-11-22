@@ -77,9 +77,13 @@ Backend tests: `go test ./...`. Frontend format: `cd frontend && npm run format`
 ## Build and install
 
 ```sh
-wails build -tags webkit2_41
-cp build/bin/sonara ~/.local/bin/sonara
+./install.sh          # checks dependencies, builds, installs to ~/.local/bin
+./install.sh --check  # only lists what is missing
 ```
+
+It stops with the install command for each missing required dependency, and
+lists the optional ones with what you lose without them. It also installs a
+desktop entry and the icon.
 
 ## Project layout
 
