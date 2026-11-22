@@ -28,6 +28,7 @@ type App struct {
 	backend           *sonaraBackend.Client
 	mu                sync.RWMutex
 	meetSpeaking      meetSpeaking // who Google Meet shows speaking, see meet_bridge.go
+	practiceAEC       *practiceAEC // echo canceller while practicing, see practice_aec.go
 	segmentOnce       sync.Once
 	segments          chan meetSegment
 	voiceContext      context.Context
@@ -297,6 +298,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	// Before the store closes: pending meeting blocks still have to be written.
 	a.stopMeetingAndWait(15 * time.Second)
+	a.stopPracticeAEC()
 	if a.backend != nil {
 		a.backend.Close()
 	}

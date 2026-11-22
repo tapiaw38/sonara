@@ -241,9 +241,16 @@ const offSuggestion = EventsOn('practice:suggestion', (text: BilingualText) => {
   if (active.value || busy.value) updateHistory(suggestions.value, suggestionPanel.value, text)
 })
 
+// You kept talking while the reply was being prepared: that reply is dropped.
+const offDiscard = EventsOn('practice:discard', (turnId: number) => {
+  transcripts.value = transcripts.value.filter((entry) => entry.turnId !== turnId)
+  suggestions.value = suggestions.value.filter((entry) => entry.turnId !== turnId)
+})
+
 onBeforeUnmount(() => {
   offQuestion()
   offSuggestion()
+  offDiscard()
   offPhase()
   offPartial()
   offLevel()

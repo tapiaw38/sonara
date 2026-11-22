@@ -20,6 +20,8 @@ type practiceStream struct {
 	a       *App
 	session *sonaraBackend.LiveSession
 
+	prefix string // what was already said this turn, shown before the new words
+
 	mu     sync.Mutex
 	failed bool
 	voiced bool
@@ -79,7 +81,7 @@ func (s *practiceStream) consume() {
 				continue
 			}
 			s.text += event.Text
-			text := s.text
+			text := strings.TrimSpace(s.prefix + " " + s.text)
 			s.mu.Unlock()
 			s.a.emit("practice:partial", text)
 		case sonaraBackend.LiveCompleted:
