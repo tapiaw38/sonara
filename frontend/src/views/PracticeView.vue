@@ -144,9 +144,11 @@ function playAudio(bytes: number[] | string | null) {
 
 async function loop(current: number, replyAudio: number[] | string | null) {
   while (active.value && current === run) {
-    phase.value = 'speaking'
+    // No audio (the start, or a noise that got no reply): listen right away.
+    const speaking = !!replyAudio?.length
+    phase.value = speaking ? 'speaking' : 'listening'
     try {
-      await SetPracticePlayback(true)
+      if (speaking) await SetPracticePlayback(true)
       if (!active.value || current !== run) break
       const playback = playAudio(replyAudio).then(async () => {
         if (current !== run) return

@@ -49,15 +49,6 @@ type practiceRecording struct {
 	cancel context.CancelFunc
 }
 
-// practiceKickoff opens the interview in whichever language is configured
-// (SetAudioLanguage), since there is no candidate utterance yet to mirror.
-func practiceKickoff(language string) string {
-	if language == "en" {
-		return "Start the interview, in English: introduce yourself in one sentence as the interviewer (for the company and role in the profile, if any) and ask the opening question."
-	}
-	return "Arrancá la entrevista, en español: presentate en una frase como quien entrevista (por la empresa y el puesto del perfil, si los hay) y hacé la pregunta inicial."
-}
-
 func practiceRetryPrompt(language string) string {
 	if language == "en" {
 		return "I didn't catch that. Could you repeat your answer?"
@@ -65,29 +56,11 @@ func practiceRetryPrompt(language string) string {
 	return "No te escuché bien. ¿Podés repetir tu respuesta?"
 }
 
-// StartPractice switches to practice mode and asks the interviewer persona
-// (respond.go's "practice-turn" branch) for an opening question, grounded in the
-// session profile already captured by SessionSetupDialog. The kickoff
-// instruction itself is never stored; only the interviewer's reply is.
+// StartPractice switches to practice mode. The candidate speaks first: the
+// interviewer persona introduces itself in its reply to whatever they say.
 func (a *App) StartPractice() (PracticeTurn, error) {
 	a.SetAssistantMode("practice")
-	ctx, language, answerID := a.nextPracticeAnswer()
-	turnCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	reply, speech, commit, err := a.requestPracticeTurn(turnCtx, ctx, answerID, practiceKickoff(language), language, false)
-	if err != nil {
-		return PracticeTurn{}, err
-	}
-	spoken := <-speech
-	audio, err := spoken.audio, spoken.err
-	if err != nil {
-		logf("practice TTS failed: %v", err)
-		return PracticeTurn{}, err
-	}
-	if err := commit(); err != nil {
-		return PracticeTurn{}, err
-	}
-	return PracticeTurn{ReplyText: reply, Audio: audio}, nil
+	return PracticeTurn{}, nil
 }
 
 // PracticeListen blocks until the candidate speaks and pauses, transcribes
@@ -259,7 +232,7 @@ func (a *App) practiceAnswer(ctx context.Context, language string, answerID uint
 	var err error
 	if candidateText != "" {
 		a.emit("practice:phase", "thinking")
-		reply, speech, commit, err = a.requestPracticeTurn(turnCtx, ctx, answerID, candidateText, language, true)
+		reply, speech, commit, err = a.requestPracticeTurn(turnCtx, ctx, answerID, candidateText, language)
 		if err != nil {
 			return PracticeTurn{}, err
 		}
@@ -307,16 +280,13 @@ const practiceSuggestionMarker = "[[SUGGESTION]]"
 // requestPracticeTurn streams the interviewer's next turn. Nothing is stored
 // until the caller runs commit, once the audio is ready: a reply dropped
 // before that (the candidate kept talking) leaves no trace in the history.
-func (a *App) requestPracticeTurn(turnCtx, sessionCtx context.Context, answerID uint64, content, language string, storeAnswer bool) (string, <-chan practiceSpeech, func() error, error) {
+func (a *App) requestPracticeTurn(turnCtx, sessionCtx context.Context, answerID uint64, content, language string) (string, <-chan practiceSpeech, func() error, error) {
 	if a.backend == nil {
 		return "", nil, nil, fmt.Errorf("Sonara backend is not initialized")
 	}
 	a.mu.RLock()
 	sessionContext, generation := a.buildSessionContextLocked(), a.sessionGeneration
-	request := content
-	if storeAnswer {
-		request = framePracticeAnswer(lastInterviewerQuestion(a.sessionHistory), content, language)
-	}
+	request := framePracticeAnswer(lastInterviewerQuestion(a.sessionHistory), content, language)
 	a.mu.RUnlock()
 
 	var streamed strings.Builder
@@ -354,9 +324,7 @@ func (a *App) requestPracticeTurn(turnCtx, sessionCtx context.Context, answerID 
 		if a.sessionGeneration != generation || a.practiceAnswerID != answerID {
 			return fmt.Errorf("la práctica cambió durante la respuesta")
 		}
-		if storeAnswer {
-			a.appendSessionMessageLocked("user", content)
-		}
+		a.appendSessionMessageLocked("user", content)
 		a.appendSessionMessageLocked("assistant", question)
 		return nil
 	}

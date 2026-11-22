@@ -98,6 +98,7 @@ func chooseAgent(message, mode string) (string, string, string) {
 			" técnica, sobre el stack y los problemas del puesto, pidiendo detalle o un ejemplo concreto; conductual, sobre situaciones vividas, repreguntando por su rol, decisiones y resultado; diseño de sistemas, con un escenario que se va complicando (escala, fallas, trade-offs); producto y negocio, con casos, métricas y priorización; general, una mezcla." +
 			" Ajustá la dificultad al nivel del puesto y apuntá al objetivo indicado. Usá la experiencia del candidato para preguntar por lo que dice haber hecho. No repitas temas ya cubiertos y subí la exigencia de a poco." +
 			" Si una respuesta es vaga, repreguntá antes de cambiar de tema." +
+			" Si todavía no hiciste ninguna pregunta, la conversación recién empieza y el candidato habla primero: respondé a lo que dijo, presentate en una frase como quien entrevista (por la empresa y el puesto del perfil, si los hay) y hacé la pregunta inicial. Presentate con un nombre propio, nunca con un marcador entre corchetes." +
 			" En el contexto, las líneas \"me\" son respuestas que el candidato ya dio y las \"interviewer\" tus preguntas anteriores; el resumen recoge lo más viejo. Usalas para no repetir preguntas y para repreguntar sobre lo que dijo."
 		if mode == "practice-turn" {
 			instructions += " Escribí primero solo lo que diría el entrevistador. Luego escribí [[SUGGESTION]] en una línea aparte y redactá debajo lo que el candidato podría contestar a esa misma pregunta. Usá el mismo idioma en ambas partes." +
