@@ -57,10 +57,11 @@ type Mic = { target: string; label: string; running: boolean; app: string }
 type SpeakerRef = { track: string; speakerKey: string }
 
 // sessionId is the saved meeting to show; empty means none picked yet.
-const props = defineProps<{ sessionId: string }>()
+const props = defineProps<{ sessionId: string; audioLanguage: string }>()
 const emit = defineEmits<{
   (event: 'sessions-changed'): void
   (event: 'opened', id: string): void
+  (event: 'set-audio-language', language: string): void
 }>()
 
 const status = ref<Status>({
@@ -449,6 +450,7 @@ async function saveName() {
 let offStatus: (() => void) | undefined
 let offSegment: (() => void) | undefined
 let offPartial: (() => void) | undefined
+let offSpeakers: (() => void) | undefined
 
 // Words being spoken right now, per track, before their block is stored.
 const partials = ref<Record<string, string>>({})
@@ -467,6 +469,9 @@ onMounted(async () => {
     upsert(event.segment)
     const { track, speakerKey } = event.segment
     if (speakerKey && !speakers.value[`${track}:${speakerKey}`]) void refreshSpeakers()
+  })
+  offSpeakers = EventsOn('meeting:speakers', (sessionId: string) => {
+    if (sessionId === view.value?.sessionId) void refreshSpeakers()
   })
   offPartial = EventsOn(
     'meeting:partial',
@@ -487,6 +492,7 @@ onBeforeUnmount(() => {
   offStatus?.()
   offSegment?.()
   offPartial?.()
+  offSpeakers?.()
   window.clearInterval(timer)
 })
 
@@ -520,7 +526,8 @@ watch(
         <summary>
           Ajustes de grabación
           <span class="setup-summary"
-            >{{ selectedMicLabel }} · {{ people ? `${people} personas` : 'personas: auto' }}</span
+            >{{ selectedMicLabel }} · {{ audioLanguage === 'en' ? 'English' : 'Español' }} ·
+            {{ people ? `${people} personas` : 'personas: auto' }}</span
           >
         </summary>
         <div class="setup-grid">
@@ -547,6 +554,22 @@ watch(
                 ↻
               </button>
             </div>
+          </div>
+          <div class="field">
+            <label
+              for="meeting-language"
+              title="Idioma en que se habla: forzar otro inventa palabras"
+              >Idioma</label
+            >
+            <select
+              id="meeting-language"
+              :value="audioLanguage"
+              :disabled="recording || processing"
+              @change="emit('set-audio-language', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="es">Español</option>
+              <option value="en">English</option>
+            </select>
           </div>
           <div v-if="status.diarizeEnabled" class="field">
             <label for="meeting-people" title="Cuántas personas hablan por este micrófono"
@@ -794,7 +817,8 @@ watch(
   gap: 5px;
 }
 .meeting-mic select,
-#meeting-people {
+#meeting-people,
+#meeting-language {
   min-width: 0;
   flex: 1;
   padding: 8px 6px;
@@ -804,13 +828,14 @@ watch(
   background: #17171f;
   font-size: 12px;
 }
-#meeting-people {
+#meeting-people,
+#meeting-language {
   flex: none;
   width: 100%;
 }
 .setup-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
   gap: 18px;
   align-items: end;
 }

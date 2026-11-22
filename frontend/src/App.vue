@@ -331,6 +331,8 @@ async function toggleAlwaysOnTop() {
         <MeetingView
           v-if="view === 'meeting'"
           :session-id="meetingSessionID"
+          :audio-language="audioLanguage"
+          @set-audio-language="setAudioLanguage"
           @opened="meetingSessionID = $event"
           @sessions-changed="refreshSessions"
         />

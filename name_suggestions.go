@@ -123,6 +123,7 @@ func (a *App) nameParticipants(ctx context.Context, sessionID string) {
 	if err != nil {
 		return
 	}
+	named := 0
 	for token, name := range raw {
 		track, key := trackOutput, token
 		switch {
@@ -139,7 +140,13 @@ func (a *App) nameParticipants(ctx context.Context, sessionID string) {
 		}
 		if err := database.saveSpeakerName(sessionID, track, key, label+" ("+name+")"); err != nil {
 			logf("meeting %s: could not store the name for %s: %v", sessionID, token, err)
+			continue
 		}
+		logf("meeting %s: %s named from the conversation", sessionID, label)
+		named++
+	}
+	if named > 0 {
+		a.emit("meeting:speakers", sessionID)
 	}
 	a.emitMeetingStatus()
 }
