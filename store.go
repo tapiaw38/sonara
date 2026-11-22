@@ -257,6 +257,10 @@ func (s *store) saveVisualContext(sessionID, text string) error {
 	return err
 }
 
+// sessionNotesMaxChars is room for several jobs and projects described with
+// role, stack and result. Keep in step with the dialog's maxlength.
+const sessionNotesMaxChars = 4000
+
 // SessionProfile is interview-specific context saved with its session.
 type SessionProfile struct {
 	Scenario  string `json:"scenario"`
@@ -274,7 +278,9 @@ func normalizeSessionProfile(profile SessionProfile) SessionProfile {
 	profile.Company = truncateContext(strings.TrimSpace(profile.Company), 160)
 	profile.Role = truncateContext(strings.TrimSpace(profile.Role), 160)
 	profile.Objective = truncateContext(strings.TrimSpace(profile.Objective), 400)
-	profile.Notes = truncateContext(strings.TrimSpace(profile.Notes), 1200)
+	// The dialog caps notes at sessionNotesMaxChars characters; this is in
+	// bytes, and an accented letter takes two.
+	profile.Notes = truncateContext(strings.TrimSpace(profile.Notes), sessionNotesMaxChars*3)
 	return profile
 }
 
