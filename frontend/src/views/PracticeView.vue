@@ -437,6 +437,11 @@ onBeforeUnmount(() => {
   padding: 0;
   border-radius: 50%;
   background: none;
+  /* The halo lives here, not on .orb: .orb's clip-path would cut it off. */
+  box-shadow: 0 0 calc(18px + var(--level) * 60px) rgb(85 214 176 / calc(0.18 + var(--level) * 0.5));
+}
+.voice-orb:not(:disabled):hover {
+  box-shadow: 0 0 34px rgb(85 214 176 / 0.38);
 }
 .voice-orb:disabled {
   cursor: default;
@@ -446,9 +451,12 @@ onBeforeUnmount(() => {
   inset: 0;
   overflow: hidden;
   border-radius: 50%;
+  /* WebKitGTK leaks the blurred, blended blobs past a rounded overflow clip,
+     drawing a faint square around the sphere; clip-path clips them for real. */
+  clip-path: circle(50%);
+  isolation: isolate;
   background: radial-gradient(circle at 50% 62%, #0f3a30 0%, #08201a 62%, #050f0c 100%);
   box-shadow:
-    0 0 calc(18px + var(--level) * 60px) rgb(85 214 176 / calc(0.18 + var(--level) * 0.5)),
     inset 0 0 26px rgb(0 0 0 / 0.65),
     inset 0 0 0 1px rgb(85 214 176 / 0.22);
   transform: scale(calc(1 + var(--level) * 0.07));
@@ -456,7 +464,6 @@ onBeforeUnmount(() => {
 }
 .voice-orb:not(:disabled):hover .orb {
   box-shadow:
-    0 0 34px rgb(85 214 176 / 0.38),
     inset 0 0 26px rgb(0 0 0 / 0.65),
     inset 0 0 0 1px rgb(85 214 176 / 0.4);
 }
