@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Sonara · Google Meet",
+  "version": "0.1.0",
+  "description": "Tells Sonara who is speaking in Google Meet so it can name the participants.",
+  "host_permissions": ["http://127.0.0.1:47823/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["https://meet.google.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

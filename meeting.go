@@ -208,6 +208,9 @@ type MeetingStatus struct {
 	// it belongs to, so a stale note is never shown on another meeting.
 	DiarizeNote      string `json:"diarizeNote"`
 	DiarizeSessionID string `json:"diarizeSessionId"`
+	// MeetSpeakers are the names the Google Meet extension reported for this
+	// meeting: empty means the extension is not sending anything.
+	MeetSpeakers []string `json:"meetSpeakers"`
 }
 
 // MeetingSegmentEvent is the payload of the "meeting:segment" event.
@@ -255,6 +258,7 @@ func (a *App) MeetingTranscriptStatus() MeetingStatus {
 	status.ElapsedMS = run.elapsedMS()
 	status.MicrophoneState, status.OutputState = run.tracks[trackMicrophone], run.tracks[trackOutput]
 	status.Pending, status.Failed, status.Message = run.pending, run.failed, run.message
+	status.MeetSpeakers = a.meetSpeaking.names(run.sessionID)
 	return status
 }
 

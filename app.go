@@ -27,6 +27,7 @@ type App struct {
 	ctx               context.Context
 	backend           *sonaraBackend.Client
 	mu                sync.RWMutex
+	meetSpeaking      meetSpeaking // who Google Meet shows speaking, see meet_bridge.go
 	segmentOnce       sync.Once
 	segments          chan meetSegment
 	voiceContext      context.Context
@@ -195,6 +196,7 @@ func newSessionID() string {
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
+	a.startMeetBridge()
 	database, err := openStore()
 	if err != nil {
 		// A broken store must not take the app down: without it the key has to

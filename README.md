@@ -1,19 +1,51 @@
-# README
+# Sonara
 
-## About
+Local-first desktop assistant for interviews and meetings, built with Wails
+(Go + Vue 3/TypeScript) for Linux on Wayland.
 
-This is the official Wails Vue-TS template.
+## Features
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+- **Interview copilot:** listens to the call's audio, transcribes it live and
+  suggests replies. It can also capture the screen and analyze it (e.g. a
+  coding question).
+- **Voice practice:** a mock interview with a spoken interviewer you can
+  interrupt by tapping the orb or talking over it.
+- **Meeting transcription:** records your microphone and the meeting's audio
+  as separate tracks, separates the participants by voice (locally or with
+  Gemini) and names them from the conversation itself.
+- **Google Meet names:** an optional Chrome extension
+  ([`extension/meet`](extension/meet/README.md)) tells Sonara who is speaking
+  in Meet, so participants get their real names.
 
-## Live Development
+Sessions and transcripts are stored locally in SQLite.
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+## Requirements
 
-## Building
+- Go, Node.js and the [Wails CLI](https://wails.io/docs/gettingstarted/installation)
+- WebKitGTK 4.1
+- PipeWire (`pw-record`, `pw-dump`) for audio capture, `ffmpeg`
+- `grim` for screen capture, `wlrctl` for window focus
+- An OpenAI API key (set in the app). DeepSeek and Gemini keys are optional:
+  Gemini enables cloud speaker separation.
 
-To build a redistributable, production mode package, use `wails build`.
+## Development
+
+```sh
+wails dev -tags webkit2_41
+```
+
+Backend tests: `go test ./...`. Frontend format: `cd frontend && npm run format`.
+
+## Build and install
+
+```sh
+wails build -tags webkit2_41
+cp build/bin/sonara ~/.local/bin/sonara
+```
+
+## Project layout
+
+- `*.go` (root): the Wails app: audio capture, meetings, diarization, practice.
+- `backend/`: the in-process assistant API. See [`backend/README.md`](backend/README.md).
+- `frontend/`: the Vue UI.
+- `extension/meet/`: the Google Meet Chrome extension.

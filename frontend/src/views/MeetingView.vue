@@ -50,6 +50,7 @@ type Status = {
   diarizeEnabled: boolean
   diarizeNote: string
   diarizeSessionId: string
+  meetSpeakers: string[] | null
 }
 type Mic = { target: string; label: string; running: boolean; app: string }
 // One renameable entity: the microphone track, the generic meeting_output
@@ -77,6 +78,7 @@ const status = ref<Status>({
   diarizeEnabled: false,
   diarizeNote: '',
   diarizeSessionId: '',
+  meetSpeakers: null,
 })
 const view = ref<View | null>(null)
 const mics = ref<Mic[]>([])
@@ -683,6 +685,9 @@ watch(
         >
         <span
           >Reunión: <em :class="status.outputState">{{ trackLabel(status.outputState) }}</em></span
+        >
+        <span v-if="status.meetSpeakers?.length"
+          >Google Meet: {{ status.meetSpeakers.join(', ') }}</span
         >
         <span v-if="status.pending">En cola: {{ status.pending }}</span>
         <span v-if="processing">Terminando de transcribir lo grabado…</span>

@@ -485,6 +485,7 @@ func (a *App) runDiarization(run *meetingRun) {
 		return
 	}
 	a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados: %d.", found))
+	a.nameFromMeet(run.sessionID)
 	a.nameParticipants(ctx, run.sessionID)
 }
 
@@ -546,6 +547,7 @@ func (a *App) periodicDiarization(ctx context.Context, run *meetingRun) {
 			a.setDiarizeNote(run.sessionID, fmt.Sprintf("Participantes detectados hasta ahora: %d (se actualiza durante la reunión).", found))
 			// Names mentioned so far show up during the meeting, not only after
 			// it; at most once a minute, since each pass reads the whole text.
+			a.nameFromMeet(run.sessionID) // local and cheap: every pass
 			if time.Since(lastNamed) >= time.Minute {
 				lastNamed = time.Now()
 				nameCtx, cancel := context.WithTimeout(ctx, time.Minute)
