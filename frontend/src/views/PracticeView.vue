@@ -189,9 +189,7 @@ onBeforeUnmount(() => {
       <p v-if="answerLive" class="answer-live" role="status">
         <span>Tu respuesta</span>{{ answerLive }}
       </p>
-      <small v-if="active && voiceHold" role="status">
-        Sigo escuchando. Decí «listo» o «I’m done» para ceder la palabra.
-      </small>
+      <small v-if="active && voiceHold" role="status"> Sigo escuchando… </small>
       <button v-if="started && active" class="end-button" @click="stop">Terminar práctica</button>
       <small v-if="message" class="meeting-message" role="alert">{{ message }}</small>
     </section>
