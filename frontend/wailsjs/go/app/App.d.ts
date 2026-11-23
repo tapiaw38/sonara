@@ -54,7 +54,7 @@ export function NewSession():Promise<boolean>;
 
 export function OpenSession(arg1:string):Promise<storage.OpenSessionResult>;
 
-export function PracticeListen():Promise<app.PracticeTurn>;
+export function PracticeRealtime():Promise<void>;
 
 export function ProviderStatus():Promise<app.ProviderStatus>;
 
@@ -102,8 +102,6 @@ export function SetMicrophone(arg1:string):Promise<string>;
 
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
 
-export function SetPracticePlayback(arg1:boolean):Promise<void>;
-
 export function SetTextProvider(arg1:string):Promise<void>;
 
 export function SetVisionProvider(arg1:string):Promise<void>;
@@ -111,8 +109,6 @@ export function SetVisionProvider(arg1:string):Promise<void>;
 export function StartListening():Promise<boolean>;
 
 export function StartMeetingTranscript():Promise<app.MeetingStatus>;
-
-export function StartPractice():Promise<app.PracticeTurn>;
 
 export function StopListening():Promise<boolean>;
 

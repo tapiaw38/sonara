@@ -47,7 +47,14 @@ func (a *App) runVoiceMatch(run *meetingRun) {
 	defer cancel()
 	spans, err := a.diarizer.DetectEcho(ctx, sample, audio.WAV(pcm))
 	if err != nil {
-		logf("meeting %s: echo detection skipped: %v", run.sessionID, err)
+		logf("meeting %s: echo detection failed: %v", run.sessionID, err)
+		note := "No se pudo detectar el eco: " + err.Error()
+		a.mu.Lock()
+		if a.diarizeNoteSession == run.sessionID && a.diarizeNote != "" {
+			note = a.diarizeNote + " " + note
+		}
+		a.diarizeNote, a.diarizeNoteSession = note, run.sessionID
+		a.mu.Unlock()
 		return
 	}
 	if len(spans) == 0 {

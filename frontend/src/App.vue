@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   AIEndpoint,
   AudioSources,
@@ -30,12 +30,14 @@ const copilotRef = ref<InstanceType<typeof CopilotView> | null>(null)
 
 // 'meeting' is the transcription view; the four copilot modes share 'copilot'.
 // It is UI-only: the copilot keeps its own mode and session underneath.
-const view = ref<'copilot' | 'meeting' | 'practice'>('copilot')
-const meetingSessionID = ref('')
-const storedMode = localStorage.getItem('sonara-mode') || 'interview'
-const assistantMode = ref(
-  ['interview', 'daily', 'coding', 'coaching'].includes(storedMode) ? storedMode : 'interview',
+const storedView = localStorage.getItem('sonara-view')
+const view = ref<'copilot' | 'meeting' | 'practice'>(
+  storedView === 'meeting' || storedView === 'practice' ? storedView : 'copilot',
 )
+const meetingSessionID = ref('')
+const copilotModes = ['interview', 'daily', 'coding', 'coaching']
+const storedMode = localStorage.getItem('sonara-mode') || 'interview'
+const assistantMode = ref(copilotModes.includes(storedMode) ? storedMode : 'interview')
 const assistantModeLabel = computed(
   () =>
     ({ interview: 'Entrevista', daily: 'Reunión', coding: 'Coding', coaching: 'Coaching' })[
@@ -52,8 +54,12 @@ const sessionCompany = ref('')
 const sessionRole = ref('')
 const sessionObjective = ref('')
 const sessionNotes = ref('')
-const compact = ref(false)
-const ghost = ref(false)
+const compact = ref(localStorage.getItem('sonara-compact') === 'true')
+const ghost = ref(localStorage.getItem('sonara-ghost') === 'true')
+
+watch(view, (value) => localStorage.setItem('sonara-view', value), { flush: 'sync' })
+watch(compact, (value) => localStorage.setItem('sonara-compact', String(value)), { flush: 'sync' })
+watch(ghost, (value) => localStorage.setItem('sonara-ghost', String(value)), { flush: 'sync' })
 const alwaysOnTop = ref(false)
 const opacityPercent = ref(Number(localStorage.getItem('sonara-opacity') || 22))
 const savedSidebarWidth = Number(localStorage.getItem('sonara-sidebar-width'))
@@ -215,7 +221,9 @@ async function openSession(id: string) {
     sessions.value = opened.sessions
     await copilotRef.value?.restoreOpenedSession(opened)
     currentSessionID.value = id
-    if (selected?.mode) await setMode(selected.mode)
+    await setMode(
+      selected?.mode && copilotModes.includes(selected.mode) ? selected.mode : assistantMode.value,
+    )
     await activateSessionProfile(id)
     sessionMessage.value = 'Sesión reabierta. El contexto volvió al prompt.'
   } catch (error) {

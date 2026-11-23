@@ -58,9 +58,7 @@ func TestDiarizeSilenceCapsLargeGap(t *testing.T) {
 	}
 }
 
-// fakeGemini stubs the three HTTP calls diarize() makes: start the resumable
-// upload, receive the bytes, and answer the interaction. Good enough to test
-// the whole diarizer without a real Gemini account.
+// fakeGemini returns speaker turns through the fake HTTP service.
 func fakeGemini(t *testing.T, spans []diarize.Span, interactionStatus int, rawOutput string) *diarize.Service {
 	t.Helper()
 	if rawOutput == "" {
@@ -70,22 +68,18 @@ func fakeGemini(t *testing.T, spans []diarize.Span, interactionStatus int, rawOu
 	return fakeGeminiRaw(t, interactionStatus, rawOutput)
 }
 
-// fakeGeminiRaw is the shared fake behind both fakeGemini (diarization) and
-// fakeGeminiEcho (voicematch_test.go): the three HTTP calls diarize()/
-// detectEcho() make — start the resumable upload, receive the bytes, and
-// answer the interaction with whatever JSON text the caller wants echoed
-// back as the model's output.
+// fakeGeminiRaw serves the Files and Interactions endpoints used by the client.
 func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *diarize.Service {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("x-goog-upload-url", "http://"+r.Host+"/upload/bytes")
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/upload/bytes", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"file": map[string]string{"uri": "https://files/abc", "name": "files/abc"}})
+	mux.HandleFunc("POST /upload/bytes", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"file": map[string]string{"uri": "https://generativelanguage.googleapis.com/v1beta/files/abc", "name": "files/abc", "mimeType": "audio/wav", "state": "ACTIVE"}})
 	})
-	mux.HandleFunc("/v1beta/interactions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/interactions", func(w http.ResponseWriter, r *http.Request) {
 		if interactionStatus != http.StatusOK {
 			w.WriteHeader(interactionStatus)
 			return
@@ -97,13 +91,13 @@ func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *diari
 			},
 		})
 	})
-	mux.HandleFunc("/v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	d := diarize.NewService(diarize.NewGemini(srv.Client(), srv.URL+"/v1beta", srv.URL+"/upload/v1beta/files"))
+	d := diarize.NewService(diarize.NewGemini(srv.Client(), srv.URL))
 	d.SetAPIKey("test-key")
 	return d
 }

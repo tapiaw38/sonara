@@ -69,9 +69,8 @@ type App struct {
 	memoryPending     []storage.Message
 	memorySummarizing bool
 	// livePartial is the streamed text shown before its turn is final.
-	livePartial     string
-	practiceRec     *practiceRecording
-	practicePlaying atomic.Bool
+	livePartial string
+	practiceRec *practiceRecording
 	// lastOutputVoice: when the meeting audio last had voice (unix ms), so the
 	// microphone can drop the other person leaking through speakers.
 	lastOutputVoice   atomic.Int64
@@ -108,7 +107,7 @@ func NewApp() *App {
 		sessionID:    newSessionID(),
 		segments:     make(chan meetSegment, meetQueuedSegments),
 		voiceContext: ctx, voiceCancel: cancel,
-		diarizer: diarize.NewService(diarize.NewGemini(nil, diarize.GeminiBaseURL, diarize.GeminiUploadURL)),
+		diarizer: diarize.NewService(diarize.NewGemini(nil, diarize.GeminiBaseURL)),
 	}
 }
 

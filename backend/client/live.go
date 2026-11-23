@@ -15,6 +15,7 @@ type (
 	LiveSession = realtime.Session
 	LiveEvent   = realtime.Event
 	LiveKind    = realtime.Kind
+	VoiceEvent  = realtime.VoiceEvent
 )
 
 const (
@@ -67,4 +68,12 @@ func (c *Client) dialLive(ctx context.Context, provider, language, what string) 
 // it simply keeps uploading blocks.
 func (c *Client) OpenMeetingLive(ctx context.Context, language string) (*LiveSession, error) {
 	return c.dialLive(ctx, c.meetingTranscribe.Provider(), language, "el streaming de reuniones")
+}
+
+// OpenPracticeVoice opens OpenAI's conversational Realtime API for Practice.
+func (c *Client) OpenPracticeVoice(ctx context.Context, instructions string) (*realtime.VoiceSession, error) {
+	c.mu.RLock()
+	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
+	c.mu.RUnlock()
+	return realtime.DialVoice(ctx, base, key, instructions)
 }

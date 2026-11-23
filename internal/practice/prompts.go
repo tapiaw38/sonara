@@ -1,43 +1,10 @@
 package practice
 
-import (
-	"strings"
-	"unicode"
-
-	"sonara/internal/storage"
-)
-
-func RetryPrompt(language string) string {
+// InterviewLanguageInstruction keeps the configured interview language even
+// when the candidate or the existing session context uses another language.
+func InterviewLanguageInstruction(language string) string {
 	if language == "en" {
-		return "I didn't catch that. Could you repeat your answer?"
+		return "Interview language: English. Use English throughout, even when the candidate or earlier conversation uses another language."
 	}
-	return "No te escuché bien. ¿Podés repetir tu respuesta?"
-}
-
-// HasWords reports whether a transcript holds any letter or digit, not just
-// punctuation the transcriber wrote for a noise.
-func HasWords(text string) bool {
-	return strings.IndexFunc(text, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0
-}
-
-// LastInterviewerQuestion is the question the candidate was just answering.
-func LastInterviewerQuestion(history []storage.Message) string {
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			return history[i].Text
-		}
-	}
-	return ""
-}
-
-// FrameAnswer pairs the answer with the question it answers, so the
-// next question can build on both instead of on a bare sentence.
-func FrameAnswer(question, answer, language string) string {
-	if question == "" {
-		return answer
-	}
-	if language == "en" {
-		return "Your previous question: " + question + "\nCandidate's answer: " + answer
-	}
-	return "Tu pregunta anterior: " + question + "\nRespuesta del candidato: " + answer
+	return "Idioma de la entrevista: español. Usá español durante toda la entrevista, aunque el candidato o el historial usen otro idioma."
 }
