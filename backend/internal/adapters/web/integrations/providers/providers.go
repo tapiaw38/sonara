@@ -52,6 +52,12 @@ func NewRegistry(byName map[string]Provider) *Registry {
 	return &Registry{byName: byName}
 }
 
+// transcribeConfigured is implemented by a provider whose transcription is
+// set up separately from its chat (Azure: its own deployment and version).
+type transcribeConfigured interface {
+	TranscribeConfigured() bool
+}
+
 // Get returns exactly the named provider, never a substitute. An unknown
 // name or one reporting itself unconfigured is an error, not a fallback.
 func (r *Registry) Get(name string) (Provider, error) {
@@ -63,6 +69,24 @@ func (r *Registry) Get(name string) (Provider, error) {
 		return nil, fmt.Errorf("el proveedor %q no está configurado", name)
 	}
 	return provider, nil
+}
+
+// GetTranscriber is Get for transcription: a provider with its own
+// transcription setup is judged by that, so an Azure resource with only a
+// transcription deployment works, and one with only chat is rejected here
+// instead of failing on the HTTP call.
+func (r *Registry) GetTranscriber(name string) (Provider, error) {
+	provider, ok := r.byName[name]
+	if !ok {
+		return nil, fmt.Errorf("proveedor desconocido: %q", name)
+	}
+	if checker, ok := provider.(transcribeConfigured); ok {
+		if !checker.TranscribeConfigured() {
+			return nil, fmt.Errorf("el proveedor %q no tiene la transcripción configurada", name)
+		}
+		return provider, nil
+	}
+	return r.Get(name)
 }
 
 // Selector resolves a chat request to one configured name: visionProvider
@@ -131,7 +155,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, audio []byte, filename, la
 }
 
 func (t *Transcriber) TranscribeWithPrompt(ctx context.Context, audio []byte, filename, language, prompt string) (domain.Transcript, error) {
-	provider, err := t.registry.Get(t.Provider())
+	provider, err := t.registry.GetTranscriber(t.Provider())
 	if err != nil {
 		return domain.Transcript{}, err
 	}

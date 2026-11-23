@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -53,11 +54,20 @@ type Event struct {
 	Err    error
 }
 
+// DefaultModel is OpenAI's streaming transcription model.
+const DefaultModel = "gpt-live-transcribe"
+
 type Options struct {
 	// URL is the full wss:// endpoint, including ?intent=transcription.
 	URL    string
 	APIKey string
-	Model  string // default gpt-live-transcribe
+	// AzureKey sends APIKey as Azure's api-key header instead of OpenAI's
+	// Authorization: Bearer.
+	AzureKey bool
+	// LiveModel marks Model as a gpt-live-transcribe deployment under another
+	// name (Azure): it gets that model's session fields.
+	LiveModel bool
+	Model     string // default DefaultModel; on Azure, the transcription deployment
 	// Language is a single ISO 639-1 code ("en", "es"); empty lets the model decide.
 	Language string
 	// Delay trades latency for accuracy: minimal|low|medium|high|xhigh.
@@ -82,6 +92,20 @@ func EndpointFor(baseURL string) (string, error) {
 	return u.String(), nil
 }
 
+// AzureEndpointFor turns an Azure OpenAI resource URL
+// (https://name.openai.azure.com) into its Realtime transcription WebSocket.
+// Only the GA /openai/v1 path accepts transcription sessions; the preview
+// /openai/realtime?api-version= one answers realtime_beta_access_required
+// (checked against a real resource, 2026-11-22).
+func AzureEndpointFor(resource string) (string, error) {
+	u, err := url.Parse(strings.TrimRight(resource, "/"))
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("endpoint de Azure inválido: %q", resource)
+	}
+	u.Scheme, u.Path, u.RawQuery = "wss", "/openai/v1/realtime", "intent=transcription"
+	return u.String(), nil
+}
+
 type Session struct {
 	conn    *websocket.Conn
 	events  chan Event
@@ -95,15 +119,15 @@ type Session struct {
 // server events. Events() is closed after a final Closed event.
 func Dial(ctx context.Context, opts Options) (*Session, error) {
 	if opts.APIKey == "" {
-		return nil, errors.New("falta la clave de OpenAI")
+		return nil, errors.New("falta la clave para la transcripción en vivo")
 	}
 	header := http.Header{"Authorization": []string{"Bearer " + opts.APIKey}}
-	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, opts.URL, header)
+	if opts.AzureKey {
+		header = http.Header{"api-key": []string{opts.APIKey}}
+	}
+	conn, err := dialWithRetry(ctx, opts.URL, header)
 	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("no se pudo abrir la transcripción en vivo (estado %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("no se pudo abrir la transcripción en vivo: %w", err)
+		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	s := &Session{conn: conn, events: make(chan Event, 128), cancel: cancel}
@@ -116,17 +140,58 @@ func Dial(ctx context.Context, opts Options) (*Session, error) {
 	return s, nil
 }
 
+// dialRetryDelays spaces the handshake attempts. A var so tests do not wait.
+var dialRetryDelays = []time.Duration{300 * time.Millisecond, 800 * time.Millisecond}
+
+// dialWithRetry retries a handshake that died on the way (EOF, reset) or that
+// the server refused for now (5xx, 429): the first connection after a while
+// idle sometimes drops (seen on Azure). A definitive answer such as 401 or 403
+// fails at once, since retrying a bad key only delays the error.
+func dialWithRetry(ctx context.Context, url string, header http.Header) (*websocket.Conn, error) {
+	for attempt := 0; ; attempt++ {
+		conn, resp, err := websocket.DefaultDialer.DialContext(ctx, url, header)
+		if err == nil {
+			return conn, nil
+		}
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		transient := status == 0 || status >= 500 || status == http.StatusTooManyRequests
+		if !transient || attempt >= len(dialRetryDelays) || ctx.Err() != nil {
+			if status != 0 {
+				return nil, fmt.Errorf("no se pudo abrir la transcripción en vivo (estado %d): %w", status, err)
+			}
+			return nil, fmt.Errorf("no se pudo abrir la transcripción en vivo: %w", err)
+		}
+		select {
+		case <-time.After(dialRetryDelays[attempt]):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("no se pudo abrir la transcripción en vivo: %w", ctx.Err())
+		}
+	}
+}
+
 func sessionUpdate(opts Options) map[string]any {
 	model := opts.Model
 	if model == "" {
-		model = "gpt-live-transcribe"
+		model = DefaultModel
 	}
 	transcription := map[string]any{"model": model}
-	if opts.Language != "" {
-		transcription["languages"] = []string{opts.Language}
-	}
-	if opts.Delay != "" {
-		transcription["delay"] = opts.Delay
+	// languages and delay are gpt-live-transcribe's. The gpt-4o-*-transcribe
+	// models take a single language and reject delay, which fails the whole
+	// session.update (seen on Azure).
+	if model == DefaultModel || opts.LiveModel {
+		if opts.Language != "" {
+			transcription["languages"] = []string{opts.Language}
+		}
+		// Azure rejects delay even for gpt-live-transcribe, failing the
+		// whole session.update.
+		if opts.Delay != "" && !opts.AzureKey {
+			transcription["delay"] = opts.Delay
+		}
+	} else if opts.Language != "" {
+		transcription["language"] = opts.Language
 	}
 	return map[string]any{
 		"type": "session.update",

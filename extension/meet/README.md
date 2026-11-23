@@ -10,3 +10,11 @@ becomes "Participante 2 (Walter)".
 Sonara listens on `127.0.0.1:47823` and only accepts requests from extensions.
 Names are assigned by matching the moments Meet showed each person speaking
 against the segments of each separated voice.
+
+By default, Sonara accepts any `chrome-extension://` origin because an unpacked
+extension's ID depends on its install path. To pin the origin, copy the Sonara
+extension ID from `chrome://extensions` and set `SONARA_MEET_EXTENSION_ID` to it
+before starting Sonara.
+
+Sonara stores up to 50 distinct names and 5,000 speaking spans per meeting.
+It acknowledges discarded events with HTTP 204.

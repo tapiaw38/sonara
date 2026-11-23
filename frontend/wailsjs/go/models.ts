@@ -1,4 +1,4 @@
-export namespace main {
+export namespace app {
 	
 	export class AnalysisResult {
 	    response: string;
@@ -12,28 +12,6 @@ export namespace main {
 	        this.response = source["response"];
 	    }
 	}
-	export class AudioSource {
-	    target: string;
-	    label: string;
-	    running: boolean;
-	    meeting: boolean;
-	    app: string;
-	    kind: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AudioSource(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.target = source["target"];
-	        this.label = source["label"];
-	        this.running = source["running"];
-	        this.meeting = source["meeting"];
-	        this.app = source["app"];
-	        this.kind = source["kind"];
-	    }
-	}
 	export class AzureOpenAIForm {
 	    hasKey: boolean;
 	    endpoint: string;
@@ -41,6 +19,7 @@ export namespace main {
 	    transcribeApiVersion: string;
 	    chatDeployment: string;
 	    transcribeDeployment: string;
+	    liveDeployment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AzureOpenAIForm(source);
@@ -54,26 +33,7 @@ export namespace main {
 	        this.transcribeApiVersion = source["transcribeApiVersion"];
 	        this.chatDeployment = source["chatDeployment"];
 	        this.transcribeDeployment = source["transcribeDeployment"];
-	    }
-	}
-	export class CapabilityProviders {
-	    text: string;
-	    vision: string;
-	    liveTranscribe: string;
-	    meeting: string;
-	    liveMode: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new CapabilityProviders(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.text = source["text"];
-	        this.vision = source["vision"];
-	        this.liveTranscribe = source["liveTranscribe"];
-	        this.meeting = source["meeting"];
-	        this.liveMode = source["liveMode"];
+	        this.liveDeployment = source["liveDeployment"];
 	    }
 	}
 	export class CaptureStatus {
@@ -176,35 +136,11 @@ export namespace main {
 	        this.meetSpeakers = source["meetSpeakers"];
 	    }
 	}
-	export class TranscriptSegment {
-	    id: number;
-	    track: string;
-	    startMs: number;
-	    endMs: number;
-	    text: string;
-	    status: string;
-	    speakerKey: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TranscriptSegment(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.track = source["track"];
-	        this.startMs = source["startMs"];
-	        this.endMs = source["endMs"];
-	        this.text = source["text"];
-	        this.status = source["status"];
-	        this.speakerKey = source["speakerKey"];
-	    }
-	}
 	export class MeetingView {
 	    sessionId: string;
 	    startedAt: string;
 	    language: string;
-	    segments: TranscriptSegment[];
+	    segments: storage.TranscriptSegment[];
 	    speakers: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
@@ -216,7 +152,7 @@ export namespace main {
 	        this.sessionId = source["sessionId"];
 	        this.startedAt = source["startedAt"];
 	        this.language = source["language"];
-	        this.segments = this.convertValues(source["segments"], TranscriptSegment);
+	        this.segments = this.convertValues(source["segments"], storage.TranscriptSegment);
 	        this.speakers = source["speakers"];
 	    }
 	
@@ -237,6 +173,94 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class PracticeTurn {
+	    Text: string;
+	    ReplyText: string;
+	    Audio: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PracticeTurn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Text = source["Text"];
+	        this.ReplyText = source["ReplyText"];
+	        this.Audio = source["Audio"];
+	    }
+	}
+	export class ProviderStatus {
+	    openai: boolean;
+	    deepseek: boolean;
+	    azure: boolean;
+	    azureTranscribe: boolean;
+	    gemini: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.openai = source["openai"];
+	        this.deepseek = source["deepseek"];
+	        this.azure = source["azure"];
+	        this.azureTranscribe = source["azureTranscribe"];
+	        this.gemini = source["gemini"];
+	    }
+	}
+
+}
+
+export namespace pipewire {
+	
+	export class Source {
+	    target: string;
+	    label: string;
+	    running: boolean;
+	    meeting: boolean;
+	    app: string;
+	    kind: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Source(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.label = source["label"];
+	        this.running = source["running"];
+	        this.meeting = source["meeting"];
+	        this.app = source["app"];
+	        this.kind = source["kind"];
+	    }
+	}
+
+}
+
+export namespace storage {
+	
+	export class CapabilityProviders {
+	    text: string;
+	    vision: string;
+	    liveTranscribe: string;
+	    meeting: string;
+	    liveMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CapabilityProviders(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.vision = source["vision"];
+	        this.liveTranscribe = source["liveTranscribe"];
+	        this.meeting = source["meeting"];
+	        this.liveMode = source["liveMode"];
+	    }
 	}
 	export class SessionViewMessage {
 	    role: string;
@@ -310,22 +334,6 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class PracticeTurn {
-	    Text: string;
-	    ReplyText: string;
-	    Audio: number[];
-	
-	    static createFrom(source: any = {}) {
-	        return new PracticeTurn(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Text = source["Text"];
-	        this.ReplyText = source["ReplyText"];
-	        this.Audio = source["Audio"];
-	    }
-	}
 	export class SessionProfile {
 	    scenario: string;
 	    company: string;
@@ -348,7 +356,30 @@ export namespace main {
 	}
 	
 	
+	export class TranscriptSegment {
+	    id: number;
+	    track: string;
+	    startMs: number;
+	    endMs: number;
+	    text: string;
+	    status: string;
+	    speakerKey: string;
 	
+	    static createFrom(source: any = {}) {
+	        return new TranscriptSegment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.track = source["track"];
+	        this.startMs = source["startMs"];
+	        this.endMs = source["endMs"];
+	        this.text = source["text"];
+	        this.status = source["status"];
+	        this.speakerKey = source["speakerKey"];
+	    }
+	}
 	export class UIPreferences {
 	    responsePanelHeight: number;
 	    transcriptPanelHeight: number;
