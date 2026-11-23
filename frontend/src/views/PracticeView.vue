@@ -5,7 +5,7 @@ import {
   SetPracticePlayback,
   StartPractice,
   StopPractice,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { usePanelResize } from '../composables/usePanelResize'

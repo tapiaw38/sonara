@@ -15,7 +15,7 @@ import {
   SetAudioSource,
   Sessions,
   ToggleAlwaysOnTop,
-} from '../wailsjs/go/main/App'
+} from '../wailsjs/go/app/App'
 import { WindowSetAlwaysOnTop } from '../wailsjs/runtime/runtime'
 import CopilotView from './views/CopilotView.vue'
 import MeetingView from './views/MeetingView.vue'

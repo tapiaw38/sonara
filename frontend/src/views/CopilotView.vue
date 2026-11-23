@@ -15,7 +15,7 @@ import {
   SetManualSend,
   StartListening,
   StopListening,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 import type { Message, TranscriptEntry } from '../types'
 
 const props = defineProps<{ assistantMode: string }>()

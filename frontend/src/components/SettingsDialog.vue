@@ -13,7 +13,7 @@ import {
   SetTextProvider,
   SetVisionProvider,
   AIEndpoint,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 import type { AudioSourceOption } from '../types'
 
 defineProps<{

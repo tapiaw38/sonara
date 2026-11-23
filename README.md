@@ -87,7 +87,21 @@ desktop entry and the icon.
 
 ## Project layout
 
-- `*.go` (root): the Wails app: audio capture, meetings, diarization, practice.
+- `main.go`: only embeds the frontend and the icon and calls `app.Run`.
+- `internal/`: packages grouped by feature, each with its own tests.
+  - `app`: the Wails façade. `App` and the methods bound to the UI, split by
+    feature (`app_listen.go`, `app_sessions.go`, `meeting.go`, `practice.go`…).
+    It orchestrates; the packages below do the work.
+  - `meeting`: cutting each track into blocks, transcript export, the text the
+    speaker-naming prompt reads.
+  - `practice`: when an answer starts, ends or talks over the interviewer
+    (`ReadAnswer`), the live transcription stream, mic filters and prompts.
+  - `storage`: SQLite repository (sessions, settings, transcripts) and migrations.
+  - `audio`: the PCM format, levels, ambient noise floor, WebRTC voice detection, WAV.
+  - `pipewire`: stream and microphone discovery, and the echo canceller.
+  - `diarize`: speaker separation; `Engine` with Gemini and sherpa-onnx strategies.
+  - `meetbridge`: the loopback endpoint for the Meet extension and name matching.
+  - `logx`, `strutil`, `fsutil`: logging, string and file helpers.
 - `backend/`: the in-process assistant API. See [`backend/README.md`](backend/README.md).
 - `frontend/`: the Vue UI.
 - `extension/meet/`: the Google Meet Chrome extension.

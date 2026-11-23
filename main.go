@@ -1,12 +1,12 @@
+// Command sonara is the desktop app. Everything lives in internal/app; this
+// file only embeds the frontend and the icon, which must sit beside it.
 package main
 
 import (
 	"embed"
+	"os"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
+	"sonara/internal/app"
 )
 
 //go:embed all:frontend/dist
@@ -16,28 +16,8 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
-	// Create an instance of the app structure
-	app := NewApp()
-
-	// Create application with options
-	err := wails.Run(&options.App{
-		Title:       "Sonara",
-		Width:       1024,
-		Height:      768,
-		AlwaysOnTop: false,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
-		Linux:            &linux.Options{Icon: appIcon, WindowIsTranslucent: true},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		Bind: []interface{}{
-			app,
-		},
-	})
-
-	if err != nil {
+	if err := app.Run(assets, appIcon); err != nil {
 		println("Error:", err.Error())
+		os.Exit(1)
 	}
 }
