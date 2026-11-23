@@ -121,6 +121,7 @@ const selectedMicAvailable = computed(() => mics.value.some((mic) => mic.app ===
 const canStart = computed(
   () =>
     !busy.value &&
+    !recordingSample.value &&
     status.value.state === 'idle' &&
     !!selectedMic.value &&
     selectedMicAvailable.value,
@@ -171,19 +172,11 @@ const rows = computed(() => {
   })
 })
 
-// Setup collapses while recording so the transcript gets the space.
-const setupOpen = ref(true)
+const setupOpen = ref(false)
 watch(
   () => status.value.state,
   (state) => {
-    setupOpen.value = state === 'idle'
-  },
-)
-// A saved meeting with text is opened to read it, not to set up a recording.
-watch(
-  () => view.value?.sessionId,
-  () => {
-    if (status.value.state === 'idle') setupOpen.value = !view.value?.segments.length
+    if (state !== 'idle') setupOpen.value = false
   },
 )
 const selectedMicLabel = computed(
@@ -520,18 +513,44 @@ watch(
       </div>
     </div>
     <div class="meeting-controls panel">
-      <details
-        class="meeting-setup"
-        :open="setupOpen"
-        @toggle="setupOpen = ($event.target as HTMLDetailsElement).open"
+      <div class="meeting-toolbar">
+        <button
+          v-if="!recording && !processing"
+          class="record-button"
+          :disabled="!canStart"
+          @click="start"
+        >
+          <span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}
+        </button>
+        <button v-else class="record-button stop" :disabled="processing" @click="stop">
+          <span>■</span>{{ processing ? 'Procesando…' : 'Detener transcripción' }}
+        </button>
+        <div class="capture-summary">
+          <span :title="selectedMicLabel">{{ selectedMicLabel }}</span>
+          <span>{{ audioLanguage === 'en' ? 'English' : 'Español' }}</span>
+          <span>{{ providerLabel }}</span>
+        </div>
+        <button
+          class="meeting-secondary setup-toggle"
+          :aria-expanded="setupOpen"
+          aria-controls="meeting-setup"
+          @click="setupOpen = !setupOpen"
+        >
+          Ajustes <span aria-hidden="true">{{ setupOpen ? '▴' : '▾' }}</span>
+        </button>
+      </div>
+      <div
+        v-if="!selectedMicAvailable && !recording && !processing && !setupOpen"
+        class="meeting-note"
       >
-        <summary>
-          Ajustes de grabación
-          <span class="setup-summary"
-            >{{ selectedMicLabel }} · {{ audioLanguage === 'en' ? 'English' : 'Español' }} ·
-            {{ people ? `${people} personas` : 'personas: auto' }}</span
-          >
-        </summary>
+        Elegí un micrófono en Ajustes para empezar.
+      </div>
+      <section
+        v-show="setupOpen"
+        id="meeting-setup"
+        class="meeting-setup"
+        aria-label="Ajustes de grabación"
+      >
         <div class="setup-grid">
           <div class="field">
             <label for="meeting-mic">Micrófono</label>
@@ -573,88 +592,65 @@ watch(
               <option value="en">English</option>
             </select>
           </div>
-          <div v-if="status.diarizeEnabled" class="field">
-            <label for="meeting-people" title="Cuántas personas hablan por este micrófono"
-              >Personas en la sala</label
-            >
-            <select
-              id="meeting-people"
-              :value="people"
-              @change="choosePeople(($event.target as HTMLSelectElement).value)"
-            >
-              <option :value="0">Automático</option>
-              <option v-for="n in 6" :key="n" :value="n">{{ n }}</option>
-            </select>
-          </div>
-          <div v-if="status.diarizeEnabled" class="field">
-            <label title="Sirve para descartar tu eco si usás parlantes">Mi voz</label>
-            <div class="sample-actions">
-              <button
-                v-if="!hasVoiceSample"
-                class="meeting-secondary"
-                :disabled="recordingSample || recording || processing"
-                @click="recordSample"
+        </div>
+        <details v-if="status.diarizeEnabled" class="speaker-setup">
+          <summary>Participantes y detección de eco</summary>
+          <div class="speaker-setup-grid">
+            <div class="field">
+              <label for="meeting-people" title="Cuántas personas hablan por este micrófono"
+                >Personas en la sala</label
               >
-                {{ recordingSample ? 'Grabando…' : 'Grabar muestra' }}
-              </button>
-              <template v-else>
-                <span class="sample-status">✓ Grabada</span>
+              <select
+                id="meeting-people"
+                :value="people"
+                @change="choosePeople(($event.target as HTMLSelectElement).value)"
+              >
+                <option :value="0">Automático</option>
+                <option v-for="n in 6" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Muestra de voz</span>
+              <div class="sample-actions">
                 <button
-                  class="link-button"
+                  v-if="!hasVoiceSample"
+                  class="meeting-secondary"
                   :disabled="recordingSample || recording || processing"
                   @click="recordSample"
                 >
-                  Regrabar
+                  {{ recordingSample ? 'Grabando…' : 'Grabar muestra' }}
                 </button>
-                <button
-                  class="link-button"
-                  :disabled="recordingSample || recording || processing"
-                  @click="deleteSample"
-                >
-                  Borrar
-                </button>
-              </template>
+                <template v-else>
+                  <span class="sample-status">✓ Grabada</span>
+                  <button
+                    class="link-button"
+                    :disabled="recordingSample || recording || processing"
+                    @click="recordSample"
+                  >
+                    Regrabar
+                  </button>
+                  <button
+                    class="link-button"
+                    :disabled="recordingSample || recording || processing"
+                    @click="deleteSample"
+                  >
+                    Borrar
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
-        </div>
+          <small v-if="sampleMessage" class="meeting-message" role="status">{{
+            sampleMessage
+          }}</small>
+        </details>
         <p
           class="meeting-note"
           title="Graba tu micrófono y el audio de la reunión (Teams o navegador, fuente elegida en ♫)."
         >
-          Transcribe con <strong>{{ providerLabel }}</strong> · el audio no se guarda · avisá que
-          estás transcribiendo
+          El audio no se guarda. Avisá que estás transcribiendo.
         </p>
-        <small v-if="sampleMessage" class="meeting-message" role="status">{{
-          sampleMessage
-        }}</small>
-      </details>
-      <div class="meeting-row meeting-actions">
-        <button
-          v-if="!recording && !processing"
-          class="record-button"
-          :disabled="!canStart"
-          @click="start"
-        >
-          <span>●</span>{{ busy ? 'Iniciando…' : 'Iniciar transcripción' }}
-        </button>
-        <button v-else class="record-button stop" :disabled="processing" @click="stop">
-          <span>■</span>{{ processing ? 'Procesando…' : 'Detener transcripción' }}
-        </button>
-        <button
-          class="meeting-secondary"
-          :disabled="!view || !view.segments.length"
-          @click="exportTxt"
-        >
-          Exportar .txt
-        </button>
-        <button
-          class="meeting-secondary"
-          :disabled="!view || !view.segments.length || suggesting"
-          @click="suggestNames"
-        >
-          {{ suggesting ? 'Buscando nombres…' : 'Sugerir nombres' }}
-        </button>
-      </div>
+      </section>
       <div v-if="Object.keys(suggestions).length" class="name-suggestions" role="status">
         <span>Se mencionaron estos nombres en la conversación:</span>
         <span v-for="(name, key) in suggestions" :key="key" class="suggestion-chip">
@@ -667,8 +663,7 @@ watch(
         suggestMessage
       }}</small>
       <div v-if="!status.diarizeEnabled" class="meeting-warning" role="status">
-        Separación de participantes apagada: falta sherpa-onnx (local) o una clave de Gemini, así
-        que no se distingue quién habla.
+        Separación de participantes desactivada. Requiere sherpa-onnx o una clave de Gemini.
       </div>
       <div
         v-else-if="status.diarizeNote && view && status.diarizeSessionId === view.sessionId"
@@ -705,7 +700,7 @@ watch(
       :class="{ resizing: transcriptResize.resizing.value }"
       :style="transcriptResize.style.value"
     >
-      <div class="panel-heading">
+      <div class="panel-heading transcript-heading">
         <span>Transcripción</span>
         <span v-if="view" class="speaker-names">
           <template v-for="ref in presentSpeakers" :key="ref.track + ':' + ref.speakerKey">
@@ -730,6 +725,12 @@ watch(
             </button>
           </template>
         </span>
+        <div v-if="view?.segments.length" class="transcript-actions">
+          <button class="meeting-secondary" @click="exportTxt">Exportar .txt</button>
+          <button class="meeting-secondary" :disabled="suggesting" @click="suggestNames">
+            {{ suggesting ? 'Buscando nombres…' : 'Sugerir nombres' }}
+          </button>
+        </div>
       </div>
       <div v-if="view && (view.segments.length || partialRows.length)" ref="list" class="segments">
         <template v-for="{ segment, continued } in rows" :key="segment.id">
@@ -797,23 +798,46 @@ watch(
 <style scoped>
 .meeting {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 .meeting-controls {
   min-height: 0;
-  padding: 16px 18px;
+  padding: 10px 12px;
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
-.meeting-row {
+.meeting-toolbar {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 6px 10px;
 }
-.meeting-row label {
-  flex: none;
-  color: #9b9daa;
-  font-size: 12px;
+.capture-summary {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a7a9b5;
+  font-size: 11px;
+}
+.capture-summary span {
+  white-space: nowrap;
+}
+.capture-summary span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.capture-summary span + span {
+  padding-left: 8px;
+  border-left: 1px solid rgb(90 92 105 / var(--surface-opacity));
+}
+.setup-toggle {
+  margin-left: auto;
+}
+.setup-toggle span {
+  padding-left: 3px;
 }
 .meeting-mic {
   flex: 1;
@@ -826,7 +850,7 @@ watch(
 #meeting-language {
   min-width: 0;
   flex: 1;
-  padding: 8px 6px;
+  padding: 6px 8px;
   border: 1px solid #34313f;
   border-radius: 6px;
   color: #ddd;
@@ -840,8 +864,8 @@ watch(
 }
 .setup-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr);
+  gap: 10px;
   align-items: end;
 }
 .field {
@@ -849,7 +873,8 @@ watch(
   gap: 7px;
   min-width: 0;
 }
-.field > label {
+.field > label,
+.field-label {
   color: #9b9daa;
   font-size: 11px;
   letter-spacing: 0.02em;
@@ -858,11 +883,11 @@ watch(
   display: flex;
   gap: 10px;
   align-items: center;
-  min-height: 36px;
+  flex-wrap: wrap;
+  min-height: 30px;
 }
 .sample-actions .meeting-secondary {
-  width: 100%;
-  padding: 8px 13px;
+  padding: 5px 9px;
 }
 .link-button {
   padding: 0;
@@ -875,11 +900,6 @@ watch(
 .link-button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-@media (max-width: 760px) {
-  .setup-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .meeting-mic button {
   padding: 0 11px;
@@ -902,33 +922,15 @@ watch(
   font-size: 11px;
   line-height: 1.55;
 }
-.meeting-note strong {
-  color: #a9c9bd;
-  font-weight: 600;
-}
-.voice-sample-row label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.field-hint {
-  color: #6b6d7b;
-  font-weight: 400;
-  font-size: 10px;
-}
 .sample-status {
   padding: 0 6px;
   color: #86d6b0;
   font-size: 10px;
   align-self: center;
 }
-.meeting-actions {
-  flex-wrap: wrap;
-  padding-top: 12px;
-  border-top: 1px solid rgb(41 42 53 / var(--surface-opacity));
-}
 .record-button {
-  padding: 11px 16px;
+  min-height: 32px;
+  padding: 6px 10px;
   border-radius: 7px;
   color: #071711;
   background: rgb(98 215 179 / var(--surface-opacity));
@@ -955,7 +957,8 @@ watch(
   cursor: default;
 }
 .meeting-secondary {
-  padding: 9px 13px;
+  min-height: 30px;
+  padding: 5px 8px;
   color: #b9f2df;
   border: 1px solid rgb(62 126 108 / var(--surface-opacity));
   border-radius: 7px;
@@ -1070,7 +1073,7 @@ watch(
 }
 .meeting-transcript {
   min-height: 300px;
-  height: clamp(300px, calc(100vh - 360px), 620px);
+  height: clamp(300px, calc(100vh - 300px), 700px);
 }
 .speaker-names {
   display: flex;
@@ -1155,23 +1158,48 @@ watch(
 }
 .meeting-setup {
   display: grid;
-  gap: 16px;
+  gap: 9px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(41 42 53 / var(--surface-opacity));
 }
-.meeting-setup summary {
+.speaker-setup {
+  border-top: 1px solid rgb(41 42 53 / var(--surface-opacity));
+  padding-top: 8px;
+}
+.speaker-setup summary {
   cursor: pointer;
   color: #c9cad3;
   font-size: 12px;
-  font-weight: 600;
-  list-style-position: inside;
 }
-.meeting-setup[open] summary {
-  margin-bottom: 4px;
+.speaker-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  margin: 8px 0;
 }
-.setup-summary {
-  margin-left: 8px;
-  color: #747583;
-  font-weight: 400;
-  font-size: 11px;
+.transcript-heading {
+  height: auto;
+  min-height: 40px;
+  padding: 5px 12px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px 10px;
+}
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+@media (max-width: 520px) {
+  .setup-grid,
+  .speaker-setup-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .capture-summary {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 .segment {
   margin: 10px 0;
@@ -1225,9 +1253,6 @@ watch(
   }
   .segment span {
     grid-column: 2;
-  }
-  .meeting-row {
-    flex-wrap: wrap;
   }
 }
 </style>
