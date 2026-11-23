@@ -120,3 +120,27 @@ func (a *App) SetGeminiAPIKey(key string) error {
 	}
 	return nil
 }
+
+// ProviderStatus says which providers are set up, so Settings can mark the
+// missing ones. Never the keys themselves.
+type ProviderStatus struct {
+	OpenAI          bool `json:"openai"`
+	DeepSeek        bool `json:"deepseek"`
+	Azure           bool `json:"azure"`
+	AzureTranscribe bool `json:"azureTranscribe"`
+	Gemini          bool `json:"gemini"`
+}
+
+func (a *App) ProviderStatus() ProviderStatus {
+	a.mu.RLock()
+	backend := a.backend
+	a.mu.RUnlock()
+	status := ProviderStatus{Gemini: a.diarizer.HasCloudKey()}
+	if backend != nil {
+		status.OpenAI = backend.ProviderReady("openai")
+		status.DeepSeek = backend.ProviderReady("deepseek")
+		status.Azure = backend.ProviderReady("azure")
+		status.AzureTranscribe = backend.AzureTranscribeReady()
+	}
+	return status
+}

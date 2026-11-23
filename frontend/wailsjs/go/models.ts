@@ -190,6 +190,26 @@ export namespace app {
 	        this.Audio = source["Audio"];
 	    }
 	}
+	export class ProviderStatus {
+	    openai: boolean;
+	    deepseek: boolean;
+	    azure: boolean;
+	    azureTranscribe: boolean;
+	    gemini: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.openai = source["openai"];
+	        this.deepseek = source["deepseek"];
+	        this.azure = source["azure"];
+	        this.azureTranscribe = source["azureTranscribe"];
+	        this.gemini = source["gemini"];
+	    }
+	}
 
 }
 

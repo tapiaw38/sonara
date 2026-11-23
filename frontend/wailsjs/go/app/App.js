@@ -106,6 +106,10 @@ export function PracticeListen() {
   return window['go']['app']['App']['PracticeListen']();
 }
 
+export function ProviderStatus() {
+  return window['go']['app']['App']['ProviderStatus']();
+}
+
 export function RecordVoiceSample() {
   return window['go']['app']['App']['RecordVoiceSample']();
 }

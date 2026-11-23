@@ -75,3 +75,20 @@ func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 		t.Error("clearKey must remove the stored key")
 	}
 }
+
+func TestProviderStatusReportsWhatIsSetUp(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	a, _ := testMeetingApp(t)
+	a.backend = sonaraBackend.New()
+	a.backend.SetAPIKey("")
+	if status := a.ProviderStatus(); status.Azure || status.DeepSeek || status.Gemini {
+		t.Fatalf("nothing set up yet: %+v", status)
+	}
+	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "", "", "chat", "stt", "", "0123456789abcdef0123456789", false); err != nil {
+		t.Fatal(err)
+	}
+	if status := a.ProviderStatus(); !status.Azure || !status.AzureTranscribe {
+		t.Fatalf("Azure saved: %+v", status)
+	}
+}

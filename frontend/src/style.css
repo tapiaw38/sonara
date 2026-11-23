@@ -1746,6 +1746,72 @@ button:focus-visible,
   padding: 17px 0;
   border-top: 1px solid #2a2f35;
 }
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #0d1014;
+}
+.settings-tabs button {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: #8f959e;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+}
+.settings-tabs button:hover {
+  color: #dfe2e6;
+}
+.settings-tabs button.active {
+  color: #eff1f3;
+  background: #22262c;
+}
+.key-group {
+  margin-top: 10px;
+  border: 1px solid #2a2f35;
+  border-radius: 10px;
+  background: #101318;
+}
+.key-group > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 13px;
+  color: #dfe2e6;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.key-group > summary::-webkit-details-marker {
+  display: none;
+}
+.key-group > summary::after {
+  content: '▸';
+  margin-left: 10px;
+  color: #6c727b;
+}
+.key-group[open] > summary::after {
+  content: '▾';
+}
+.key-group > .api-key-form {
+  padding: 0 13px 13px;
+}
+.key-state {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+}
+.key-state.ok {
+  color: #48b494;
+}
+.key-state.missing {
+  color: #858b95;
+}
 .settings-section h3 {
   margin: 0 0 13px;
   color: #dfe2e6;

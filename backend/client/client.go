@@ -192,8 +192,12 @@ func (c *Client) TextProvider() string { return c.textVision.TextProvider() }
 
 // TextProviderReady says whether the chosen text provider has what it needs
 // (a key, an endpoint) — not whether that key is valid.
-func (c *Client) TextProviderReady() bool {
-	switch c.textVision.TextProvider() {
+func (c *Client) TextProviderReady() bool { return c.ProviderReady(c.textVision.TextProvider()) }
+
+// ProviderReady says whether a provider has what it needs for text (a key,
+// an endpoint), not whether that key is valid. Local needs nothing.
+func (c *Client) ProviderReady(name string) bool {
+	switch name {
 	case providers.OpenAI:
 		c.mu.RLock()
 		defer c.mu.RUnlock()
@@ -205,6 +209,10 @@ func (c *Client) TextProviderReady() bool {
 	}
 	return true
 }
+
+// AzureTranscribeReady is ProviderReady for Azure transcription, which has
+// its own deployment.
+func (c *Client) AzureTranscribeReady() bool { return c.azure.TranscribeConfigured() }
 
 // SetVisionProvider chooses who answers a request that carries a screen
 // capture. DeepSeek is accepted here (Settings may still offer it), but it

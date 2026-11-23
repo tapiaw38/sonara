@@ -56,6 +56,8 @@ export function OpenSession(arg1:string):Promise<storage.OpenSessionResult>;
 
 export function PracticeListen():Promise<app.PracticeTurn>;
 
+export function ProviderStatus():Promise<app.ProviderStatus>;
+
 export function RecordVoiceSample():Promise<void>;
 
 export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Record<string, string>>;
