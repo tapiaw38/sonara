@@ -108,7 +108,7 @@ func NewApp() *App {
 		sessionID:    newSessionID(),
 		segments:     make(chan meetSegment, meetQueuedSegments),
 		voiceContext: ctx, voiceCancel: cancel,
-		diarizer: diarize.NewService(diarize.NewGemini(nil, diarize.GeminiBaseURL, diarize.GeminiUploadURL)),
+		diarizer: diarize.NewService(diarize.NewGemini(nil, diarize.GeminiBaseURL)),
 	}
 }
 

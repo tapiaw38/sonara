@@ -2,10 +2,13 @@ package diarize
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"sonara/internal/audio"
@@ -57,7 +60,7 @@ func TestDiarizeHappyPath(t *testing.T) {
 
 func TestDiarizeNoKeyConfigured(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // no local sherpa-onnx either
-	d := NewService(NewGemini(nil, GeminiBaseURL, GeminiUploadURL))
+	d := NewService(NewGemini(nil, GeminiBaseURL))
 	if d.Configured() {
 		t.Fatal("a fresh diarizer must not be configured")
 	}
@@ -177,12 +180,12 @@ func TestCleanEchoSpans(t *testing.T) {
 }
 
 // fakeGeminiEcho mirrors fakeGemini (diarize_test.go) but answers the
-// /v1beta/interactions call with echo spans instead of speaker spans; it
+// /v1/interactions call with echo spans instead of speaker spans; it
 // reuses the exact same fake upload endpoints.
 func fakeGeminiEcho(t *testing.T, spans []EchoSpan, status int) *Service {
 	t.Helper()
 	encoded, _ := json.Marshal(spans)
-	return fakeGeminiRaw(t, status, string(encoded))
+	return fakeGeminiRaw(t, status, string(encoded), true)
 }
 
 func TestDetectEchoHappyPath(t *testing.T) {
@@ -196,46 +199,102 @@ func TestDetectEchoHappyPath(t *testing.T) {
 
 func TestDetectEchoPropagatesFailure(t *testing.T) {
 	d := fakeGeminiEcho(t, nil, http.StatusInternalServerError)
-	if _, err := d.DetectEcho(context.Background(), []byte("s"), []byte("m")); err == nil {
+	if _, err := d.DetectEcho(context.Background(), []byte("sample"), []byte("m")); err == nil {
 		t.Fatal("a failing interaction must error")
 	}
 }
 
 func TestDetectEchoNoKeyConfigured(t *testing.T) {
-	d := NewService(NewGemini(nil, GeminiBaseURL, GeminiUploadURL))
+	d := NewService(NewGemini(nil, GeminiBaseURL))
 	if _, err := d.DetectEcho(context.Background(), nil, nil); err == nil {
 		t.Fatal("calling without a key must error")
 	}
 }
 
-// fakeGemini stubs the three HTTP calls diarize() makes: start the resumable
-// upload, receive the bytes, and answer the interaction. Good enough to test
-// the whole diarizer without a real Gemini account.
+// fakeGemini returns speaker turns through the fake HTTP service.
 func fakeGemini(t *testing.T, spans []Span, interactionStatus int, rawOutput string) *Service {
 	t.Helper()
 	if rawOutput == "" {
 		encoded, _ := json.Marshal(spans)
 		rawOutput = string(encoded)
 	}
-	return fakeGeminiRaw(t, interactionStatus, rawOutput)
+	return fakeGeminiRaw(t, interactionStatus, rawOutput, false)
 }
 
-// fakeGeminiRaw is the shared fake behind both fakeGemini (diarization) and
-// fakeGeminiEcho (voicematch_test.go): the three HTTP calls diarize()/
-// detectEcho() make — start the resumable upload, receive the bytes, and
-// answer the interaction with whatever JSON text the caller wants echoed
-// back as the model's output.
-func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *Service {
+// fakeGeminiRaw serves the Files and Interactions endpoints used by the client.
+func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string, processing bool) *Service {
 	t.Helper()
+	t.Setenv("GEMINI_MODEL", "")
+	const uri = "https://generativelanguage.googleapis.com/v1beta/files/abc"
+	var deleted bool
+	var fileChecked atomic.Bool
 	mux := http.NewServeMux()
-	mux.HandleFunc("/upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /upload/v1beta/files", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "test-key" ||
+			r.Header.Get("X-Goog-Upload-Protocol") != "resumable" ||
+			r.Header.Get("X-Goog-Upload-Command") != "start" ||
+			r.Header.Get("X-Goog-Upload-Header-Content-Type") != "audio/wav" {
+			t.Errorf("unexpected upload start headers: %v", r.Header)
+		}
 		w.Header().Set("x-goog-upload-url", "http://"+r.Host+"/upload/bytes")
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/upload/bytes", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"file": map[string]string{"uri": "https://files/abc", "name": "files/abc"}})
+	mux.HandleFunc("POST /upload/bytes", func(w http.ResponseWriter, r *http.Request) {
+		payload, err := io.ReadAll(r.Body)
+		if err != nil || r.ContentLength != int64(len(payload)) ||
+			r.Header.Get("X-Goog-Upload-Offset") != "0" ||
+			r.Header.Get("X-Goog-Upload-Command") != "upload, finalize" {
+			t.Errorf("invalid upload finalization: %v, %v", r.Header, err)
+		}
+		file := geminiFile{URI: uri, Name: "files/abc", MimeType: "audio/wav", State: "ACTIVE"}
+		if processing {
+			file.State = "PROCESSING"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"file": file})
 	})
-	mux.HandleFunc("/v1beta/interactions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "test-key" {
+			t.Error("missing Files API key")
+		}
+		fileChecked.Store(true)
+		json.NewEncoder(w).Encode(geminiFile{URI: uri, Name: "files/abc", MimeType: "audio/wav", State: "ACTIVE"})
+	})
+	mux.HandleFunc("POST /v1/interactions", func(w http.ResponseWriter, r *http.Request) {
+		if processing && !fileChecked.Load() {
+			t.Error("interaction started before file became active")
+		}
+		if r.Header.Get("x-goog-api-key") != "test-key" ||
+			r.Header.Get("Content-Type") != "application/json" ||
+			r.Header.Get("Api-Revision") != "" {
+			t.Errorf("unexpected interaction headers: %v", r.Header)
+		}
+		var request geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("invalid interaction request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		format := request.ResponseFormat
+		if request.Model != "gemini-4-hydrogen" || format.Type != "text" ||
+			format.MimeType != "application/json" || format.Schema["type"] != "array" {
+			t.Errorf("unexpected model or format: %q, %+v", request.Model, format)
+		}
+		switch len(request.Input) {
+		case 3:
+			sample := request.Input[1]
+			if sample != (geminiInput{Type: "audio", Data: base64.StdEncoding.EncodeToString([]byte("sample")), MimeType: "audio/wav"}) {
+				t.Errorf("unexpected inline sample: %+v", sample)
+			}
+			fallthrough
+		case 2:
+			audio := request.Input[len(request.Input)-1]
+			if request.Input[0].Type != "text" ||
+				audio != (geminiInput{Type: "audio", URI: uri, MimeType: "audio/wav"}) {
+				t.Errorf("unexpected uploaded audio input: %+v", request.Input)
+			}
+		default:
+			t.Errorf("unexpected interaction input: %+v", request.Input)
+		}
 		if interactionStatus != http.StatusOK {
 			w.WriteHeader(interactionStatus)
 			return
@@ -247,13 +306,23 @@ func fakeGeminiRaw(t *testing.T, interactionStatus int, rawOutput string) *Servi
 			},
 		})
 	})
-	mux.HandleFunc("/v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	mux.HandleFunc("DELETE /v1beta/files/abc", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "test-key" || r.ContentLength != 0 {
+			t.Error("invalid Files API delete request")
+		}
+		deleted = true
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{}"))
 	})
 	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.Close()
+		if !deleted {
+			t.Error("uploaded file was not deleted")
+		}
+	})
 
-	d := NewService(NewGemini(srv.Client(), srv.URL+"/v1beta", srv.URL+"/upload/v1beta/files"))
+	d := NewService(NewGemini(srv.Client(), srv.URL))
 	d.SetAPIKey("test-key")
 	return d
 }

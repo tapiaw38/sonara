@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"sonara/internal/audio"
@@ -88,7 +89,14 @@ func TestRunVoiceMatchFailureLeavesSegmentsUntouched(t *testing.T) {
 	withVoiceSample(t, []byte("muestra"))
 	run.diarizePCM = []byte{1, 2, 3}
 
-	a.runVoiceMatch(run) // must not panic
+	a.setDiarizeNote(run.sessionID, "Participantes detectados: 1.")
+	a.runVoiceMatch(run)
+
+	status := a.MeetingTranscriptStatus()
+	if status.DiarizeSessionID != run.sessionID ||
+		!strings.HasPrefix(status.DiarizeNote, "Participantes detectados: 1. No se pudo detectar el eco: ") {
+		t.Fatalf("unexpected meeting status: %+v", status)
+	}
 
 	segments, _ := database.TranscriptSegments("m1")
 	for _, s := range segments {

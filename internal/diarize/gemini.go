@@ -18,29 +18,33 @@ import (
 	"sonara/internal/logx"
 )
 
-// Default Gemini endpoints.
-const (
-	GeminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta"
-	GeminiUploadURL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-)
+// GeminiBaseURL is the origin shared by the Interactions and Files APIs.
+const GeminiBaseURL = "https://generativelanguage.googleapis.com"
 
-const geminiAPIRevision = "2026-05-20"
+const geminiWAV = "audio/wav"
+
+type geminiFile struct {
+	URI      string `json:"uri"`
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	State    string `json:"state"`
+}
 
 // Gemini diarizes and detects echo through the Files and Interactions APIs.
 type Gemini struct {
-	client             *http.Client
-	baseURL, uploadURL string
-	keyMu              sync.RWMutex
-	apiKey             string
+	client  *http.Client
+	baseURL string
+	keyMu   sync.RWMutex
+	apiKey  string
 }
 
 // NewGemini builds the client; a nil client gets one bounded by FinalTimeout.
-// The URLs are parameters so tests can point them at a fake server.
-func NewGemini(client *http.Client, baseURL, uploadURL string) *Gemini {
+// The base URL is injectable so tests can use a fake server.
+func NewGemini(client *http.Client, baseURL string) *Gemini {
 	if client == nil {
 		client = &http.Client{Timeout: FinalTimeout}
 	}
-	return &Gemini{client: client, baseURL: baseURL, uploadURL: uploadURL}
+	return &Gemini{client: client, baseURL: baseURL}
 }
 
 func (g *Gemini) SetAPIKey(key string) {
@@ -113,8 +117,8 @@ func (g *Gemini) cleanup(fileName, apiKey string) {
 // uploadFile runs the Files API's resumable upload in two requests: one to
 // start the session and get an upload URL, one to send the bytes.
 func (g *Gemini) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri, name, mimeType string, err error) {
-	mimeType = "audio/wav"
-	start, err := http.NewRequestWithContext(ctx, http.MethodPost, g.uploadURL,
+	mimeType = geminiWAV
+	start, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/upload/v1beta/files",
 		strings.NewReader(`{"file":{"display_name":"sonara-meeting"}}`))
 	if err != nil {
 		return "", "", "", err
@@ -159,25 +163,57 @@ func (g *Gemini) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri
 		return "", "", "", fmt.Errorf("estado %d al subir el audio", putResp.StatusCode)
 	}
 	var decoded struct {
-		File struct {
-			URI  string `json:"uri"`
-			Name string `json:"name"`
-		} `json:"file"`
+		File geminiFile `json:"file"`
 	}
-	if err := json.Unmarshal(body, &decoded); err != nil || decoded.File.URI == "" {
-		return "", "", "", fmt.Errorf("la subida no devolvió un archivo usable")
+	if err := json.Unmarshal(body, &decoded); err != nil || decoded.File.Name == "" {
+		return "", "", "", fmt.Errorf("la subida no devolvió el nombre del archivo")
 	}
-	return decoded.File.URI, decoded.File.Name, mimeType, nil
+	file := decoded.File
+	for file.State == "PROCESSING" {
+		select {
+		case <-ctx.Done():
+			g.cleanup(decoded.File.Name, apiKey)
+			return "", "", "", ctx.Err()
+		case <-time.After(time.Second):
+		}
+		file, err = g.getFile(ctx, apiKey, decoded.File.Name)
+		if err != nil {
+			g.cleanup(decoded.File.Name, apiKey)
+			return "", "", "", err
+		}
+	}
+	if file.State != "ACTIVE" || file.URI == "" || file.MimeType == "" {
+		g.cleanup(decoded.File.Name, apiKey)
+		return "", "", "", fmt.Errorf("Gemini no devolvió un archivo de audio usable (estado %q)", file.State)
+	}
+	return file.URI, decoded.File.Name, file.MimeType, nil
 }
 
-// deleteFile is best-effort: its exact endpoint was not confirmed against
-// Google's own docs in this session (only that deletion is possible through
-// the API). A failure here never affects the meeting; see the doc comment.
+func (g *Gemini) getFile(ctx context.Context, apiKey, fileName string) (geminiFile, error) {
+	var file geminiFile
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.baseURL+"/v1beta/"+fileName, nil)
+	if err != nil {
+		return file, err
+	}
+	req.Header.Set("x-goog-api-key", apiKey)
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return file, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return file, fmt.Errorf("estado %d al consultar el archivo de Gemini", resp.StatusCode)
+	}
+	err = json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&file)
+	return file, err
+}
+
+// deleteFile removes the uploaded resource through the Files API.
 func (g *Gemini) deleteFile(ctx context.Context, apiKey, fileName string) error {
 	if fileName == "" {
 		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, g.baseURL+"/"+fileName, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, g.baseURL+"/v1beta/"+fileName, nil)
 	if err != nil {
 		return err
 	}
@@ -245,7 +281,7 @@ func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeTy
 		return nil, err
 	}
 	var spans []Span
-	if err := json.Unmarshal([]byte(text), &spans); err != nil {
+	if err := json.Unmarshal([]byte(text), &spans); err != nil || spans == nil {
 		return nil, fmt.Errorf("Gemini no devolvió la lista de hablantes esperada")
 	}
 	return cleanSpans(spans, durationMS), nil
@@ -259,13 +295,12 @@ func (g *Gemini) interact(ctx context.Context, apiKey string, request geminiRequ
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/interactions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/v1/interactions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Revision", geminiAPIRevision)
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -345,7 +380,7 @@ func (g *Gemini) DetectEcho(ctx context.Context, sampleWav, meetingWav []byte) (
 		Model: geminiModelName(),
 		Input: []geminiInput{
 			{Type: "text", Text: echoPrompt},
-			{Type: "audio", Data: base64.StdEncoding.EncodeToString(sampleWav), MimeType: "audio/wav"},
+			{Type: "audio", Data: base64.StdEncoding.EncodeToString(sampleWav), MimeType: geminiWAV},
 			{Type: "audio", URI: fileURI, MimeType: mimeType},
 		},
 		ResponseFormat: geminiResponseFormat{Type: "text", MimeType: "application/json", Schema: echoSchema},
@@ -354,7 +389,7 @@ func (g *Gemini) DetectEcho(ctx context.Context, sampleWav, meetingWav []byte) (
 		return nil, err
 	}
 	var spans []EchoSpan
-	if err := json.Unmarshal([]byte(text), &spans); err != nil {
+	if err := json.Unmarshal([]byte(text), &spans); err != nil || spans == nil {
 		return nil, fmt.Errorf("Gemini no devolvió la lista de intervalos esperada")
 	}
 	return cleanEchoSpans(spans, wavDurationMS(meetingWav)), nil

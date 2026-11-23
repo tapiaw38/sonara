@@ -1,32 +1,15 @@
 // Package diarize separates a meeting's participants by voice: who spoke when.
 //
-// Phase 2: speaker diarization of the meeting_output track, via the Gemini
-// API (cloud) rather than a local model — no PyTorch, no local service, no
-// Hugging Face token to install on the user's machine. It is optional,
-// additive, and off unless a Gemini key is configured (Settings): a meeting
-// transcribes exactly as in phase 1 whether or not this is set up, and
-// nothing here ever blocks recording or transcription. If the call fails,
-// participants simply stay "Participante" instead of "Participante 1/2/…".
+// A configured Gemini key selects the cloud engine. Without one, the service
+// selects local sherpa-onnx. Cloud failures are reported to the caller.
 //
-// Unlike transcription, diarization runs once, after capture stops, on the
-// whole accumulated meeting_output track rather than per block: a fresh
-// Gemini call has no memory of a previous one, so diarizing short blocks
-// independently would give each one its own, mutually incompatible "Speaker
-// 1" — stable identity across the meeting needs the model to see it all at
-// once. That means this track's audio — never the microphone's — is held in
-// memory for the length of the meeting instead of being discarded per block,
-// and only when a Gemini key is configured; the caller caps how much
-// (diarizeMaxDuration in the app).
+// Cloud passes send the accumulated meeting_output recording so the model can
+// label speakers across the recording. Echo detection also sends an optional,
+// separately recorded voice sample. The app caps the buffered meeting audio.
 //
-// This also means the microphone is never diarized or voice-matched: "Yo" is
-// assigned by which device captured it, not by analyzing the audio. Matching a
-// user's own voice inside the meeting_output mix, to catch an echo of
-// themselves through someone else's speakers, is phase 3 — see voicematch.go.
-//
-// *** UNVERIFIED AGAINST A REAL KEY ***: this talks to
-// generativelanguage.googleapis.com's Files and Interactions APIs per their
-// public docs (ai.google.dev, fetched 2026-11-16), but has never been run
-// against a real Gemini account — see PLAN_TRANSCRIPCION_REUNIONES.md.
+// The Files API v1beta and Interactions API v1 contract is covered by HTTP
+// tests. The integration and the accuracy of its speaker and echo intervals
+// still need validation against Gemini with a real key.
 package diarize
 
 import (

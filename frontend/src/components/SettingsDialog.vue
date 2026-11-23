@@ -565,9 +565,9 @@ onMounted(async () => {
               spellcheck="false"
               placeholder="AI…"
             /><small
-              >Separa a los participantes de una reunión al terminar de grabarla: el audio de esa
-              pista se envía a Gemini. Sin clave, quedan como "Participante". No instala nada en tu
-              máquina.</small
+              >Envía a Gemini el audio de la reunión para separar participantes. Si grabaste una
+              muestra de voz, también la envía para detectar tu eco. Sin clave, la separación usa
+              sherpa-onnx local. La integración sigue pendiente de prueba con una clave real.</small
             >
             <div class="api-key-actions">
               <button type="submit" :disabled="savingApiKey || !geminiKey">
