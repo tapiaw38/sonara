@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,17 +55,16 @@ func TestResamplerRatioAndContinuity(t *testing.T) {
 
 type fakeServer struct {
 	t        *testing.T
+	auth     chan http.Header // the handshake's headers, one per connection
 	received chan map[string]any
 	send     chan map[string]any
 }
 
 func newFakeServer(t *testing.T) (*fakeServer, string, func()) {
-	fs := &fakeServer{t: t, received: make(chan map[string]any, 16), send: make(chan map[string]any, 16)}
+	fs := &fakeServer{t: t, auth: make(chan http.Header, 4), received: make(chan map[string]any, 16), send: make(chan map[string]any, 16)}
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer k" {
-			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
-		}
+		fs.auth <- r.Header.Clone()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -107,6 +107,9 @@ func TestSessionProtocol(t *testing.T) {
 	}
 	defer s.Close()
 
+	if header := <-fs.auth; header.Get("Authorization") != "Bearer k" {
+		t.Errorf("Authorization = %q", header.Get("Authorization"))
+	}
 	update := next(t, fs.received)
 	raw, _ := json.Marshal(update)
 	for _, want := range []string{
@@ -177,5 +180,107 @@ func TestClosedIsTheLastEvent(t *testing.T) {
 func TestDialWithoutKey(t *testing.T) {
 	if _, err := Dial(context.Background(), Options{URL: "ws://x"}); err == nil {
 		t.Fatal("a missing key must fail before dialing")
+	}
+}
+
+// Azure: api-key header, the deployment as model, and a single language with
+// no delay, which gpt-4o-*-transcribe rejects (failing the whole update).
+func TestAzureSession(t *testing.T) {
+	fs, url, stop := newFakeServer(t)
+	defer stop()
+	s, err := Dial(context.Background(), Options{URL: url, APIKey: "k", AzureKey: true, Model: "gpt-4o-mini-transcribe", Language: "es", Delay: "minimal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	header := <-fs.auth
+	if header.Get("api-key") != "k" || header.Get("Authorization") != "" {
+		t.Errorf("headers = %v, want only api-key", header)
+	}
+	raw, _ := json.Marshal(next(t, fs.received))
+	for _, want := range []string{`"model":"gpt-4o-mini-transcribe"`, `"language":"es"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("session.update lacks %s: %s", want, raw)
+		}
+	}
+	for _, unwanted := range []string{`"delay"`, `"languages"`} {
+		if strings.Contains(string(raw), unwanted) {
+			t.Errorf("session.update must not send %s to Azure: %s", unwanted, raw)
+		}
+	}
+}
+
+func TestAzureEndpointFor(t *testing.T) {
+	got, err := AzureEndpointFor("https://copilot.openai.azure.com/")
+	if err != nil || got != "wss://copilot.openai.azure.com/openai/v1/realtime?intent=transcription" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := AzureEndpointFor("not a url"); err == nil {
+		t.Fatal("an invalid endpoint must error")
+	}
+}
+
+// The first handshake dies mid-way (like Azure's EOF after idle): Dial must
+// retry and connect. A 401 must not be retried.
+func TestDialRetriesATransientHandshakeFailure(t *testing.T) {
+	saved := dialRetryDelays
+	dialRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { dialRetryDelays = saved })
+
+	var attempts atomic.Int32
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close() // EOF before the upgrade answer
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var m map[string]any
+		for conn.ReadJSON(&m) == nil {
+		}
+	}))
+	defer srv.Close()
+	s, err := Dial(context.Background(), Options{URL: "ws" + strings.TrimPrefix(srv.URL, "http"), APIKey: "k"})
+	if err != nil {
+		t.Fatalf("a dropped first handshake must be retried: %v", err)
+	}
+	s.Close()
+	if attempts.Load() != 2 {
+		t.Errorf("attempts = %d, want 2", attempts.Load())
+	}
+
+	attempts.Store(0)
+	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "bad key", http.StatusUnauthorized)
+	}))
+	defer denied.Close()
+	if _, err := Dial(context.Background(), Options{URL: "ws" + strings.TrimPrefix(denied.URL, "http"), APIKey: "k"}); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("err = %v, want the 401", err)
+	}
+	if attempts.Load() != 1 {
+		t.Errorf("a 401 was retried: %d attempts", attempts.Load())
+	}
+}
+
+// A gpt-live-transcribe deployment on Azure gets that model's languages list,
+// but never delay, which Azure rejects for it too.
+func TestAzureLiveModelSession(t *testing.T) {
+	fs, url, stop := newFakeServer(t)
+	defer stop()
+	s, err := Dial(context.Background(), Options{URL: url, APIKey: "k", AzureKey: true, Model: "my-live", LiveModel: true, Language: "es", Delay: "minimal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	<-fs.auth
+	raw, _ := json.Marshal(next(t, fs.received))
+	if !strings.Contains(string(raw), `"languages":["es"]`) || !strings.Contains(string(raw), `"model":"my-live"`) || strings.Contains(string(raw), `"delay"`) {
+		t.Errorf("session.update = %s", raw)
 	}
 }

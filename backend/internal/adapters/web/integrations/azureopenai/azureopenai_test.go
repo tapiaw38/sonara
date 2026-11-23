@@ -30,7 +30,24 @@ func TestConfiguredChecksAreIndependent(t *testing.T) {
 		t.Error("chat config alone should be enough for Configured")
 	}
 	if g.TranscribeConfigured() {
-		t.Error("TranscribeConfigured must stay false without a transcribe deployment and its own API version")
+		t.Error("TranscribeConfigured must stay false without a transcribe deployment")
+	}
+}
+
+// Blank versions fall back to known-good defaults instead of leaving Azure
+// unconfigured; a typed version is kept as is.
+func TestBlankAPIVersionsUseDefaults(t *testing.T) {
+	g := NewGateway()
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", ChatDeployment: "chat", TranscribeDeployment: "stt"})
+	if !g.Configured() || !g.TranscribeConfigured() {
+		t.Fatal("blank versions must not leave Azure unconfigured")
+	}
+	if got := g.chatURL(g.config()); !strings.HasSuffix(got, "api-version="+DefaultChatAPIVersion) {
+		t.Errorf("chat URL = %q", got)
+	}
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", ChatDeployment: "chat", ChatAPIVersion: "2024-10-21"})
+	if got := g.chatURL(g.config()); !strings.HasSuffix(got, "api-version=2024-10-21") {
+		t.Errorf("a typed version was replaced: %q", got)
 	}
 }
 
@@ -151,5 +168,18 @@ func TestTranscribeRejectsWhenNotConfigured(t *testing.T) {
 	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", ChatAPIVersion: "v", ChatDeployment: "chat"}) // no transcribe deployment or its API version
 	if _, err := g.Transcribe(context.Background(), nil, "", ""); err == nil {
 		t.Fatal("missing the transcribe deployment must refuse, not fall back to the chat one")
+	}
+}
+
+// The streaming deployment wins when set; otherwise the upload one stands in.
+func TestRealtimeConfigPrefersLiveDeployment(t *testing.T) {
+	g := NewGateway()
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", TranscribeDeployment: "stt"})
+	if _, _, dep, live, ok := g.RealtimeConfig(); !ok || dep != "stt" || live {
+		t.Fatalf("without a live deployment: dep=%q live=%v ok=%v", dep, live, ok)
+	}
+	g.SetConfig(Config{APIKey: "k", Endpoint: "https://x", TranscribeDeployment: "stt", LiveDeployment: "live"})
+	if _, _, dep, live, ok := g.RealtimeConfig(); !ok || dep != "live" || !live {
+		t.Fatalf("with a live deployment: dep=%q live=%v ok=%v", dep, live, ok)
 	}
 }

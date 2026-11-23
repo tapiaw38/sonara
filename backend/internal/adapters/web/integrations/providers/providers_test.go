@@ -124,3 +124,24 @@ func TestTranscriberIsBoundToOneProviderAndNeverFallsBack(t *testing.T) {
 		t.Fatalf("after switching: got %+v, %v", out, err)
 	}
 }
+
+// splitProvider has chat and transcription configured independently, like Azure.
+type splitProvider struct {
+	fakeProvider
+	transcribeReady bool
+}
+
+func (s *splitProvider) TranscribeConfigured() bool { return s.transcribeReady }
+
+func TestTranscriberJudgesTranscriptionSetupNotChat(t *testing.T) {
+	transcribeOnly := &splitProvider{fakeProvider: fakeProvider{name: "azure", ready: false}, transcribeReady: true}
+	registry := NewRegistry(map[string]Provider{"azure": transcribeOnly})
+	if _, err := NewTranscriber(registry, "azure").Transcribe(context.Background(), []byte("x"), "a.wav", "es"); err != nil {
+		t.Fatalf("a transcription-only setup must transcribe: %v", err)
+	}
+	chatOnly := &splitProvider{fakeProvider: fakeProvider{name: "azure", ready: true}, transcribeReady: false}
+	registry = NewRegistry(map[string]Provider{"azure": chatOnly})
+	if _, err := NewTranscriber(registry, "azure").Transcribe(context.Background(), []byte("x"), "a.wav", "es"); err == nil {
+		t.Fatal("a chat-only setup must be rejected before any transcription call")
+	}
+}

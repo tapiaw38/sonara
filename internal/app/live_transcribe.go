@@ -15,8 +15,8 @@ import (
 // Live copilot transcription (phase 2) and anticipated replies (phase 3).
 //
 // In batch mode every turn is recorded, uploaded as a WAV and transcribed
-// before anything else starts. Here the audio is streamed to OpenAI's Realtime
-// transcription while the other person is still talking: partial text shows up
+// before anything else starts. Here the audio is streamed to the Realtime
+// transcription of OpenAI or Azure OpenAI while the other person is still talking: partial text shows up
 // immediately, and the reply is started from that partial text a few hundred
 // milliseconds into the pause, before the final transcript even arrives.
 //
@@ -28,7 +28,7 @@ import (
 //     restarted from the final text.
 // A retracted reply costs tokens, never a wrong answer left on screen.
 //
-// Live mode is opt-in (Settings) and OpenAI-only; there is no fallback to the
+// Live mode is opt-in (Settings) and needs OpenAI or Azure OpenAI; there is no fallback to the
 // batch path when it fails — the error is shown, like every other provider.
 //
 // *** UNVERIFIED against the real service; see the realtime package. ***
@@ -421,7 +421,7 @@ func (a *App) ensureLive(ctx context.Context) (*liveRuntime, error) {
 }
 
 // SetLiveTranscribeMode chooses how the copilot transcribes: "batch" (record,
-// upload, transcribe: works with every provider) or "stream" (OpenAI Realtime:
+// upload, transcribe: works with every provider) or "stream" (OpenAI or Azure Realtime:
 // text while they speak, reply started ahead of the final transcript).
 func (a *App) SetLiveTranscribeMode(mode string) error {
 	if mode != liveModeBatch && mode != liveModeStream {

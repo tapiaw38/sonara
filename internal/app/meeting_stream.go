@@ -11,7 +11,7 @@ import (
 	"sonara/internal/storage"
 )
 
-// meetingStream sends one track's audio to OpenAI's streaming transcription
+// meetingStream sends one track's audio to streaming transcription (OpenAI or Azure)
 // while it is recorded, so words show up as they are spoken ("meeting:partial")
 // instead of a block at a time. The block cutter still decides where a block
 // ends: that is the commit, and the committed text is stored exactly like an

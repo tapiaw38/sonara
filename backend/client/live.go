@@ -25,38 +25,46 @@ const (
 	LiveClosed    = realtime.Closed
 )
 
-// OpenLive opens a streaming transcription session for the live copilot.
-// Streaming exists only on OpenAI, so it requires OpenAI to be the chosen
-// live-transcription provider: there is no fallback to another provider, a
-// wrong choice is an error that says so.
+// OpenLive opens a streaming transcription session for the live copilot with
+// the chosen live-transcription provider (OpenAI or Azure OpenAI). There is
+// no fallback to another provider: a choice without streaming is an error
+// that says so.
 func (c *Client) OpenLive(ctx context.Context, language string) (*LiveSession, error) {
-	if name := c.liveTranscribe.Provider(); name != providers.OpenAI {
-		return nil, fmt.Errorf("la transcripción en vivo requiere OpenAI como proveedor de transcripción en vivo (ahora: %s)", name)
-	}
-	c.mu.RLock()
-	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
-	c.mu.RUnlock()
-	endpoint, err := realtime.EndpointFor(base)
-	if err != nil {
-		return nil, err
-	}
-	// "minimal" delay: the whole point of this mode is latency.
-	return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, Language: language, Delay: "minimal"})
+	return c.dialLive(ctx, c.liveTranscribe.Provider(), language, "la transcripción en vivo")
 }
 
-// OpenMeetingLive is OpenLive for meeting transcription: it needs OpenAI as
-// the meeting provider. Any other provider is not an error the caller shows:
+// dialLive opens a streaming transcription session with provider: OpenAI's
+// Realtime API or Azure OpenAI's GA one. Any other provider is an error; the
+// caller then uploads audio in blocks instead.
+func (c *Client) dialLive(ctx context.Context, provider, language, what string) (*LiveSession, error) {
+	switch provider {
+	case providers.OpenAI:
+		c.mu.RLock()
+		key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
+		c.mu.RUnlock()
+		endpoint, err := realtime.EndpointFor(base)
+		if err != nil {
+			return nil, err
+		}
+		// "minimal" delay: the whole point of this mode is latency.
+		return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, Language: language, Delay: "minimal"})
+	case providers.Azure:
+		key, resource, deployment, live, ok := c.azure.RealtimeConfig()
+		if !ok {
+			return nil, fmt.Errorf("%s con Azure necesita clave, endpoint y deployment de transcripción", what)
+		}
+		endpoint, err := realtime.AzureEndpointFor(resource)
+		if err != nil {
+			return nil, err
+		}
+		return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, AzureKey: true, Model: deployment, LiveModel: live, Language: language})
+	}
+	return nil, fmt.Errorf("%s requiere OpenAI o Azure OpenAI como proveedor (ahora: %s)", what, provider)
+}
+
+// OpenMeetingLive is OpenLive for meeting transcription, with the meeting
+// provider. Any provider without streaming is not an error the caller shows:
 // it simply keeps uploading blocks.
 func (c *Client) OpenMeetingLive(ctx context.Context, language string) (*LiveSession, error) {
-	if name := c.meetingTranscribe.Provider(); name != providers.OpenAI {
-		return nil, fmt.Errorf("streaming solo con OpenAI (ahora: %s)", name)
-	}
-	c.mu.RLock()
-	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
-	c.mu.RUnlock()
-	endpoint, err := realtime.EndpointFor(base)
-	if err != nil {
-		return nil, err
-	}
-	return realtime.Dial(ctx, realtime.Options{URL: endpoint, APIKey: key, Language: language, Delay: "minimal"})
+	return c.dialLive(ctx, c.meetingTranscribe.Provider(), language, "el streaming de reuniones")
 }

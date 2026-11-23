@@ -19,6 +19,7 @@ export namespace app {
 	    transcribeApiVersion: string;
 	    chatDeployment: string;
 	    transcribeDeployment: string;
+	    liveDeployment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AzureOpenAIForm(source);
@@ -32,6 +33,7 @@ export namespace app {
 	        this.transcribeApiVersion = source["transcribeApiVersion"];
 	        this.chatDeployment = source["chatDeployment"];
 	        this.transcribeDeployment = source["transcribeDeployment"];
+	        this.liveDeployment = source["liveDeployment"];
 	    }
 	}
 	export class CaptureStatus {

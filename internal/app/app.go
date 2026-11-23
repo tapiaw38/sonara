@@ -182,6 +182,7 @@ func (a *App) startup(ctx context.Context) {
 				APIKey: azure.APIKey, Endpoint: azure.Endpoint,
 				ChatAPIVersion: azure.ChatAPIVersion, TranscribeAPIVersion: azure.TranscribeAPIVersion,
 				ChatDeployment: azure.ChatDeployment, TranscribeDeployment: azure.TranscribeDeployment,
+				LiveDeployment: azure.LiveDeployment,
 			}); err != nil {
 				logf("stored Azure OpenAI settings rejected: %v", err)
 			}

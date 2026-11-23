@@ -18,6 +18,7 @@ package azureopenai
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,6 +54,11 @@ type Config struct {
 	// GPT-4o) is the model deployed under this name.
 	ChatDeployment       string
 	TranscribeDeployment string
+	// LiveDeployment is the streaming transcription deployment, normally of
+	// gpt-live-transcribe: it sends text while the person is still talking,
+	// which the gpt-4o-*-transcribe models (TranscribeDeployment) only do
+	// after a pause. Empty falls back to TranscribeDeployment.
+	LiveDeployment string
 }
 
 type Gateway struct {
@@ -60,6 +66,14 @@ type Gateway struct {
 	mu     sync.RWMutex
 	cfg    Config
 }
+
+// Default API versions for a blank field, both checked against a real
+// resource (gpt-5-mini chat, gpt-4o-mini-transcribe audio) on 2026-11-22. A
+// blank field used to leave Azure "not configured" with no hint why.
+const (
+	DefaultChatAPIVersion       = "2025-04-01-preview"
+	DefaultTranscribeAPIVersion = "2025-03-01-preview"
+)
 
 func NewGateway() *Gateway {
 	return &Gateway{client: &http.Client{Timeout: 90 * time.Second}}
@@ -69,10 +83,11 @@ func (g *Gateway) SetConfig(cfg Config) {
 	g.mu.Lock()
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	cfg.Endpoint = strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
-	cfg.ChatAPIVersion = strings.TrimSpace(cfg.ChatAPIVersion)
-	cfg.TranscribeAPIVersion = strings.TrimSpace(cfg.TranscribeAPIVersion)
+	cfg.ChatAPIVersion = cmp.Or(strings.TrimSpace(cfg.ChatAPIVersion), DefaultChatAPIVersion)
+	cfg.TranscribeAPIVersion = cmp.Or(strings.TrimSpace(cfg.TranscribeAPIVersion), DefaultTranscribeAPIVersion)
 	cfg.ChatDeployment = strings.TrimSpace(cfg.ChatDeployment)
 	cfg.TranscribeDeployment = strings.TrimSpace(cfg.TranscribeDeployment)
+	cfg.LiveDeployment = strings.TrimSpace(cfg.LiveDeployment)
 	g.cfg = cfg
 	g.mu.Unlock()
 }
@@ -94,6 +109,19 @@ func (g *Gateway) Configured() bool {
 func (g *Gateway) TranscribeConfigured() bool {
 	c := g.config()
 	return c.APIKey != "" && c.Endpoint != "" && c.TranscribeAPIVersion != "" && c.TranscribeDeployment != ""
+}
+
+// RealtimeConfig is what streaming transcription needs: key, resource and
+// deployment. live reports that the deployment is the dedicated streaming
+// one (LiveDeployment), not the upload deployment standing in for it. The GA
+// realtime path takes no api-version.
+func (g *Gateway) RealtimeConfig() (apiKey, endpoint, deployment string, live, ok bool) {
+	c := g.config()
+	deployment, live = c.LiveDeployment, c.LiveDeployment != ""
+	if !live {
+		deployment = c.TranscribeDeployment
+	}
+	return c.APIKey, c.Endpoint, deployment, live, c.APIKey != "" && c.Endpoint != "" && deployment != ""
 }
 
 type chatMessage struct {

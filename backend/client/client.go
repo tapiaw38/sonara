@@ -67,6 +67,7 @@ type AzureConfig struct {
 	TranscribeAPIVersion string
 	ChatDeployment       string
 	TranscribeDeployment string
+	LiveDeployment       string
 }
 
 func New() *Client {
@@ -161,6 +162,7 @@ func (c *Client) SetAzureOpenAIConfig(cfg AzureConfig) error {
 		APIKey: key, Endpoint: cfg.Endpoint,
 		ChatAPIVersion: cfg.ChatAPIVersion, TranscribeAPIVersion: cfg.TranscribeAPIVersion,
 		ChatDeployment: cfg.ChatDeployment, TranscribeDeployment: cfg.TranscribeDeployment,
+		LiveDeployment: cfg.LiveDeployment,
 	})
 	return nil
 }

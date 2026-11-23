@@ -145,6 +145,7 @@ type AzureOpenAIForm struct {
 	TranscribeAPIVersion string `json:"transcribeApiVersion"`
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
+	LiveDeployment       string `json:"liveDeployment"`
 }
 
 // GetAzureOpenAISettings returns everything except the key itself, for
@@ -164,6 +165,7 @@ func (a *App) GetAzureOpenAISettings() (AzureOpenAIForm, error) {
 		HasKey: stored.APIKey != "", Endpoint: stored.Endpoint,
 		ChatAPIVersion: stored.ChatAPIVersion, TranscribeAPIVersion: stored.TranscribeAPIVersion,
 		ChatDeployment: stored.ChatDeployment, TranscribeDeployment: stored.TranscribeDeployment,
+		LiveDeployment: stored.LiveDeployment,
 	}, nil
 }
 
@@ -173,7 +175,7 @@ func (a *App) GetAzureOpenAISettings() (AzureOpenAIForm, error) {
 // versions on the same resource. An empty apiKey keeps whatever key is
 // already stored (so the rest can be edited without retyping it); clearing
 // the key itself is a separate, explicit action — pass clearKey=true.
-func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersion, chatDeployment, transcribeDeployment, apiKey string, clearKey bool) error {
+func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersion, chatDeployment, transcribeDeployment, liveDeployment, apiKey string, clearKey bool) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")
 	}
@@ -187,6 +189,7 @@ func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersio
 		TranscribeAPIVersion: strings.TrimSpace(transcribeAPIVersion),
 		ChatDeployment:       strings.TrimSpace(chatDeployment),
 		TranscribeDeployment: strings.TrimSpace(transcribeDeployment),
+		LiveDeployment:       strings.TrimSpace(liveDeployment),
 	}
 	switch {
 	case clearKey:
@@ -203,6 +206,7 @@ func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersio
 		APIKey: settings.APIKey, Endpoint: settings.Endpoint,
 		ChatAPIVersion: settings.ChatAPIVersion, TranscribeAPIVersion: settings.TranscribeAPIVersion,
 		ChatDeployment: settings.ChatDeployment, TranscribeDeployment: settings.TranscribeDeployment,
+		LiveDeployment: settings.LiveDeployment,
 	}); err != nil {
 		return err
 	}

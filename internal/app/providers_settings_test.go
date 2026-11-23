@@ -50,11 +50,11 @@ func TestSetProviderRejectsUnknownName(t *testing.T) {
 func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 	a, database := testMeetingApp(t)
 	a.backend = sonaraBackend.New()
-	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "secret-key", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "secret-key", false); err != nil {
 		t.Fatal(err)
 	}
 	// Edit only the endpoint, leaving apiKey blank: the stored key must survive.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "", false); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := database.AzureOpenAISettings()
@@ -62,12 +62,12 @@ func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 		t.Fatalf("stored = %+v, err %v", stored, err)
 	}
 	form, err := a.GetAzureOpenAISettings()
-	if err != nil || !form.HasKey || form.Endpoint != "https://y.openai.azure.com" {
+	if err != nil || !form.HasKey || form.Endpoint != "https://y.openai.azure.com" || form.LiveDeployment != "live" {
 		t.Fatalf("form = %+v, err %v (the key itself must never be echoed back)", form, err)
 	}
 
 	// clearKey explicitly removes it even with endpoint/deployments present.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "", true); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "", true); err != nil {
 		t.Fatal(err)
 	}
 	form, _ = a.GetAzureOpenAISettings()

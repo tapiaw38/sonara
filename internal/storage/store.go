@@ -183,6 +183,7 @@ type AzureOpenAISettings struct {
 	TranscribeAPIVersion string `json:"transcribeApiVersion"`
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
+	LiveDeployment       string `json:"liveDeployment"`
 }
 
 func (s *Store) AzureOpenAISettings() (AzureOpenAISettings, error) {

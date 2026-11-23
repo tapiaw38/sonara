@@ -46,6 +46,7 @@ const azureChatApiVersion = ref('')
 const azureTranscribeApiVersion = ref('')
 const azureChatDeployment = ref('')
 const azureTranscribeDeployment = ref('')
+const azureLiveDeployment = ref('')
 const azureKey = ref('')
 const azureHasKey = ref(false)
 const azureMessage = ref('')
@@ -71,6 +72,7 @@ async function loadAzureSettings() {
     azureTranscribeApiVersion.value = form.transcribeApiVersion
     azureChatDeployment.value = form.chatDeployment
     azureTranscribeDeployment.value = form.transcribeDeployment
+    azureLiveDeployment.value = form.liveDeployment
     azureHasKey.value = form.hasKey
   } catch {
     // Settings dialog just shows blank fields; not worth a user-facing error.
@@ -149,6 +151,7 @@ async function saveAzureConfig(clearKey: boolean) {
       azureTranscribeApiVersion.value,
       azureChatDeployment.value,
       azureTranscribeDeployment.value,
+      azureLiveDeployment.value,
       azureKey.value,
       clearKey,
     )
@@ -366,7 +369,7 @@ onMounted(async () => {
             v-model="azureChatApiVersion"
             autocomplete="off"
             spellcheck="false"
-            placeholder="2024-06-01"
+            placeholder="vacío = 2025-04-01-preview"
           />
           <label for="azure-transcribe-api-version">Versión de API (transcripción)</label
           ><input
@@ -374,7 +377,7 @@ onMounted(async () => {
             v-model="azureTranscribeApiVersion"
             autocomplete="off"
             spellcheck="false"
-            placeholder="puede ser distinta de la de chat"
+            placeholder="vacío = 2025-03-01-preview"
           />
           <label for="azure-chat-deployment">Deployment de chat/visión</label
           ><input
@@ -391,6 +394,14 @@ onMounted(async () => {
             autocomplete="off"
             spellcheck="false"
             placeholder="Nombre del deployment (opcional)"
+          />
+          <label for="azure-live-deployment">Deployment de transcripción en vivo</label
+          ><input
+            id="azure-live-deployment"
+            v-model="azureLiveDeployment"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="gpt-live-transcribe (vacío = el de transcripción)"
           />
           <label for="azure-key">API key</label
           ><input
@@ -505,11 +516,14 @@ onMounted(async () => {
           @change="setLiveMode(($event.target as HTMLSelectElement).value)"
         >
           <option value="batch">Por lotes (grabar, subir, transcribir)</option>
-          <option value="stream">En vivo (OpenAI, experimental): texto mientras hablan</option>
+          <option value="stream">
+            En vivo (OpenAI o Azure, experimental): texto mientras hablan
+          </option>
         </select>
         <small class="provider-hint"
-          >En vivo requiere OpenAI como proveedor de transcripción en vivo, usa grabación a 24 kHz
-          hacia OpenAI y no admite el modo manual.</small
+          >En vivo requiere OpenAI o Azure OpenAI como proveedor de transcripción en vivo (Azure usa
+          el deployment de transcripción, p. ej. gpt-4o-mini-transcribe), envía audio a 24 kHz y no
+          admite el modo manual.</small
         >
         <small v-if="providersMessage" role="status" class="provider-error">{{
           providersMessage
