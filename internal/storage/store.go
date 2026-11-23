@@ -129,13 +129,23 @@ func (s *Store) SetSetting(key, value string) error {
 type UIPreferences struct {
 	ResponsePanelHeight   int `json:"responsePanelHeight"`
 	TranscriptPanelHeight int `json:"transcriptPanelHeight"`
+	// ResponsePanelShare is the copilot response column's share of the
+	// width, in percent; 0 keeps the layout's default.
+	ResponsePanelShare int `json:"responsePanelShare"`
 }
 
 func normalizeUIPreferences(preferences UIPreferences) UIPreferences {
 	preferences.ResponsePanelHeight = clampPreference(preferences.ResponsePanelHeight, 280, 2400)
 	preferences.TranscriptPanelHeight = clampPreference(preferences.TranscriptPanelHeight, 180, 2400)
+	preferences.ResponsePanelShare = clampPreference(preferences.ResponsePanelShare, minPanelShare, maxPanelShare)
 	return preferences
 }
+
+// minPanelShare and maxPanelShare keep both copilot columns usable.
+const (
+	minPanelShare = 25
+	maxPanelShare = 80
+)
 
 func clampPreference(value, minValue, maxValue int) int {
 	if value == 0 {

@@ -17,6 +17,7 @@ import {
   StopListening,
 } from '../../wailsjs/go/app/App'
 import type { Message, TranscriptEntry } from '../types'
+import { useColumnSplit } from '../composables/useColumnSplit'
 
 const props = defineProps<{ assistantMode: string }>()
 const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
@@ -76,6 +77,8 @@ const captureRequestID = ref(0)
 const busy = ref(false)
 const responsePanelHeight = ref(0)
 const transcriptPanelHeight = ref(0)
+const responsePanelShare = ref(0)
+const columnSplit = useColumnSplit(responsePanelShare, () => void savePanelPreferences())
 const panelMaxHeight = Math.max(280, window.innerHeight - 100)
 const responsePanelEl = ref<HTMLElement | null>(null)
 const transcriptPanelEl = ref<HTMLElement | null>(null)
@@ -157,12 +160,14 @@ async function loadPanelPreferences() {
         preferences.responsePanelHeight || legacyPanelHeight('sonara-response-height'),
       transcriptPanelHeight:
         preferences.transcriptPanelHeight || legacyPanelHeight('sonara-transcript-height'),
+      responsePanelShare: preferences.responsePanelShare || 0,
     }
     const hasLegacyValues =
       (!preferences.responsePanelHeight && migrated.responsePanelHeight > 0) ||
       (!preferences.transcriptPanelHeight && migrated.transcriptPanelHeight > 0)
     responsePanelHeight.value = migrated.responsePanelHeight
     transcriptPanelHeight.value = migrated.transcriptPanelHeight
+    responsePanelShare.value = preferences.responsePanelShare || 0
     if (hasLegacyValues) {
       try {
         await SaveUIPreferencesToDB(migrated)
@@ -190,6 +195,7 @@ async function savePanelPreferences() {
   const preferences = {
     responsePanelHeight: responsePanelHeight.value,
     transcriptPanelHeight: transcriptPanelHeight.value,
+    responsePanelShare: responsePanelShare.value,
   }
   try {
     await SaveUIPreferencesToDB(preferences)
@@ -584,7 +590,11 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div class="panels">
+  <div
+    class="panels"
+    :class="{ 'column-resizing': columnSplit.resizing.value }"
+    :style="columnSplit.style.value"
+  >
     <section
       ref="transcriptPanelEl"
       class="panel transcript-panel"
@@ -772,5 +782,25 @@ onBeforeUnmount(() => {
         @keydown.down.prevent="nudgePanel('response', 16)"
       ></div>
     </section>
+    <div
+      class="column-resizer"
+      :class="{ resizing: columnSplit.resizing.value }"
+      role="separator"
+      aria-label="Cambiar ancho de los paneles"
+      aria-orientation="vertical"
+      tabindex="0"
+      :aria-valuenow="responsePanelShare || 64"
+      aria-valuemin="25"
+      aria-valuemax="80"
+      title="Arrastrá para cambiar el ancho; doble clic para restablecer"
+      @pointerdown="columnSplit.start"
+      @pointermove="columnSplit.move"
+      @pointerup="columnSplit.stop"
+      @pointercancel="columnSplit.stop"
+      @lostpointercapture="columnSplit.stop"
+      @dblclick="columnSplit.reset"
+      @keydown.left.prevent="columnSplit.nudge(-2)"
+      @keydown.right.prevent="columnSplit.nudge(2)"
+    ></div>
   </div>
 </template>

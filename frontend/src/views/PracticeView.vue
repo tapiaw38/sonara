@@ -9,6 +9,7 @@ import {
 
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { usePanelResize } from '../composables/usePanelResize'
+import { useColumnSplit } from '../composables/useColumnSplit'
 
 const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
 
@@ -28,6 +29,12 @@ const suggestionPanel = ref<HTMLElement | null>(null)
 const audio = ref<HTMLAudioElement | null>(null)
 const suggestionResize = usePanelResize('sonara-practice-suggestion-height')
 const questionResize = usePanelResize('sonara-practice-transcript-height')
+const practiceSplitKey = 'sonara-practice-split'
+const practiceSplit = ref(Number(localStorage.getItem(practiceSplitKey)) || 0)
+const columnSplit = useColumnSplit(practiceSplit, () => {
+  if (practiceSplit.value) localStorage.setItem(practiceSplitKey, String(practiceSplit.value))
+  else localStorage.removeItem(practiceSplitKey)
+})
 
 const phaseLabel: Record<Phase, string> = {
   idle: 'Listo para arrancar',
@@ -314,7 +321,11 @@ onBeforeUnmount(() => {
       <button v-if="started && active" class="end-button" @click="stop">Terminar práctica</button>
       <small v-if="message" class="meeting-message" role="alert">{{ message }}</small>
     </section>
-    <div class="panels practice-results">
+    <div
+      class="panels practice-results"
+      :class="{ 'column-resizing': columnSplit.resizing.value }"
+      :style="columnSplit.style.value"
+    >
       <section
         class="panel response-panel resizable-panel"
         :class="{ resizing: suggestionResize.resizing.value }"
@@ -377,6 +388,26 @@ onBeforeUnmount(() => {
           @keydown.down.prevent="questionResize.nudge($event, 16)"
         ></div>
       </section>
+      <div
+        class="column-resizer"
+        :class="{ resizing: columnSplit.resizing.value }"
+        role="separator"
+        aria-label="Cambiar ancho de los paneles"
+        aria-orientation="vertical"
+        tabindex="0"
+        :aria-valuenow="practiceSplit || 64"
+        aria-valuemin="25"
+        aria-valuemax="80"
+        title="Arrastrá para cambiar el ancho; doble clic para restablecer"
+        @pointerdown="columnSplit.start"
+        @pointermove="columnSplit.move"
+        @pointerup="columnSplit.stop"
+        @pointercancel="columnSplit.stop"
+        @lostpointercapture="columnSplit.stop"
+        @dblclick="columnSplit.reset"
+        @keydown.left.prevent="columnSplit.nudge(-2)"
+        @keydown.right.prevent="columnSplit.nudge(2)"
+      ></div>
     </div>
     <audio ref="audio" hidden></audio>
   </div>
