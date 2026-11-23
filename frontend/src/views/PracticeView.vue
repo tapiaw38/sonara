@@ -1,32 +1,26 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref } from 'vue'
-import {
-  PracticeListen,
-  SetPracticePlayback,
-  StartPractice,
-  StopPractice,
-} from '../../wailsjs/go/app/App'
-
+import { PracticeRealtime, StopPractice } from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { usePanelResize } from '../composables/usePanelResize'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
 const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
 
-type Phase =
-  'idle' | 'listening' | 'speaking' | 'capturing' | 'transcribing' | 'thinking' | 'synthesizing'
+type Phase = 'idle' | 'listening' | 'speaking' | 'capturing' | 'transcribing' | 'thinking'
 
 const started = ref(false)
+const voiceHold = ref(false)
 const active = ref(false)
 const busy = ref(false)
 const phase = ref<Phase>('idle')
 const message = ref('')
-type BilingualText = { turnId: number; en: string; es: string }
+type BilingualText = { turnId: number; en: string; es: string; interrupted?: boolean }
 const transcripts = ref<BilingualText[]>([])
 const suggestions = ref<BilingualText[]>([])
+const closedTurns = new Set<number>()
 const transcriptPanel = ref<HTMLElement | null>(null)
 const suggestionPanel = ref<HTMLElement | null>(null)
-const audio = ref<HTMLAudioElement | null>(null)
 const suggestionResize = usePanelResize('sonara-practice-suggestion-height')
 const questionResize = usePanelResize('sonara-practice-transcript-height')
 const practiceSplitKey = 'sonara-practice-split'
@@ -39,70 +33,19 @@ const columnSplit = useColumnSplit(practiceSplit, () => {
 const phaseLabel: Record<Phase, string> = {
   idle: 'Listo para arrancar',
   listening: 'Escuchando…',
-  speaking: 'Hablando… tocá el círculo para interrumpir',
+  speaking: 'Hablando… podés interrumpir con tu voz',
   capturing: 'Voz detectada…',
   transcribing: 'Transcribiendo…',
   thinking: 'Preparando respuesta…',
-  synthesizing: 'Preparando respuesta de voz…',
 }
 
-let finishPlayback: (() => void) | undefined
 let run = 0
-
-// Voice circle: how loud whoever is talking is right now, 0..1. The
-// interviewer's level is read from its own audio; the candidate's comes from
-// the microphone ("practice:level").
 const level = ref(0)
 let micLevel = 0
-let audioCtx: AudioContext | null = null
-let analyser: AnalyserNode | null = null
-let samples: Uint8Array<ArrayBuffer> | null = null
 let levelFrame = 0
 
-// Created on the click that starts the practice: a context made later could
-// stay suspended, and audio routed through it would be silent.
-function prepareAudioContext() {
-  if (audioCtx || typeof AudioContext === 'undefined') return
-  try {
-    audioCtx = new AudioContext()
-    void audioCtx.resume()
-  } catch {
-    audioCtx = null
-  }
-}
-
-function connectAnalyser(el: HTMLAudioElement) {
-  if (analyser || !audioCtx || audioCtx.state !== 'running') return
-  try {
-    const source = audioCtx.createMediaElementSource(el)
-    analyser = audioCtx.createAnalyser()
-    analyser.fftSize = 512
-    source.connect(analyser)
-    analyser.connect(audioCtx.destination)
-    samples = new Uint8Array(new ArrayBuffer(analyser.fftSize))
-  } catch {
-    analyser = null
-  }
-}
-
-function speakerLevel() {
-  if (!analyser || !samples) return 0
-  analyser.getByteTimeDomainData(samples)
-  let sum = 0
-  for (const value of samples) {
-    const centered = (value - 128) / 128
-    sum += centered * centered
-  }
-  return Math.sqrt(sum / samples.length)
-}
-
 function tickLevel() {
-  const raw =
-    phase.value === 'speaking'
-      ? speakerLevel() * 4
-      : phase.value === 'listening' || phase.value === 'capturing'
-        ? micLevel * 6
-        : 0
+  const raw = phase.value === 'listening' || phase.value === 'capturing' ? micLevel * 6 : 0
   const target = Math.min(1, raw)
   // Rise fast, fall slowly: the waves follow the voice without flickering.
   level.value += (target - level.value) * (target > level.value ? 0.45 : 0.1)
@@ -113,111 +56,46 @@ const offLevel = EventsOn('practice:level', (value: number) => {
   micLevel = value
 })
 
-function playAudio(bytes: number[] | string | null) {
-  return new Promise<void>((resolve) => {
-    const el = audio.value
-    if (!el || !bytes?.length) return resolve()
-    const wav =
-      typeof bytes === 'string'
-        ? Uint8Array.from(atob(bytes), (char) => char.charCodeAt(0))
-        : new Uint8Array(bytes)
-    const blob = new Blob([wav], { type: 'audio/wav' })
-    const url = URL.createObjectURL(blob)
-    const done = () => {
-      if (finishPlayback !== done) return
-      finishPlayback = undefined
-      el.onended = null
-      el.onerror = null
-      el.pause()
-      el.removeAttribute('src')
-      URL.revokeObjectURL(url)
-      resolve()
-    }
-    finishPlayback = done
-    el.onended = done
-    el.onerror = () => {
-      message.value = 'No se pudo reproducir el audio (códec no soportado?).'
-      done()
-    }
-    el.src = url
-    connectAnalyser(el)
-    el.play().catch((error) => {
-      if (finishPlayback !== done) return
-      message.value = `No se pudo reproducir el audio: ${error}`
-      done()
-    })
-  })
-}
-
-async function loop(current: number, replyAudio: number[] | string | null) {
-  while (active.value && current === run) {
-    // No audio (the start, or a noise that got no reply): listen right away.
-    const speaking = !!replyAudio?.length
-    phase.value = speaking ? 'speaking' : 'listening'
-    try {
-      if (speaking) await SetPracticePlayback(true)
-      if (!active.value || current !== run) break
-      const playback = playAudio(replyAudio).then(async () => {
-        if (current !== run) return
-        await SetPracticePlayback(false)
-        if (current === run && phase.value === 'speaking') phase.value = 'listening'
-      })
-      try {
-        const [turn] = await Promise.all([PracticeListen(), playback])
-        replyAudio = turn.Audio
-      } finally {
-        if (current === run) finishPlayback?.()
-      }
-    } catch (error) {
-      if (active.value && current === run) message.value = String(error)
-      break
-    }
-  }
-  if (current === run) {
-    active.value = false
-    phase.value = 'idle'
-  }
-}
-
 async function start() {
+  if (active.value || busy.value) return
   const current = ++run
-  busy.value = true
   message.value = ''
+  answerLive.value = ''
+  voiceHold.value = false
+  active.value = true
+  started.value = true
+  phase.value = 'listening'
   try {
-    const turn = await StartPractice()
-    if (current !== run) return
-    started.value = true
-    active.value = true
-    void loop(current, turn.Audio)
+    await PracticeRealtime()
   } catch (error) {
-    message.value = String(error)
+    if (current === run) message.value = String(error)
   } finally {
-    if (current === run) busy.value = false
-  }
-}
-
-// The circle starts the practice, and while the interviewer speaks it cuts
-// it off: the recording is already running, so the answer starts right away.
-function onCircle() {
-  if (active.value && phase.value === 'speaking') {
-    finishPlayback?.()
-    phase.value = 'listening'
-    return
-  }
-  if (!active.value) {
-    prepareAudioContext()
-    void start()
+    if (current === run) {
+      active.value = false
+      phase.value = 'idle'
+    }
   }
 }
 
 function stop() {
   run++
+  voiceHold.value = false
   active.value = false
-  busy.value = false
-  finishPlayback?.()
-  void StopPractice()
+  const current = run
+  busy.value = true
   phase.value = 'idle'
+  void StopPractice()
+    .catch((error) => {
+      if (current === run) message.value = String(error)
+    })
+    .finally(() => {
+      if (current === run) busy.value = false
+    })
 }
+
+const offVoiceHold = EventsOn('practice:voice-hold', (hold: boolean) => {
+  if (active.value) voiceHold.value = hold
+})
 
 // Your answer as it is being transcribed, kept on screen until the next one.
 const answerLive = ref('')
@@ -225,15 +103,13 @@ const answerLive = ref('')
 const offPhase = EventsOn('practice:phase', (next: Phase) => {
   if (!active.value) return
   phase.value = next
-  if (next === 'capturing') {
-    finishPlayback?.()
-    answerLive.value = ''
-  }
+  if (next === 'capturing') answerLive.value = ''
 })
 const offPartial = EventsOn('practice:partial', (text: string) => {
   if (active.value) answerLive.value = text
 })
 function updateHistory(entries: BilingualText[], panel: HTMLElement | null, text: BilingualText) {
+  if (closedTurns.has(text.turnId)) return
   const follow = panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72
   const index = entries.findIndex((entry) => entry.turnId === text.turnId)
   if (index < 0) entries.push(text)
@@ -250,21 +126,23 @@ const offSuggestion = EventsOn('practice:suggestion', (text: BilingualText) => {
   if (active.value || busy.value) updateHistory(suggestions.value, suggestionPanel.value, text)
 })
 
-// You kept talking while the reply was being prepared: that reply is dropped.
-const offDiscard = EventsOn('practice:discard', (turnId: number) => {
-  transcripts.value = transcripts.value.filter((entry) => entry.turnId !== turnId)
-  suggestions.value = suggestions.value.filter((entry) => entry.turnId !== turnId)
+const offInterrupted = EventsOn('practice:interrupted', (turnId: number) => {
+  closedTurns.add(turnId)
+  for (const entries of [transcripts.value, suggestions.value]) {
+    const entry = entries.find((item) => item.turnId === turnId)
+    if (entry) entry.interrupted = true
+  }
 })
 
 onBeforeUnmount(() => {
+  offVoiceHold()
   offQuestion()
   offSuggestion()
-  offDiscard()
+  offInterrupted()
   offPhase()
   offPartial()
   offLevel()
   cancelAnimationFrame(levelFrame)
-  void audioCtx?.close()
   if (active.value || busy.value) stop()
 })
 </script>
@@ -296,16 +174,9 @@ onBeforeUnmount(() => {
         class="voice-orb"
         :class="[phase, { started }]"
         :style="{ '--level': level.toFixed(3) }"
-        :disabled="busy || (active && phase !== 'speaking')"
-        :title="phase === 'speaking' ? 'Tocá para interrumpir y responder' : undefined"
-        :aria-label="
-          phase === 'speaking'
-            ? 'Interrumpir al entrevistador'
-            : started
-              ? phaseLabel[phase]
-              : 'Empezar práctica'
-        "
-        @click="onCircle"
+        :disabled="busy || active"
+        :aria-label="started ? phaseLabel[phase] : 'Empezar práctica'"
+        @click="start"
       >
         <span class="orb-rings" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="orb" aria-hidden="true">
@@ -318,6 +189,9 @@ onBeforeUnmount(() => {
       <p v-if="answerLive" class="answer-live" role="status">
         <span>Tu respuesta</span>{{ answerLive }}
       </p>
+      <small v-if="active && voiceHold" role="status">
+        Sigo escuchando. Decí «listo» o «I’m done» para ceder la palabra.
+      </small>
       <button v-if="started && active" class="end-button" @click="stop">Terminar práctica</button>
       <small v-if="message" class="meeting-message" role="alert">{{ message }}</small>
     </section>
@@ -337,6 +211,7 @@ onBeforeUnmount(() => {
             Tu respuesta sugerida aparecerá acá.
           </p>
           <div v-for="entry in suggestions" :key="entry.turnId" class="practice-entry">
+            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
             <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
             <p v-if="entry.es" class="transcript-translation" lang="es">
               <span>ES</span>{{ entry.es }}
@@ -367,6 +242,7 @@ onBeforeUnmount(() => {
         <div ref="transcriptPanel" class="transcript-body" role="log">
           <p v-if="!transcripts.length" class="transcript-text">Esperando al simulador…</p>
           <div v-for="entry in transcripts" :key="entry.turnId" class="practice-entry">
+            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
             <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
             <p v-if="entry.es" class="transcript-translation" lang="es">
               <span>ES</span>{{ entry.es }}
@@ -409,7 +285,6 @@ onBeforeUnmount(() => {
         @keydown.right.prevent="columnSplit.nudge(2)"
       ></div>
     </div>
-    <audio ref="audio" hidden></audio>
   </div>
 </template>
 
@@ -440,6 +315,10 @@ onBeforeUnmount(() => {
 }
 .practice-entry {
   flex-shrink: 0;
+}
+.practice-interrupted {
+  display: block;
+  opacity: 0.75;
 }
 .practice-entry + .practice-entry {
   margin-top: 14px;
@@ -543,8 +422,7 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 .voice-orb.thinking .blob,
-.voice-orb.transcribing .blob,
-.voice-orb.synthesizing .blob {
+.voice-orb.transcribing .blob {
   animation-duration: 2.4s;
 }
 .voice-orb.capturing .blob,

@@ -69,9 +69,8 @@ type App struct {
 	memoryPending     []storage.Message
 	memorySummarizing bool
 	// livePartial is the streamed text shown before its turn is final.
-	livePartial     string
-	practiceRec     *practiceRecording
-	practicePlaying atomic.Bool
+	livePartial string
+	practiceRec *practiceRecording
 	// lastOutputVoice: when the meeting audio last had voice (unix ms), so the
 	// microphone can drop the other person leaking through speakers.
 	lastOutputVoice   atomic.Int64

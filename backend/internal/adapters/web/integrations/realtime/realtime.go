@@ -107,12 +107,13 @@ func AzureEndpointFor(resource string) (string, error) {
 }
 
 type Session struct {
-	conn    *websocket.Conn
-	events  chan Event
-	writeMu sync.Mutex
-	rs      resampler
-	closing sync.Once
-	cancel  context.CancelFunc
+	conn         *websocket.Conn
+	events       chan Event
+	writeMu      sync.Mutex
+	writeTimeout time.Duration
+	rs           resampler
+	closing      sync.Once
+	cancel       context.CancelFunc
 }
 
 // Dial connects, configures the transcription session and starts reading
@@ -209,6 +210,11 @@ func sessionUpdate(opts Options) map[string]any {
 func (s *Session) send(v any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.writeTimeout > 0 {
+		if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
+			return err
+		}
+	}
 	return s.conn.WriteJSON(v)
 }
 

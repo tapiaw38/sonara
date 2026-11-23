@@ -102,8 +102,8 @@ export function OpenSession(arg1) {
   return window['go']['app']['App']['OpenSession'](arg1);
 }
 
-export function PracticeListen() {
-  return window['go']['app']['App']['PracticeListen']();
+export function PracticeRealtime() {
+  return window['go']['app']['App']['PracticeRealtime']();
 }
 
 export function ProviderStatus() {
@@ -198,10 +198,6 @@ export function SetOpenAIAPIKey(arg1) {
   return window['go']['app']['App']['SetOpenAIAPIKey'](arg1);
 }
 
-export function SetPracticePlayback(arg1) {
-  return window['go']['app']['App']['SetPracticePlayback'](arg1);
-}
-
 export function SetTextProvider(arg1) {
   return window['go']['app']['App']['SetTextProvider'](arg1);
 }
@@ -216,10 +212,6 @@ export function StartListening() {
 
 export function StartMeetingTranscript() {
   return window['go']['app']['App']['StartMeetingTranscript']();
-}
-
-export function StartPractice() {
-  return window['go']['app']['App']['StartPractice']();
 }
 
 export function StopListening() {

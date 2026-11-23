@@ -174,22 +174,6 @@ export namespace app {
 		    return a;
 		}
 	}
-	export class PracticeTurn {
-	    Text: string;
-	    ReplyText: string;
-	    Audio: number[];
-	
-	    static createFrom(source: any = {}) {
-	        return new PracticeTurn(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Text = source["Text"];
-	        this.ReplyText = source["ReplyText"];
-	        this.Audio = source["Audio"];
-	    }
-	}
 	export class ProviderStatus {
 	    openai: boolean;
 	    deepseek: boolean;

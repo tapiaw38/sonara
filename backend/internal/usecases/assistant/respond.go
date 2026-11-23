@@ -52,7 +52,7 @@ func (u *respondUsecase) plan(input RespondInput) (request domain.Request, model
 	prompt := input.Message
 	if context := strings.TrimSpace(input.Context); context != "" {
 		label := "Context from this Sonara session (use only when relevant)"
-		if mode == "practice" || mode == "practice-turn" {
+		if mode == "practice" || mode == "practice-turn" || mode == "practice-suggestion" {
 			label = "Interview context and conversation so far (use it)"
 		}
 		prompt = label + ":\n" + context + "\n\nLatest request:\n" + input.Message
@@ -84,16 +84,24 @@ func (u *respondUsecase) ExecuteStream(ctx context.Context, input RespondInput, 
 
 func normalizeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "summary", "memory":
+	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "practice-suggestion", "summary", "memory":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return "interview"
 	}
 }
 
+const practiceSuggestionInstructions = "Escribí en primera persona y en lenguaje hablado. Empezá con una respuesta directa y desarrollala en dos a cuatro frases cuando haga falta. " +
+	"Para una experiencia, usá un caso del perfil o de lo que contó el candidato, con su aporte concreto y el resultado conocido. Para una pregunta técnica, explicá un enfoque y por qué sirve. " +
+	"No inventes experiencia, cargos, métricas ni resultados. Si falta un dato esencial, dejá un marcador específico y breve entre corchetes."
+
 func chooseAgent(message, mode string) (string, string, string) {
+	if mode == "practice-suggestion" {
+		return "interviewer", "fast", "Redactá únicamente lo que el candidato podría decir en respuesta a la última pregunta del entrevistador. Respetá el idioma configurado indicado al comienzo de la solicitud. " +
+			practiceSuggestionInstructions
+	}
 	if mode == "practice" || mode == "practice-turn" {
-		instructions := "Sos quien entrevista en una conversación hablada. Leé tu pregunta anterior y la respuesta del candidato, junto con el contexto de la entrevista. Respondé con una reacción breve y natural a lo que dijo (sin elogios vacíos) y una sola pregunta bien elaborada que profundice en algo concreto de su respuesta o avance hacia el objetivo de la entrevista; en total dos o tres frases fáciles de decir en voz alta. Variá cómo enlazás las preguntas: a veces alcanza con preguntar directamente. Si te piden aclarar o repetir, hacelo antes de avanzar. Usá lenguaje cotidiano, frases breves y el idioma del candidato. Sin listas ni marcas de estilo." +
+		instructions := "Sos quien entrevista en una conversación hablada. Leé tu pregunta anterior y la respuesta del candidato, junto con el contexto de la entrevista. Respondé con una reacción breve y natural a lo que dijo (sin elogios vacíos) y una sola pregunta bien elaborada que profundice en algo concreto de su respuesta o avance hacia el objetivo de la entrevista; en total dos o tres frases fáciles de decir en voz alta. Variá cómo enlazás las preguntas: a veces alcanza con preguntar directamente. Si te piden aclarar o repetir, hacelo antes de avanzar. Usá lenguaje cotidiano y frases breves. Sin listas ni marcas de estilo." +
 			" Si el contexto trae el perfil de la entrevista, actuá como alguien de esa empresa entrevistando para ese puesto, y elegí preguntas reales de ese tipo:" +
 			" técnica, sobre el stack y los problemas del puesto, pidiendo detalle o un ejemplo concreto; conductual, sobre situaciones vividas, repreguntando por su rol, decisiones y resultado; diseño de sistemas, con un escenario que se va complicando (escala, fallas, trade-offs); producto y negocio, con casos, métricas y priorización; general, una mezcla." +
 			" Ajustá la dificultad al nivel del puesto y apuntá al objetivo indicado. Usá la experiencia del candidato para preguntar por lo que dice haber hecho. No repitas temas ya cubiertos y subí la exigencia de a poco." +
@@ -101,10 +109,10 @@ func chooseAgent(message, mode string) (string, string, string) {
 			" Si todavía no hiciste ninguna pregunta, la conversación recién empieza y el candidato habla primero: respondé a lo que dijo, presentate en una frase como quien entrevista (por la empresa y el puesto del perfil, si los hay) y hacé la pregunta inicial. Presentate con un nombre propio, nunca con un marcador entre corchetes." +
 			" En el contexto, las líneas \"me\" son respuestas que el candidato ya dio y las \"interviewer\" tus preguntas anteriores; el resumen recoge lo más viejo. Usalas para no repetir preguntas y para repreguntar sobre lo que dijo."
 		if mode == "practice-turn" {
-			instructions += " Escribí primero solo lo que diría el entrevistador. Luego escribí [[SUGGESTION]] en una línea aparte y redactá debajo lo que el candidato podría contestar a esa misma pregunta. Usá el mismo idioma en ambas partes." +
-				" Empezá la sugerencia con una respuesta directa y desarrollala en dos a cuatro frases naturales cuando haga falta. Si preguntan por una experiencia, elegí un caso del perfil o de lo que la persona contó y conectá en pocas palabras el contexto, su aporte concreto y el resultado conocido." +
-				" Si la pregunta es técnica, explicá un enfoque concreto y por qué sirve, con un ejemplo o una limitación pertinente. Si preguntan por una motivación, vinculá un interés concreto del candidato con el puesto." +
-				" Escribí en primera persona, con lenguaje hablado y sin frases hechas. No inventes experiencia, cargos, métricas ni resultados. Si falta un dato esencial que solo el candidato puede aportar, dejá un marcador específico y breve entre corchetes. Si se puede responder con un enfoque hipotético útil, usalo. Entregá solo la respuesta lista para decir, sin títulos ni explicaciones."
+			instructions += " Respetá el idioma configurado indicado al comienzo de la solicitud, aunque el candidato o el historial usen otro idioma. Entregá ambas partes en este orden: lo que diría el entrevistador, el separador literal [[SUGGESTION]] en una línea aparte, y debajo la respuesta que podría decir el candidato a esa pregunta. " +
+				"Usá el mismo idioma en ambas partes. Para la parte del candidato, seguí estas instrucciones: " + practiceSuggestionInstructions
+		} else {
+			instructions += " Usá el idioma del candidato."
 		}
 		return "interviewer", "fast", instructions
 	}
