@@ -1329,8 +1329,45 @@ button:focus-visible,
   color: #78a99c;
 }
 .panels {
-  grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.72fr);
-  gap: 14px;
+  --split-min-b: 240px;
+  grid-template-columns:
+    minmax(0, var(--split-a, 1.28fr)) 14px
+    minmax(var(--split-min-b), var(--split-b, 0.72fr));
+  gap: 14px 0;
+}
+/* The handle is the middle grid track, so it always sits on the real edge
+   between the panels, even when the right one is held at its minimum. */
+.column-resizer {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  align-self: stretch;
+  cursor: col-resize;
+  touch-action: none;
+}
+.column-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 48px;
+  border-radius: 4px;
+  background: #4a505a;
+  transform: translate(-50%, -50%);
+  transition:
+    background 0.15s ease,
+    height 0.15s ease;
+}
+.column-resizer:hover::after,
+.column-resizer:focus-visible::after,
+.column-resizer.resizing::after {
+  height: 72px;
+  background: #48b494;
+}
+.column-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .response-panel {
   grid-column: 1;
@@ -1340,7 +1377,7 @@ button:focus-visible,
   background: rgb(17 19 24 / calc(0.96 * var(--surface-opacity)));
 }
 .transcript-panel {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   height: clamp(300px, calc(100vh - 205px), 720px);
   min-height: 0;
@@ -1600,7 +1637,10 @@ button:focus-visible,
   }
 }
 .shell.compact .panels {
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.55fr);
+  --split-min-b: 190px;
+  grid-template-columns:
+    minmax(0, var(--split-a, 1fr)) 14px
+    minmax(var(--split-min-b), var(--split-b, 0.55fr));
 }
 .shell.compact .response-panel {
   height: clamp(300px, calc(100vh - 125px), 600px);
@@ -2092,4 +2132,20 @@ button:focus-visible,
 }
 .product-nav .mode-menu button.current strong {
   color: #9fe7cf;
+}
+
+/* Narrow screens stack the panels; last so it beats the column placement. */
+@media (max-width: 760px) {
+  .panels,
+  .shell.compact .panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panels > .response-panel,
+  .panels > .transcript-panel {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .column-resizer {
+    display: none;
+  }
 }

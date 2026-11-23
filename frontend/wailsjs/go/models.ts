@@ -383,6 +383,7 @@ export namespace storage {
 	export class UIPreferences {
 	    responsePanelHeight: number;
 	    transcriptPanelHeight: number;
+	    responsePanelShare: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new UIPreferences(source);
@@ -392,6 +393,7 @@ export namespace storage {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.responsePanelHeight = source["responsePanelHeight"];
 	        this.transcriptPanelHeight = source["transcriptPanelHeight"];
+	        this.responsePanelShare = source["responsePanelShare"];
 	    }
 	}
 

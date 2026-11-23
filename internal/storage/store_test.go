@@ -167,3 +167,18 @@ func TestSessionNotesKeepFullLengthInContext(t *testing.T) {
 		t.Fatalf("notes truncated to %d characters", utf8.RuneCountInString(got))
 	}
 }
+
+// The copilot column split survives a restart and is kept within bounds.
+func TestUIPreferencesKeepColumnShare(t *testing.T) {
+	database := openTestStore(t)
+	if err := database.SaveUIPreferences(UIPreferences{ResponsePanelShare: 55}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := database.UIPreferences(); got.ResponsePanelShare != 55 {
+		t.Fatalf("share = %d, want 55", got.ResponsePanelShare)
+	}
+	database.SaveUIPreferences(UIPreferences{ResponsePanelShare: 99})
+	if got, _ := database.UIPreferences(); got.ResponsePanelShare != maxPanelShare {
+		t.Fatalf("share = %d, want the %d cap", got.ResponsePanelShare, maxPanelShare)
+	}
+}
