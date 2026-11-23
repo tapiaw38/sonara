@@ -9,6 +9,7 @@ import (
 
 	"sonara/internal/audio"
 	"sonara/internal/meeting"
+	"sonara/internal/pipewire"
 	"sonara/internal/storage"
 )
 
@@ -17,14 +18,23 @@ import (
 // conversation memory as "me", so suggestions build on, and do not
 // contradict, what was already answered.
 //
-// Speakers make the microphone hear the other person too: a block during
-// most of which the meeting audio also had voice is dropped. Overlap is
-// counted frame by frame while the block is recorded, so the other person
-// answering right after does not erase what the user said. With headphones
-// nothing is dropped.
+// Speakers make the microphone hear the other person too. The microphone goes
+// through PipeWire's echo canceller (the one Practice uses), which removes
+// what the speakers play, so the user's words are kept even while the other
+// person is talking. Without it, a block during most of which the meeting
+// audio also had voice is dropped as echo; overlap is counted frame by frame,
+// so the other person answering right after does not erase what the user
+// said. That fallback alone lost every word said over someone else.
 
 // micEchoShare: above this share of the block with meeting voice, it is echo.
 const micEchoShare = 0.3
+
+// keepMicBlock decides whether a voiced microphone block is the user. With
+// echo cancellation the speakers are already gone from it; without, a block
+// mostly overlapping meeting voice is taken for echo.
+func keepMicBlock(meetingVoiceShare float64, echoCancelled bool) bool {
+	return echoCancelled || meetingVoiceShare <= micEchoShare
+}
 
 type micBlock struct {
 	block   meeting.Block
@@ -35,6 +45,7 @@ func (a *App) listenMicForContext(ctx context.Context) {
 	blocks := make(chan micBlock, 8)
 	go a.rememberMicBlocks(ctx, blocks)
 	defer close(blocks)
+	defer a.echoCanceller.Stop()
 	for ctx.Err() == nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		target, err := a.practiceMicrophone(probeCtx)
@@ -54,6 +65,8 @@ func (a *App) listenMicForContext(ctx context.Context) {
 }
 
 func (a *App) captureMicForContext(ctx context.Context, target string, blocks chan<- micBlock) {
+	target = a.echoCanceller.Source(ctx, target)
+	echoCancelled := target == pipewire.EchoCancelSource
 	command := exec.CommandContext(ctx, "pw-record", "--target", target, "--latency", "40ms", "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
 	stdout, err := command.StdoutPipe()
 	if err != nil || command.Start() != nil {
@@ -82,7 +95,7 @@ func (a *App) captureMicForContext(ctx context.Context, target string, blocks ch
 			continue
 		}
 		frames := (block.EndMS - block.StartMS) / meeting.FrameMS
-		if share := float64(echoFrames) / float64(max(frames, 1)); share > micEchoShare {
+		if share := float64(echoFrames) / float64(max(frames, 1)); !keepMicBlock(share, echoCancelled) {
 			logf("copilot mic: dropped %.1fs block, the meeting had voice %.0f%% of it", float64(frames)/10, share*100)
 			continue
 		}
