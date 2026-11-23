@@ -512,7 +512,7 @@ watch(
         <p class="workspace-subtitle">Quién habla y qué dijo, línea por línea.</p>
       </div>
     </div>
-    <div class="meeting-controls panel">
+    <div class="meeting-controls" :class="{ 'setup-open': setupOpen }">
       <div class="meeting-toolbar">
         <button
           v-if="!recording && !processing"
@@ -800,10 +800,19 @@ watch(
   display: grid;
   gap: 12px;
 }
+.meeting > .content-header {
+  margin-bottom: 0;
+}
 .meeting-controls {
-  min-height: 0;
-  padding: 10px 12px;
+  padding: 6px 10px;
   display: grid;
+  gap: 6px;
+  border: 1px solid rgb(41 42 53 / var(--surface-opacity));
+  border-radius: 9px;
+  background: rgb(19 20 27 / calc(0.9 * var(--surface-opacity)));
+}
+.meeting-controls.setup-open {
+  padding: 10px 12px;
   gap: 8px;
 }
 .meeting-toolbar {
