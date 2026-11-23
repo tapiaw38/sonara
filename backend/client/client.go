@@ -124,7 +124,7 @@ func (c *Client) TranslateStream(ctx context.Context, text string, onDelta func(
 
 // TranslateTo returns a translation into Spanish or English.
 func (c *Client) TranslateTo(ctx context.Context, text, language string) (string, error) {
-	return c.translate.ExecuteTo(ctx, text, language, func(string) {})
+	return c.translate.ExecuteTo(ctx, text, language, nil)
 }
 
 // Close stops the local Whisper server if Sonara started it.

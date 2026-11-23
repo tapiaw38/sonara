@@ -46,7 +46,7 @@ func (u *translateUsecase) ExecuteTo(ctx context.Context, text, language string,
 		return "", nil
 	}
 	request := domain.Request{Task: domain.TaskChat, Prompt: "Traducí al " + target + ":\n\n" + text}
-	if streamer, ok := u.gateway.(streamResponder); ok {
+	if streamer, ok := u.gateway.(streamResponder); ok && onDelta != nil {
 		return streamer.RespondStream(ctx, request, u.cfg.FastModel, translateInstructions, onDelta)
 	}
 	out, err := u.gateway.Respond(ctx, request, u.cfg.FastModel, translateInstructions)
