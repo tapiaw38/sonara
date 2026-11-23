@@ -282,7 +282,10 @@ func (a *App) listenMeetAudio(ctx context.Context) {
 	defer stopCapture()
 	command := exec.CommandContext(captureCtx, "pw-record", "--target", target, "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-")
 	stdout, err := command.StdoutPipe()
-	if err != nil || command.Start() != nil {
+	if err == nil {
+		err = command.Start()
+	}
+	if err != nil {
 		logf("pw-record could not attach to target %s: %v", target, err)
 		a.setListeningFailure("No se pudo conectar al audio de la reunión")
 		return

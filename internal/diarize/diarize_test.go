@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+
+	"sonara/internal/audio"
 )
 
 func TestOverlapSpeakerPicksMostTimeInWindow(t *testing.T) {
@@ -45,8 +48,9 @@ func TestStableSpeakerKeysOrderedByFirstAppearance(t *testing.T) {
 
 func TestDiarizeHappyPath(t *testing.T) {
 	d := fakeGemini(t, []Span{{StartMS: 0, EndMS: 1000, Speaker: "Speaker 1"}}, http.StatusOK, "")
-	spans, err := d.Diarize(context.Background(), []byte("RIFF....WAVEfmt "), 0)
-	if err != nil || len(spans) != 1 || spans[0].Speaker != "Speaker 1" {
+	spans, err := d.Diarize(context.Background(), audio.WAV(make([]byte, audio.SampleRate)), 0)
+	want := []Span{{StartMS: 0, EndMS: 500, Speaker: "Speaker 1"}}
+	if err != nil || !slices.Equal(spans, want) {
 		t.Fatalf("spans = %+v, err = %v", spans, err)
 	}
 }
@@ -131,6 +135,47 @@ func TestIsEcho(t *testing.T) {
 	}
 }
 
+func TestIsEchoCountsOverlapsOnce(t *testing.T) {
+	spans := []EchoSpan{{StartMS: 100, EndMS: 400}, {StartMS: 0, EndMS: 350}}
+	if IsEcho(spans, 0, 1000) {
+		t.Fatal("overlapping spans cover only 400 of 1000 ms")
+	}
+}
+
+func TestCleanSpans(t *testing.T) {
+	spans := []Span{
+		{StartMS: -1, EndMS: 50, Speaker: "A"},
+		{StartMS: 0, EndMS: -1, Speaker: "A"},
+		{StartMS: 50, EndMS: 50, Speaker: "A"},
+		{StartMS: 60, EndMS: 50, Speaker: "A"},
+		{StartMS: 0, EndMS: 50},
+		{StartMS: 0, EndMS: 50, Speaker: " \t"},
+		{StartMS: 100, EndMS: 150, Speaker: "A"},
+		{StartMS: 0, EndMS: 40, Speaker: "A"},
+		{StartMS: 40, EndMS: 150, Speaker: "B"},
+	}
+	want := []Span{{StartMS: 0, EndMS: 40, Speaker: "A"}, {StartMS: 40, EndMS: 100, Speaker: "B"}}
+	if got := cleanSpans(spans, 100); !slices.Equal(got, want) {
+		t.Fatalf("cleanSpans = %+v, want %+v", got, want)
+	}
+}
+
+func TestCleanEchoSpans(t *testing.T) {
+	spans := []EchoSpan{
+		{StartMS: -1, EndMS: 50},
+		{StartMS: 0, EndMS: -1},
+		{StartMS: 50, EndMS: 50},
+		{StartMS: 60, EndMS: 50},
+		{StartMS: 100, EndMS: 150},
+		{StartMS: 0, EndMS: 40},
+		{StartMS: 40, EndMS: 150},
+	}
+	want := []EchoSpan{{StartMS: 0, EndMS: 40}, {StartMS: 40, EndMS: 100}}
+	if got := cleanEchoSpans(spans, 100); !slices.Equal(got, want) {
+		t.Fatalf("cleanEchoSpans = %+v, want %+v", got, want)
+	}
+}
+
 // fakeGeminiEcho mirrors fakeGemini (diarize_test.go) but answers the
 // /v1beta/interactions call with echo spans instead of speaker spans; it
 // reuses the exact same fake upload endpoints.
@@ -142,8 +187,9 @@ func fakeGeminiEcho(t *testing.T, spans []EchoSpan, status int) *Service {
 
 func TestDetectEchoHappyPath(t *testing.T) {
 	d := fakeGeminiEcho(t, []EchoSpan{{StartMS: 1000, EndMS: 2000}}, http.StatusOK)
-	spans, err := d.DetectEcho(context.Background(), []byte("sample"), []byte("meeting"))
-	if err != nil || len(spans) != 1 || spans[0].StartMS != 1000 {
+	spans, err := d.DetectEcho(context.Background(), []byte("sample"), audio.WAV(make([]byte, 3*audio.SampleRate)))
+	want := []EchoSpan{{StartMS: 1000, EndMS: 1500}}
+	if err != nil || !slices.Equal(spans, want) {
 		t.Fatalf("spans = %+v, err = %v", spans, err)
 	}
 }

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -56,6 +58,7 @@ type App struct {
 	audioLevel          float64
 	audioLanguage       string
 	translation         string
+	overlayMu           sync.Mutex // serialize compositor commands across toggles
 	floatedForOverlay   bool
 	// Meeting transcription state, independent of the copilot's listening.
 	meeting       *meetingRun
@@ -110,9 +113,13 @@ func NewApp() *App {
 }
 
 // newSessionID is sortable and unique per session: the timestamp orders the
-// list and the nanoseconds keep two sessions started in the same second apart.
+// list, and the random suffix keeps two sessions created in the same clock
+// tick apart.
 func newSessionID() string {
-	return time.Now().UTC().Format("20060102T150405.000000000")
+	timestamp := time.Now().UTC().Format("20060102T150405.000000000")
+	var suffix [3]byte
+	rand.Read(suffix[:])
+	return timestamp + "-" + hex.EncodeToString(suffix[:])
 }
 
 // startup is called when the app starts. The context is saved

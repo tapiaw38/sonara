@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"sonara/internal/audio"
 	"sonara/internal/diarize"
 	"sonara/internal/storage"
 )
@@ -38,6 +40,21 @@ func TestDiarizePCMAccumulationCapsAndStaysAligned(t *testing.T) {
 	capped.appendDiarizePCM(storage.TrackOutput, make([]byte, 100)) // now fully at the cap: nothing more fits
 	if len(capped.diarizePCM) != beforeSecondCall {
 		t.Errorf("a full buffer grew further: %d -> %d", beforeSecondCall, len(capped.diarizePCM))
+	}
+}
+
+func TestDiarizeSilenceCapsLargeGap(t *testing.T) {
+	pcm := make([]byte, diarizeMaxBytes)
+	offset := len(pcm) - 10
+	pcm[offset-1] = 42
+	pcm[offset] = 42
+	run := &meetingRun{diarizePCM: pcm[:offset]}
+	run.padDiarizeSilence(storage.TrackOutput, math.MaxInt64)
+	if len(run.diarizePCM) != len(pcm) || !run.diarizeCapped {
+		t.Fatalf("padding produced %d bytes, capped = %t", len(run.diarizePCM), run.diarizeCapped)
+	}
+	if run.diarizePCM[offset-1] != 42 || run.diarizePCM[offset] != 0 {
+		t.Fatal("padding must preserve recorded audio and append silence")
 	}
 }
 
@@ -106,7 +123,7 @@ func TestRunDiarizationLabelsStoredSegments(t *testing.T) {
 		{StartMS: 2000, EndMS: 6000, Speaker: "Speaker 2"}, // appears second but speaks first
 		{StartMS: 6000, EndMS: 10000, Speaker: "Speaker 1"},
 	}, http.StatusOK, "")
-	run.diarizePCM = make([]byte, 1000) // non-empty: there is something to diarize
+	run.diarizePCM = make([]byte, 10*audio.SampleRate*2)
 
 	var events []MeetingSegmentEvent
 	a.emitHook = func(_ string, data any) {
@@ -212,7 +229,7 @@ func TestRunDiarizationLeavesANoteForTheUI(t *testing.T) {
 
 	a.diarizer = fakeGemini(t, []diarize.Span{{StartMS: 0, EndMS: 4000, Speaker: "A"}}, http.StatusOK, "")
 	a.diarizer.CloudPeriod = 20 * time.Millisecond
-	run.diarizePCM = []byte{1, 2, 3}
+	run.diarizePCM = make([]byte, 4*audio.SampleRate*2)
 	a.runDiarization(run)
 	if note := a.MeetingTranscriptStatus().DiarizeNote; note != "Participantes detectados: 1." {
 		t.Fatalf("success note = %q", note)

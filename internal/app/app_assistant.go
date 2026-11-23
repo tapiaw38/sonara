@@ -133,14 +133,20 @@ func (a *App) CaptureScreen() (CaptureStatus, error) {
 	// upload that: the assistant then answers that the image arrived empty. Writing
 	// beside it and renaming is atomic, so only the finished frame is ever
 	// visible under the real name.
-	pending := path + ".pending"
+	file, err := os.CreateTemp(filepath.Dir(path), "capture-*.png.pending")
+	if err != nil {
+		return CaptureStatus{}, err
+	}
+	pending := file.Name()
+	defer os.Remove(pending)
+	if err := file.Close(); err != nil {
+		return CaptureStatus{}, err
+	}
 	if output, err := exec.Command("grim", pending).CombinedOutput(); err != nil {
-		os.Remove(pending)
 		logf("grim failed: %v: %s", err, output)
 		return CaptureStatus{}, fmt.Errorf("grim failed: %w: %s", err, output)
 	}
 	if err := os.Rename(pending, path); err != nil {
-		os.Remove(pending)
 		return CaptureStatus{}, err
 	}
 	return a.LastCapture()

@@ -102,6 +102,9 @@ func (e *EchoCanceller) startLocked(mic string) error {
 	// Absolute path: pipewire -c resolves a relative one against its own
 	// config directories and fails silently.
 	path := filepath.Join(dir, "sonara", "practice-aec.conf")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, []byte(fmt.Sprintf(echoCancelConfig, mic)), 0o600); err != nil {
 		return err
 	}

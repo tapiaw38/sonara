@@ -45,18 +45,18 @@ func (r *meetingRun) appendDiarizePCM(track string, frame []byte) {
 	r.diarizeMu.Lock()
 	defer r.diarizeMu.Unlock()
 	buffer := r.diarizeBuffer(track)
-	room := diarizeMaxBytes - int64(len(*buffer))
-	if room < int64(len(frame)) {
-		if room < 0 {
-			room = 0
-		}
-		frame = frame[:room]
-		if !r.diarizeCapped {
-			r.diarizeCapped = true
-			logDedup("diarize-cap", "meeting output exceeded %s; later audio will not be diarized", diarizeMaxDuration)
-		}
+	size := r.limitDiarizeBytes(len(*buffer), int64(len(frame)))
+	*buffer = append(*buffer, frame[:size]...)
+}
+
+// Caller holds diarizeMu so the available room cannot change before append.
+func (r *meetingRun) limitDiarizeBytes(used int, requested int64) int64 {
+	room := max(0, diarizeMaxBytes-int64(used))
+	if requested > room && !r.diarizeCapped {
+		r.diarizeCapped = true
+		logDedup("diarize-cap", "meeting output exceeded %s; later audio will not be diarized", diarizeMaxDuration)
 	}
-	*buffer = append(*buffer, frame...)
+	return min(requested, room)
 }
 
 // releaseDiarizePCM frees the accumulated meeting_output audio. Called once
@@ -75,8 +75,13 @@ func (r *meetingRun) padDiarizeSilence(track string, durationMS int64) {
 	if durationMS <= 0 {
 		return
 	}
-	silence := make([]byte, durationMS*audio.SampleRate*2/1000)
-	r.appendDiarizePCM(track, silence)
+	r.diarizeMu.Lock()
+	defer r.diarizeMu.Unlock()
+	buffer := r.diarizeBuffer(track)
+	// One extra millisecond preserves the cap diagnostic without multiplying an unbounded gap.
+	durationMS = min(durationMS, diarizeMaxDuration.Milliseconds()+1)
+	size := r.limitDiarizeBytes(len(*buffer), durationMS*audio.SampleRate*2/1000)
+	*buffer = append(*buffer, make([]byte, size)...)
 }
 
 // runDiarization is the final pass: best-effort, and the only place that reads

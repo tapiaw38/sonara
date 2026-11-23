@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -32,6 +33,8 @@ const (
 	// enough evidence, and only when one name clearly dominates.
 	minOverlapMS = 2000
 	minShare     = 0.6
+	maxNames     = 50
+	maxSpans     = 5000
 )
 
 // Span is one stretch of time Meet showed name speaking.
@@ -46,6 +49,7 @@ type Tracker struct {
 	mu        sync.Mutex
 	sessionID string
 	spans     []Span
+	names     []string
 }
 
 // Add records that name was speaking at elapsedMS, extending their last span
@@ -54,19 +58,23 @@ func (t *Tracker) Add(sessionID, name string, elapsedMS int64) (isNew bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.sessionID != sessionID {
-		t.sessionID, t.spans = sessionID, nil
+		t.sessionID, t.spans, t.names = sessionID, nil, nil
 	}
 	at := max(elapsedMS-captionLagMS, 0)
 	for i := len(t.spans) - 1; i >= 0; i-- {
 		if t.spans[i].Name == name {
 			if at-t.spans[i].End <= spanGapMS {
 				t.spans[i].End = max(t.spans[i].End, at)
-			} else {
+			} else if len(t.spans) < maxSpans { // bounded: a runaway sender cannot grow it forever
 				t.spans = append(t.spans, Span{Name: name, Start: at, End: at + 300})
 			}
 			return false
 		}
 	}
+	if len(t.names) >= maxNames || len(t.spans) >= maxSpans {
+		return false
+	}
+	t.names = append(t.names, name)
 	t.spans = append(t.spans, Span{Name: name, Start: at, End: at + 300})
 	return true
 }
@@ -78,13 +86,7 @@ func (t *Tracker) Names(sessionID string) []string {
 	if t.sessionID != sessionID {
 		return nil
 	}
-	var out []string
-	for _, span := range t.spans {
-		if !slices.Contains(out, span.Name) {
-			out = append(out, span.Name)
-		}
-	}
-	return out
+	return slices.Clone(t.names)
 }
 
 // Snapshot copies this meeting's spans.
@@ -140,12 +142,17 @@ type Recorder interface {
 }
 
 // Handler receives {"name": "...", "ts": <epoch ms>} from the extension's
-// service worker into tracker. Only extension origins are accepted, so a web
-// page open in the browser cannot inject names. onNewName runs the first time
-// a name shows up in a meeting.
+// service worker into tracker. SONARA_MEET_EXTENSION_ID pins the origin when
+// set. Otherwise, any extension origin works because unpacked IDs depend on
+// the install path. Events dropped at the tracker's limits still get 204.
+// onNewName runs the first time a name is stored in a meeting.
 func Handler(recorder Recorder, tracker *Tracker, onNewName func()) http.HandlerFunc {
+	const extensionOrigin = "chrome-extension://"
+	extensionID := os.Getenv("SONARA_MEET_EXTENSION_ID")
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !strings.HasPrefix(r.Header.Get("Origin"), "chrome-extension://") {
+		origin := r.Header.Get("Origin")
+		if r.Method != http.MethodPost || !strings.HasPrefix(origin, extensionOrigin) ||
+			(extensionID != "" && origin != extensionOrigin+extensionID) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

@@ -2,7 +2,13 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -374,5 +380,94 @@ func TestMemoryRoleInPractice(t *testing.T) {
 func TestMeetRecorderIdleWithoutMeeting(t *testing.T) {
 	if _, _, ok := (meetRecorder{&App{}}).ActiveRecording(); ok {
 		t.Fatal("no meeting running: the Meet bridge must have nothing to attach to")
+	}
+}
+
+func TestListenMeetAudioLogsStartError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	dump := `#!/bin/sh
+printf '%s\n' '[{"type":"PipeWire:Interface:Node","id":1,"info":{"state":"running","props":{"media.class":"Stream/Output/Audio","application.name":"Google Chrome","object.serial":12}}}]'
+`
+	if err := os.WriteFile(filepath.Join(dir, "pw-dump"), []byte(dump), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := logf
+	t.Cleanup(func() { logf = original })
+	var startErr error
+	logf = func(format string, args ...any) {
+		if strings.HasPrefix(format, "pw-record could not attach") {
+			startErr, _ = args[1].(error)
+		}
+	}
+	a := NewApp()
+	a.listenMeetAudio(context.Background())
+	if !errors.Is(startErr, exec.ErrNotFound) {
+		t.Fatalf("logged start error = %v, want missing pw-record", startErr)
+	}
+}
+
+func TestCaptureScreenUsesUniquePendingFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	t.Setenv("XDG_CACHE_HOME", dir)
+	t.Setenv("CAPTURE_TEST_PATHS", filepath.Join(dir, "paths"))
+	grim := `#!/bin/sh
+printf '%s\n' "$1" >> "$CAPTURE_TEST_PATHS"
+printf 'image' > "$1"
+exit "${CAPTURE_TEST_EXIT:-0}"
+`
+	if err := os.WriteFile(filepath.Join(dir, "grim"), []byte(grim), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp()
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := a.CaptureScreen()
+			errs <- err
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "paths"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(paths) != 2 || paths[0] == paths[1] {
+		t.Fatalf("pending paths = %q, want two distinct paths", paths)
+	}
+
+	t.Setenv("CAPTURE_TEST_EXIT", "1")
+	if _, err := a.CaptureScreen(); err == nil {
+		t.Fatal("expected grim failure")
+	}
+	path, err := capturePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
+		t.Fatalf("capture directory = %v, want only latest.png", entries)
+	}
+}
+
+func TestNewSessionID(t *testing.T) {
+	first, second := newSessionID(), newSessionID()
+	if first == second {
+		t.Fatal("consecutive session IDs collided")
+	}
+	format := regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}-[0-9a-f]{6}$`)
+	for _, id := range []string{first, second} {
+		if !format.MatchString(id) {
+			t.Errorf("session ID %q has an unexpected format", id)
+		}
 	}
 }

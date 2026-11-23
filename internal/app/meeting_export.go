@@ -29,12 +29,15 @@ func (a *App) exportMeetingTo(sessionID, path string) error {
 // meetingSummary never fails the export: a missing summary is noted, the
 // transcript is still written.
 func (a *App) meetingSummary(transcript string) string {
-	if a.backend == nil {
+	a.mu.RLock()
+	backend := a.backend
+	a.mu.RUnlock()
+	if backend == nil {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(a.requestContext(), 90*time.Second)
 	defer cancel()
-	output, err := a.backend.Respond(ctx, "Resumí esta reunión:\n\n"+transcript, "summary", "")
+	output, err := backend.Respond(ctx, "Resumí esta reunión:\n\n"+transcript, "summary", "")
 	if err != nil {
 		logf("meeting summary failed: %v", err)
 		return "\n\n===== RESUMEN =====\n(no se pudo generar el resumen)\n"

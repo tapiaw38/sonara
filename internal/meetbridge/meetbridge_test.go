@@ -3,6 +3,7 @@ package meetbridge
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,7 @@ type idle struct{}
 func (idle) ActiveRecording() (string, time.Time, bool) { return "", time.Time{}, false }
 
 func TestHandlerRejectsWebPages(t *testing.T) {
+	t.Setenv("SONARA_MEET_EXTENSION_ID", "")
 	handler := Handler(idle{}, &Tracker{}, nil)
 	req := httptest.NewRequest(http.MethodPost, "/meet/speaking", strings.NewReader(`{"name":"X"}`))
 	req.Header.Set("Origin", "https://evil.example")
@@ -60,5 +62,47 @@ func TestHandlerRejectsWebPages(t *testing.T) {
 	handler(rec, req)
 	if rec.Code != http.StatusConflict { // not recording
 		t.Fatalf("want 409, got %d", rec.Code)
+	}
+}
+
+func TestHandlerPinsExtensionOrigin(t *testing.T) {
+	t.Setenv("SONARA_MEET_EXTENSION_ID", "abc")
+	handler := Handler(idle{}, &Tracker{}, nil)
+	for _, tc := range []struct {
+		origin string
+		want   int
+	}{
+		{"chrome-extension://abc", http.StatusConflict},
+		{"chrome-extension://abcd", http.StatusForbidden},
+		{"chrome-extension://other", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/meet/speaking", strings.NewReader(`{"name":"X"}`))
+		req.Header.Set("Origin", tc.origin)
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("origin %q: status = %d, want %d", tc.origin, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestTrackerCapsNamesAndSpansPerSession(t *testing.T) {
+	var tracker Tracker
+	for i := range 50 {
+		if !tracker.Add("first", strconv.Itoa(i), 0) {
+			t.Fatalf("name %d was dropped before the limit", i)
+		}
+	}
+	if tracker.Add("first", "extra", 0) || len(tracker.Names("first")) != 50 || len(tracker.Snapshot("first")) != 50 {
+		t.Fatal("tracker stored a 51st name")
+	}
+	for i := 1; i <= 4951; i++ {
+		tracker.Add("first", "0", int64(i)*3000)
+	}
+	if got := len(tracker.Snapshot("first")); got != 5000 {
+		t.Fatalf("stored %d spans, want 5000", got)
+	}
+	if !tracker.Add("second", "extra", 0) || len(tracker.Snapshot("second")) != 1 {
+		t.Fatal("limits did not reset for the next session")
 	}
 }

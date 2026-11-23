@@ -3,6 +3,7 @@ package diarize
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // OverlapMS is how much of [startMS, endMS) a span covers — zero when they
@@ -106,9 +107,41 @@ func IsEcho(spans []EchoSpan, startMS, endMS int64) bool {
 	if duration <= 0 || len(spans) == 0 {
 		return false
 	}
-	var covered int64
+	var clipped []EchoSpan
 	for _, span := range spans {
-		covered += OverlapMS(span.StartMS, span.EndMS, startMS, endMS)
+		from, to := max(startMS, span.StartMS), min(endMS, span.EndMS)
+		if from < to {
+			clipped = append(clipped, EchoSpan{StartMS: from, EndMS: to})
+		}
+	}
+	sort.Slice(clipped, func(i, j int) bool { return clipped[i].StartMS < clipped[j].StartMS })
+	var covered int64
+	end := startMS
+	for _, span := range clipped {
+		covered += max(0, span.EndMS-max(end, span.StartMS))
+		end = max(end, span.EndMS)
 	}
 	return float64(covered)/float64(duration) >= echoOverlapFraction
+}
+
+func cleanSpans(spans []Span, durationMS int64) []Span {
+	var clean []Span
+	for _, span := range spans {
+		span.EndMS = min(span.EndMS, durationMS)
+		if span.StartMS >= 0 && span.EndMS > span.StartMS && strings.TrimSpace(span.Speaker) != "" {
+			clean = append(clean, span)
+		}
+	}
+	return clean
+}
+
+func cleanEchoSpans(spans []EchoSpan, durationMS int64) []EchoSpan {
+	var clean []EchoSpan
+	for _, span := range spans {
+		span.EndMS = min(span.EndMS, durationMS)
+		if span.StartMS >= 0 && span.EndMS > span.StartMS {
+			clean = append(clean, span)
+		}
+	}
+	return clean
 }

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"sonara/internal/audio"
 	"sonara/internal/logx"
 )
 
@@ -98,7 +99,7 @@ func (g *Gemini) Diarize(ctx context.Context, wav []byte, _ int) ([]Span, error)
 	// not skip deleting what was already uploaded. Google expires it by
 	// itself after 48h either way.
 	defer g.cleanup(fileName, apiKey)
-	return g.requestDiarization(ctx, apiKey, fileURI, mimeType)
+	return g.requestDiarization(ctx, apiKey, fileURI, mimeType, wavDurationMS(wav))
 }
 
 func (g *Gemini) cleanup(fileName, apiKey string) {
@@ -226,7 +227,12 @@ type geminiInteraction struct {
 	} `json:"steps"`
 }
 
-func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeType string) ([]Span, error) {
+// audio.WAV writes a 44-byte header followed by mono 16-bit PCM.
+func wavDurationMS(wav []byte) int64 {
+	return int64(max(0, len(wav)-44)) / (audio.SampleRate * 2 / 1000)
+}
+
+func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeType string, durationMS int64) ([]Span, error) {
 	text, err := g.interact(ctx, apiKey, geminiRequest{
 		Model: geminiModelName(),
 		Input: []geminiInput{
@@ -242,7 +248,7 @@ func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeTy
 	if err := json.Unmarshal([]byte(text), &spans); err != nil {
 		return nil, fmt.Errorf("Gemini no devolvió la lista de hablantes esperada")
 	}
-	return spans, nil
+	return cleanSpans(spans, durationMS), nil
 }
 
 // interact is the shared POST /interactions call: build the request, check
@@ -351,5 +357,5 @@ func (g *Gemini) DetectEcho(ctx context.Context, sampleWav, meetingWav []byte) (
 	if err := json.Unmarshal([]byte(text), &spans); err != nil {
 		return nil, fmt.Errorf("Gemini no devolvió la lista de intervalos esperada")
 	}
-	return spans, nil
+	return cleanEchoSpans(spans, wavDurationMS(meetingWav)), nil
 }

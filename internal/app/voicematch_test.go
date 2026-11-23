@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"sonara/internal/audio"
 	"sonara/internal/diarize"
 	"sonara/internal/storage"
 )
@@ -18,7 +19,7 @@ func TestRunVoiceMatchMarksOverlappingSegmentsAsEcho(t *testing.T) {
 
 	a.diarizer = fakeGeminiEcho(t, []diarize.EchoSpan{{StartMS: 0, EndMS: 2000}}, http.StatusOK)
 	withVoiceSample(t, []byte("muestra"))
-	run.diarizePCM = make([]byte, 1000)
+	run.diarizePCM = make([]byte, 2*audio.SampleRate*2)
 
 	var events int
 	a.emitHook = func(_ string, data any) {

@@ -28,6 +28,9 @@ func overlayPlan(isOverlay, isFloating, weFloated bool) (cmds []string, nowFloat
 }
 
 func (a *App) ToggleAlwaysOnTop() bool {
+	a.overlayMu.Lock()
+	defer a.overlayMu.Unlock()
+
 	out, err := exec.Command("mmsg", "get", "focusing-client").Output()
 	if err != nil {
 		return false
@@ -37,7 +40,10 @@ func (a *App) ToggleAlwaysOnTop() bool {
 		return false
 	}
 
-	cmds, nowFloated := overlayPlan(c.IsOverlay, c.IsFloating, a.floatedForOverlay)
+	a.mu.RLock()
+	weFloated := a.floatedForOverlay
+	a.mu.RUnlock()
+	cmds, nowFloated := overlayPlan(c.IsOverlay, c.IsFloating, weFloated)
 	for _, cmd := range cmds {
 		if err := exec.Command("mmsg", "dispatch", cmd).Run(); err != nil {
 			return false
