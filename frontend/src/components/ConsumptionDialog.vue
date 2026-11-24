@@ -6,6 +6,8 @@ import type { storage } from '../../wailsjs/go/models'
 const emit = defineEmits<{ close: [] }>()
 const report = ref<storage.UsageReport>()
 const periodID = ref('today')
+const breakdown = ref<'providers' | 'functions' | 'models'>('providers')
+const priceKey = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const message = ref('')
@@ -33,15 +35,10 @@ const labels: Record<string, string> = {
   names: 'Nombres',
   diarization: 'Separación de participantes y eco',
 }
-const metrics = [
-  { key: 'calls', name: 'Llamadas' },
-  { key: 'errors', name: 'Errores' },
-  { key: 'input', name: 'Tokens entrada' },
-  { key: 'output', name: 'Tokens salida' },
-  { key: 'audioSeconds', name: 'Audio (s)' },
-  { key: 'characters', name: 'Caracteres' },
-  { key: 'usd', name: 'Estimado (USD)' },
-  { key: 'unpriced', name: 'Sin estimar' },
+const breakdowns = [
+  { id: 'providers', label: 'Proveedor' },
+  { id: 'functions', label: 'Función' },
+  { id: 'models', label: 'Modelo' },
 ] as const
 const fields = [
   { key: 'input', label: 'Entrada' },
@@ -58,18 +55,28 @@ const currency = new Intl.NumberFormat('es', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 6,
 })
-const sections = computed(() =>
-  period.value
-    ? [
-        { title: 'Por proveedor', groups: period.value.providers },
-        { title: 'Por función', groups: period.value.functions },
-        { title: 'Por modelo', groups: period.value.models },
-      ].filter((item) => item.groups.length)
-    : [],
+const groups = computed(() =>
+  [...(period.value?.[breakdown.value] ?? [])].sort(
+    (a, b) => b.totals.usd - a.totals.usd || b.totals.calls - a.totals.calls,
+  ),
+)
+const selectedPrice = computed(() =>
+  report.value?.prices.find((price) => modelKey(price) === priceKey.value),
 )
 
-function format(field: (typeof metrics)[number]['key'], value: number) {
-  return field === 'usd' ? currency.format(value) : number.format(value)
+function modelKey(price: storage.UsagePrice) {
+  return price.provider + '/' + price.model
+}
+
+function groupName(name: string) {
+  const [provider, model] = name.split(' · ', 2)
+  return model ? `${labels[provider] ?? provider} · ${model}` : (labels[name] ?? name)
+}
+
+function audioTime(seconds: number) {
+  if (seconds < 60) return `${number.format(seconds)} s`
+  if (seconds < 3600) return `${number.format(seconds / 60)} min`
+  return `${number.format(seconds / 3600)} h`
 }
 
 async function refresh() {
@@ -77,6 +84,10 @@ async function refresh() {
   failure.value = ''
   try {
     report.value = await GetAPIUsage()
+    if (!selectedPrice.value) {
+      const price = report.value.prices.find((row) => !row.enabled) ?? report.value.prices[0]
+      priceKey.value = price ? modelKey(price) : ''
+    }
   } catch (error) {
     failure.value = String(error)
   } finally {
@@ -146,90 +157,140 @@ onMounted(() => {
         </button>
       </div>
       <p v-if="failure" role="alert">{{ failure }}</p>
+      <p v-if="loading && !report" role="status">Cargando consumo…</p>
       <template v-if="period && report">
-        <dl class="usage-totals">
-          <div v-for="metric in metrics" :key="metric.key">
-            <dt>{{ metric.name }}</dt>
-            <dd>{{ format(metric.key, period.totals[metric.key]) }}</dd>
+        <dl class="usage-summary">
+          <div class="usage-cost">
+            <dt>Costo estimado</dt>
+            <dd>{{ currency.format(period.totals.usd) }}</dd>
+            <small v-if="period.totals.unpriced">
+              {{ number.format(period.totals.unpriced) }} sin estimar
+            </small>
+          </div>
+          <div>
+            <dt>Llamadas</dt>
+            <dd>{{ number.format(period.totals.calls) }}</dd>
+            <small v-if="period.totals.errors"
+              >{{ number.format(period.totals.errors) }} con error</small
+            >
+          </div>
+          <div>
+            <dt>Tokens</dt>
+            <dd>{{ number.format(period.totals.input + period.totals.output) }}</dd>
+            <small
+              >{{ number.format(period.totals.input) }} entrada ·
+              {{ number.format(period.totals.output) }} salida</small
+            >
+          </div>
+          <div>
+            <dt>Audio</dt>
+            <dd>{{ audioTime(period.totals.audioSeconds) }}</dd>
+            <small v-if="period.totals.characters"
+              >{{ number.format(period.totals.characters) }} caracteres TTS</small
+            >
           </div>
         </dl>
-        <p v-if="!period.totals.calls">Todavía no hay llamadas registradas en este período.</p>
-        <p v-else-if="period.totals.unpriced">
-          Las llamadas sin tarifa o sin métricas suficientes quedan fuera del costo.
-        </p>
-        <section v-for="section in sections" :key="section.title">
-          <h3>{{ section.title }}</h3>
-          <div class="usage-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">{{ section.title }}</th>
-                  <th v-for="metric in metrics" :key="metric.key" scope="col">{{ metric.name }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in section.groups" :key="row.name">
-                  <th scope="row">{{ labels[row.name] ?? row.name }}</th>
-                  <td v-for="metric in metrics" :key="metric.key">
-                    {{ format(metric.key, row.totals[metric.key]) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <section
+          v-if="groups.length"
+          class="usage-breakdown"
+          aria-labelledby="usage-breakdown-title"
+        >
+          <div class="breakdown-header">
+            <h3 id="usage-breakdown-title">Desglose</h3>
+            <div class="usage-periods" aria-label="Agrupar consumo">
+              <button
+                v-for="item in breakdowns"
+                :key="item.id"
+                :aria-pressed="breakdown === item.id"
+                @click="breakdown = item.id"
+              >
+                {{ item.label }}
+              </button>
+            </div>
           </div>
+          <ul class="usage-groups">
+            <li v-for="row in groups" :key="row.name">
+              <div>
+                <strong>{{ groupName(row.name) }}</strong>
+                <span class="usage-details">
+                  <span>{{ number.format(row.totals.calls) }} llamadas</span>
+                  <span v-if="row.totals.input || row.totals.output"
+                    >{{ number.format(row.totals.input) }} entrada ·
+                    {{ number.format(row.totals.output) }} salida</span
+                  >
+                  <span v-if="row.totals.audioSeconds"
+                    >{{ audioTime(row.totals.audioSeconds) }} de audio</span
+                  >
+                  <span v-if="row.totals.characters"
+                    >{{ number.format(row.totals.characters) }} caracteres</span
+                  >
+                  <span v-if="row.totals.errors"
+                    >{{ number.format(row.totals.errors) }} con error</span
+                  >
+                </span>
+              </div>
+              <div class="row-cost">
+                <strong>{{
+                  row.totals.unpriced === row.totals.calls ? '—' : currency.format(row.totals.usd)
+                }}</strong>
+                <small v-if="row.totals.unpriced"
+                  >{{ number.format(row.totals.unpriced) }} sin estimar</small
+                >
+              </div>
+            </li>
+          </ul>
         </section>
+        <div v-else class="usage-empty">Todavía no hay llamadas registradas en este período.</div>
         <details class="usage-prices">
           <summary>Precios por modelo</summary>
           <p>
-            Tarifas en USD por millón de tokens o caracteres, salvo el minuto de audio. Los precios
-            se aplican también al historial.
+            Los precios se aplican también al historial. Las tarifas faltantes se excluyen del
+            costo.
           </p>
-          <form @submit.prevent="save">
-            <div class="usage-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Proveedor y modelo</th>
-                    <th scope="col">Activo</th>
-                    <th v-for="field in fields" :key="field.key" scope="col">{{ field.label }}</th>
-                    <th scope="col">Cobro por duración</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="price in report.prices" :key="price.provider + '/' + price.model">
-                    <th scope="row">{{ labels[price.provider] }} · {{ price.model }}</th>
-                    <td>
-                      <input
-                        v-model="price.enabled"
-                        type="checkbox"
-                        :aria-label="'Activar tarifa para ' + price.model"
-                      />
-                    </td>
-                    <td v-for="field in fields" :key="field.key">
-                      <input
-                        v-model.number="price[field.key]"
-                        type="number"
-                        required
-                        min="0"
-                        step="any"
-                        :aria-label="field.label + ' · ' + price.model"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        v-model="price.durationBilling"
-                        type="checkbox"
-                        :aria-label="'Priorizar duración para ' + price.model"
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          <form v-if="selectedPrice" @submit.prevent="save">
+            <label class="price-model">
+              Modelo
+              <select v-model="priceKey">
+                <option
+                  v-for="price in report.prices"
+                  :key="modelKey(price)"
+                  :value="modelKey(price)"
+                >
+                  {{ labels[price.provider] ?? price.provider }} · {{ price.model
+                  }}{{ price.enabled ? '' : ' (sin tarifa)' }}
+                </option>
+              </select>
+            </label>
+            <div class="price-fields">
+              <label v-for="field in fields" :key="field.key">
+                {{ field.label }}
+                <input
+                  v-model.number="selectedPrice[field.key]"
+                  type="number"
+                  required
+                  min="0"
+                  step="any"
+                />
+                <small>{{
+                  field.key === 'perMinute'
+                    ? 'USD/min'
+                    : field.key === 'perMillionChars'
+                      ? 'USD/millón de caracteres'
+                      : 'USD/millón de tokens'
+                }}</small>
+              </label>
             </div>
-            <button type="submit" :disabled="loading || saving">
-              {{ saving ? 'Guardando…' : 'Guardar precios' }}
-            </button>
-            <span v-if="message" role="status">{{ message }}</span>
+            <div class="price-footer">
+              <label><input v-model="selectedPrice.enabled" type="checkbox" /> Usar tarifa</label>
+              <label
+                ><input v-model="selectedPrice.durationBilling" type="checkbox" /> Priorizar
+                minutos</label
+              >
+              <button type="submit" :disabled="loading || saving">
+                {{ saving ? 'Guardando…' : 'Guardar precios' }}
+              </button>
+            </div>
+            <p v-if="message" role="status">{{ message }}</p>
           </form>
         </details>
       </template>
@@ -239,95 +300,154 @@ onMounted(() => {
 
 <style scoped>
 .usage-dialog {
-  width: min(1050px, 96vw);
+  width: min(820px, 96vw);
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  color: #e8e9ee;
+}
+.usage-dialog p,
+.usage-dialog small {
+  color: #a7a9b5;
 }
 .usage-dialog p {
   margin: 0;
-  color: #a7a9b5;
 }
 .usage-toolbar,
-.usage-periods {
+.breakdown-header,
+.price-footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-.usage-toolbar {
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+.usage-periods {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #343643;
+  border-radius: 8px;
+  background: #18191f;
 }
 .usage-toolbar button,
+.usage-periods button,
 .usage-prices button {
   padding: 6px 10px;
-  border: 1px solid #414351;
-  border-radius: 6px;
-  background: #232430;
-  color: #dedfe6;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #c5c7d2;
+  background: transparent;
+}
+.usage-toolbar > button,
+.usage-prices button {
+  border-color: #414351;
 }
 .usage-periods [aria-pressed='true'] {
-  border-color: #62d7b3;
-  color: #a2f2d9;
+  color: #b5f3df;
+  background: #253a32;
 }
-.usage-totals {
+.usage-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
 }
-.usage-totals div {
-  padding: 8px;
+.usage-summary > div,
+.usage-empty,
+.usage-prices {
+  padding: 12px;
   border: 1px solid #343643;
-  border-radius: 6px;
+  border-radius: 9px;
+  background: #191c23;
 }
-dt {
+.usage-summary .usage-cost {
+  border-color: #36584b;
+  background: #1b2926;
+}
+dt,
+.usage-details,
+.price-fields small {
   color: #a7a9b5;
   font-size: 11px;
 }
 dd {
-  margin: 4px 0 0;
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+  font-size: 20px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+.usage-cost dd {
+  color: #b5f3df;
 }
 h3 {
-  font-size: 13px;
-  margin: 0 0 5px;
+  font-size: 14px;
+  margin: 0;
 }
-.usage-scroll {
-  overflow-x: auto;
+.usage-groups {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #343643;
+  border-radius: 8px;
 }
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+.usage-groups li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 9px 12px;
+  overflow-wrap: anywhere;
 }
-th,
-td {
-  padding: 6px;
-  border-bottom: 1px solid #343643;
+.usage-groups li + li {
+  border-top: 1px solid #343643;
+}
+.usage-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin-top: 4px;
+}
+.row-cost {
+  display: grid;
+  align-content: start;
+  gap: 4px;
   text-align: right;
-}
-th:first-child {
-  text-align: left;
-  min-width: 135px;
+  font-variant-numeric: tabular-nums;
 }
 .usage-prices summary {
   cursor: pointer;
   font-weight: 600;
 }
-.usage-prices p,
-.usage-prices form > button,
-.usage-prices form > span {
-  margin-top: 8px;
+.usage-prices[open] summary {
+  margin-bottom: 9px;
 }
-.usage-prices form > span {
-  margin-left: 8px;
+.usage-prices form,
+.price-fields,
+.price-fields label,
+.price-model {
+  display: grid;
+  gap: 6px;
 }
-input[type='number'] {
-  width: 65px;
-  padding: 4px;
+.usage-prices form {
+  gap: 12px;
+  margin-top: 10px;
+}
+.price-fields {
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+}
+.price-fields input,
+.price-model select {
+  min-width: 0;
+  padding: 5px 7px;
   border: 1px solid #414351;
-  border-radius: 4px;
+  border-radius: 5px;
   background: #161720;
   color: inherit;
+}
+@media (max-width: 650px) {
+  .usage-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
