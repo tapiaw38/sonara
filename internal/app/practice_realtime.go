@@ -45,8 +45,22 @@ func (a *App) PracticeRealtime() error {
 		a.mu.Unlock()
 	}()
 
-	if a.backend.PracticeVoiceProvider() == "azure" {
-		err := a.runAzurePractice(ctx, language, generation)
+	switch a.backend.PracticeVoiceProvider() {
+	case "azure":
+		if err := a.backend.CheckAzurePractice(); err != nil {
+			return err
+		}
+		err := a.runBatchPractice(ctx, language, generation, a.backend.TranscribeAzurePractice, a.backend.SpeakAzurePractice)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	case "local":
+		speak, err := a.backend.OpenKokoroPractice(language)
+		if err != nil {
+			return err
+		}
+		err = a.runBatchPractice(ctx, language, generation, a.backend.TranscribePractice, speak)
 		if ctx.Err() != nil {
 			return nil
 		}

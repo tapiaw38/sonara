@@ -145,7 +145,7 @@ func (a *App) SetPracticeVoiceProvider(name string) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")
 	}
-	if name != "openai" && name != "azure" {
+	if name != "openai" && name != "azure" && name != "local" {
 		return fmt.Errorf("proveedor de voz inválido")
 	}
 	if err := a.updateCapabilityProviders(func(p *storage.CapabilityProviders) { p.PracticeVoice = name }); err != nil {

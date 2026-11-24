@@ -389,10 +389,15 @@ onMounted(async () => {
                 : ''
             }}
           </option>
+          <option value="local">Kokoro local (gratis)</option>
         </select>
         <small v-if="providerVoice === 'azure'" class="provider-hint"
           >Azure usa los deployments de voz y transcripción de Claves. Los cambios se aplican a la
           próxima práctica.</small
+        >
+        <small v-else-if="providerVoice === 'local'" class="provider-hint"
+          >Kokoro genera la voz sin conexión. Práctica usa el proveedor de transcripción en vivo y
+          el proveedor de texto seleccionados. Instalación en el README.</small
         >
         <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
         <select

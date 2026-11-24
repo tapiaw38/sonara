@@ -9,6 +9,7 @@ import (
 
 	"sonara/backend/internal/adapters/web/integrations/azureopenai"
 	"sonara/backend/internal/adapters/web/integrations/deepseek"
+	"sonara/backend/internal/adapters/web/integrations/kokoro"
 	"sonara/backend/internal/adapters/web/integrations/localwhisper"
 	"sonara/backend/internal/adapters/web/integrations/openai"
 	"sonara/backend/internal/adapters/web/integrations/providers"
@@ -333,6 +334,13 @@ func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
 	if c.PracticeVoiceProvider() == providers.Azure {
 		return c.SpeakAzurePractice(ctx, text)
 	}
+	if c.PracticeVoiceProvider() == providers.Local {
+		speak, err := c.OpenKokoroPractice("es")
+		if err != nil {
+			return nil, err
+		}
+		return speak(ctx, text)
+	}
 	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
 	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
 }
@@ -351,7 +359,7 @@ func (c *Client) PracticeVoiceProvider() string {
 }
 
 func (c *Client) SetPracticeVoiceProvider(name string) error {
-	if name != providers.OpenAI && name != providers.Azure {
+	if name != providers.OpenAI && name != providers.Azure && name != providers.Local {
 		return fmt.Errorf("proveedor de voz inválido")
 	}
 	c.mu.Lock()
@@ -401,4 +409,15 @@ func responseFunction(mode string) string {
 	default:
 		return usage.Copilot
 	}
+}
+
+// OpenKokoroPractice validates and pins the local voice for a Practice session.
+func (c *Client) OpenKokoroPractice(language string) (func(context.Context, string) ([]byte, error), error) {
+	voice, err := kokoro.Open(language)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, text string) ([]byte, error) {
+		return voice.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text)
+	}, nil
 }

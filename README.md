@@ -66,6 +66,25 @@ Transcription runs in the cloud by default; the local engines are optional.
   - `3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx` (speaker embedding model).
   - `SONARA_DIARIZE_THRESHOLD` tunes how readily voices are split.
 
+- **Kokoro local voice for Practice** (Linux x86-64): select **Kokoro local (gratis)**
+  in **Configuración → Uso → Voz (Práctica)**. The int8 v1.0 archive is about
+  127 MiB. It includes Spanish `ef_dora` (28) and US English `af_bella` (2).
+  TTS uses sherpa-onnx 1.12.40 for its Spanish phonemizer and can coexist with
+  sherpa-onnx 2.x for speaker separation. Only synthesis runs locally by
+  selecting Kokoro. Practice still uses the configured live transcriber and text
+  provider.
+
+  ```sh
+  dir="$HOME/.local/share/sherpa-onnx"
+  cli=sherpa-onnx-v1.12.40-linux-x64-static.tar.bz2
+  model=kokoro-int8-multi-lang-v1_0.tar.bz2
+  mkdir -p "$dir"
+  gh release download v1.12.40 -R k2-fsa/sherpa-onnx -p "$cli" -D "$dir" --skip-existing
+  gh release download tts-models -R k2-fsa/sherpa-onnx -p "$model" -D "$dir" --skip-existing
+  tar -xjf "$dir/$cli" -C "$dir"
+  tar -xjf "$dir/$model" -C "$dir"
+  ```
+
 ## Development
 
 ```sh

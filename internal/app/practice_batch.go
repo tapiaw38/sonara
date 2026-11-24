@@ -9,17 +9,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sonara/backend/client"
 	"sonara/internal/audio"
 	"sonara/internal/pipewire"
 	"sonara/internal/practice"
 )
 
-// Azure Practice uses explicit transcription and speech deployments. OpenAI
-// Realtime is never opened in this branch.
-func (a *App) runAzurePractice(ctx context.Context, language string, generation uint64) error {
-	if err := a.backend.CheckAzurePractice(); err != nil {
-		return err
-	}
+// Batch Practice shares turn-taking, playback and coaching across TTS providers.
+func (a *App) runBatchPractice(
+	ctx context.Context, language string, generation uint64,
+	transcribe func(context.Context, []byte, string) (client.Transcript, error),
+	speak func(context.Context, string) ([]byte, error),
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 5*time.Second)
@@ -46,7 +47,7 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 	reader := practice.NewLevelReader(mic, func(level float64) { a.emit("practice:level", level) })
 	vad := audio.NewSpeechDetector()
 
-	var playback *azurePracticePlayback
+	var playback *batchPracticePlayback
 	defer func() {
 		if playback != nil {
 			playback.cancel()
@@ -56,7 +57,7 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 	var holding bool
 	var answer string
 	a.emit("practice:phase", "listening")
-	logf("practice azure: session ready (language=%s)", language)
+	logf("practice batch: session ready (language=%s)", language)
 	for {
 		pcm, err := practice.ReadAnswer(ctx, threshold, reader, func() bool {
 			return playback != nil && playback.playing.Load()
@@ -73,7 +74,7 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 				case playErr := <-playback.done:
 					playback = nil
 					if playErr != nil && ctx.Err() != nil {
-						return fmt.Errorf("falló la reproducción de la voz de Azure: %w", playErr)
+						return fmt.Errorf("falló la reproducción de la voz de Práctica: %w", playErr)
 					}
 				default:
 				}
@@ -85,23 +86,23 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 			playback = nil
 			played := <-previous.done
 			if played != nil && !previous.interrupted.Load() {
-				return fmt.Errorf("falló la reproducción de la voz de Azure: %w", played)
+				return fmt.Errorf("falló la reproducción de la voz de Práctica: %w", played)
 			}
 		}
 		a.emit("practice:phase", "transcribing")
-		out, err := a.backend.TranscribeAzurePractice(ctx, audio.WAV(pcm), language)
+		out, err := transcribe(ctx, audio.WAV(pcm), language)
 		if err != nil {
-			return fmt.Errorf("transcripción de Práctica con Azure: %w", err)
+			return fmt.Errorf("transcripción de Práctica: %w", err)
 		}
 		switch spokenPracticeCommand(out.Text) {
 		case practiceVoiceHold:
 			holding = true
 			a.emit("practice:voice-hold", true)
-			logf("practice azure: voice command recognized (hold)")
+			logf("practice batch: voice command recognized (hold)")
 		case practiceVoiceReady:
 			holding = false
 			a.emit("practice:voice-hold", false)
-			logf("practice azure: voice command recognized (ready)")
+			logf("practice batch: voice command recognized (ready)")
 		default:
 			answer = strings.TrimSpace(answer + " " + out.Text)
 		}
@@ -125,11 +126,11 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 			return fmt.Errorf("no se generó una pregunta para Práctica")
 		}
 		a.emit("practice:phase", "synthesizing")
-		wav, err := a.backend.SpeakAzurePractice(ctx, question)
+		wav, err := speak(ctx, question)
 		if err != nil {
 			return err
 		}
-		p, err := a.startAzurePracticePlayback(ctx, cancel, wav, generation, answer, question)
+		p, err := a.startBatchPracticePlayback(ctx, cancel, wav, generation, answer, question)
 		if err != nil {
 			return err
 		}
@@ -141,22 +142,22 @@ func (a *App) runAzurePractice(ctx context.Context, language string, generation 
 	}
 }
 
-type azurePracticePlayback struct {
+type batchPracticePlayback struct {
 	id                   uint64
 	cancel               context.CancelFunc
 	playing, interrupted atomic.Bool
 	done                 chan error
 }
 
-func (a *App) startAzurePracticePlayback(ctx context.Context, stopCapture context.CancelFunc, wav []byte, generation uint64, answer, question string) (*azurePracticePlayback, error) {
+func (a *App) startBatchPracticePlayback(ctx context.Context, stopCapture context.CancelFunc, wav []byte, generation uint64, answer, question string) (*batchPracticePlayback, error) {
 	playCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(playCtx, "pw-play", "--latency", "40ms", "-")
 	cmd.Stdin = bytes.NewReader(wav)
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("no se pudo reproducir la voz de Azure: %w", err)
+		return nil, fmt.Errorf("no se pudo reproducir la voz de Práctica: %w", err)
 	}
-	p := &azurePracticePlayback{id: a.nextPracticeAnswer(), cancel: cancel, done: make(chan error, 1)}
+	p := &batchPracticePlayback{id: a.nextPracticeAnswer(), cancel: cancel, done: make(chan error, 1)}
 	p.playing.Store(true)
 	a.emit("practice:phase", "speaking")
 	go func() {
