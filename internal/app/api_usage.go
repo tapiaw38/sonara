@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"sonara/backend/usage"
@@ -45,4 +46,22 @@ func (a *App) SaveAPIUsagePrices(prices []storage.UsagePrice) error {
 		return fmt.Errorf("consumo no disponible")
 	}
 	return database.SaveUsagePrices(prices)
+}
+
+const usageCatalogURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+
+func (a *App) refreshUsageCatalog(ctx context.Context, database *storage.Store) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := database.RefreshUsageCatalog(ctx, client, usageCatalogURL, time.Now()); err != nil && ctx.Err() == nil {
+			logDedup("api-price-catalog", "could not refresh API price catalog: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

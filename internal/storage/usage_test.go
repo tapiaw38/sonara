@@ -1,7 +1,11 @@
 package storage
 
 import (
+	"context"
+	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -62,5 +66,54 @@ func TestUsageRealtimePricesByTokenModality(t *testing.T) {
 	got, ok := estimateUsage(entry, price)
 	if !ok || math.Abs(got-.002636) > 1e-9 {
 		t.Fatalf("estimate = %f, %v", got, ok)
+	}
+}
+
+func TestUsageCatalogRefreshesDailyAndPreservesManualOverride(t *testing.T) {
+	db, err := OpenAt(filepath.Join(t.TempDir(), "catalog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "" {
+			t.Error("expected public GET")
+		}
+		if calls > 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, `{"gpt-6-luna":{"litellm_provider":"openai","input_cost_per_token":0.000001,"output_cost_per_token":0.000002},"azure/unknown":{"litellm_provider":"azure","input_cost_per_token":0.000001}}`)
+	}))
+	defer server.Close()
+	refresh := func(at time.Time) error {
+		return db.RefreshUsageCatalog(context.Background(), server.Client(), server.URL, at)
+	}
+	if err := refresh(now); err != nil {
+		t.Fatal(err)
+	}
+	if err := refresh(now.Add(time.Hour)); err != nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	k := priceKey("openai", "gpt-6-luna")
+	if err := db.SaveUsagePrices([]UsagePrice{{Provider: k[0], Model: k[1], Enabled: true, Input: 9}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := refresh(now.Add(25 * time.Hour)); err == nil {
+		t.Fatal("expected failed refresh")
+	}
+	prices, err := db.usagePrices(db.usageCatalog())
+	if err != nil || prices[k].Input != 9 || prices[k].Source != "manual" {
+		t.Fatalf("manual: %+v %v", prices[k], err)
+	}
+	if err := db.SaveUsagePrices([]UsagePrice{{Provider: k[0], Model: k[1], Source: "reset"}}); err != nil {
+		t.Fatal(err)
+	}
+	prices, err = db.usagePrices(db.usageCatalog())
+	if err != nil || prices[k].Input != 1 || prices[k].Output != 2 || prices[k].Source != "catalog" {
+		t.Fatalf("catalog: %+v %v", prices[k], err)
 	}
 }

@@ -23,6 +23,7 @@ type UsagePrice struct {
 	AudioOutput     float64 `json:"audioOutput"`
 	PerMinute       float64 `json:"perMinute"`
 	PerMillionChars float64 `json:"perMillionChars"`
+	Source          string  `json:"source"`
 	DurationBilling bool    `json:"durationBilling"`
 }
 
@@ -66,8 +67,9 @@ type UsagePeriod struct {
 	Models    []UsageGroup `json:"models"`
 }
 type UsageReport struct {
-	Periods []UsagePeriod `json:"periods"`
-	Prices  []UsagePrice  `json:"prices"`
+	Periods        []UsagePeriod `json:"periods"`
+	Prices         []UsagePrice  `json:"prices"`
+	CatalogUpdated string        `json:"catalogUpdated"`
 }
 
 func (s *Store) RecordUsage(e usage.Entry) error {
@@ -101,6 +103,23 @@ func (s *Store) SaveUsagePrices(prices []UsagePrice) error {
 			}
 		}
 	}
+	manual, err := s.manualUsagePrices()
+	if err != nil {
+		return err
+	}
+	for _, p := range prices {
+		k := priceKey(p.Provider, p.Model)
+		if p.Source == "reset" {
+			delete(manual, k)
+		} else {
+			p.Source = "manual"
+			manual[k] = p
+		}
+	}
+	prices = make([]UsagePrice, 0, len(manual))
+	for _, price := range manual {
+		prices = append(prices, price)
+	}
 	data, err := json.Marshal(prices)
 	if err != nil {
 		return err
@@ -108,19 +127,26 @@ func (s *Store) SaveUsagePrices(prices []UsagePrice) error {
 	return s.SetSetting(usagePricesSetting, string(data))
 }
 
-func (s *Store) usagePrices() (map[[2]string]UsagePrice, error) {
-	prices := make(map[[2]string]UsagePrice)
-	for _, p := range defaultUsagePrices {
-		prices[priceKey(p.Provider, p.Model)] = p
-	}
+func (s *Store) manualUsagePrices() (map[[2]string]UsagePrice, error) {
+	manual := make(map[[2]string]UsagePrice)
 	if raw := s.Setting(usagePricesSetting); raw != "" {
 		var overrides []UsagePrice
 		if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
 			return nil, err
 		}
 		for _, p := range overrides {
-			prices[priceKey(p.Provider, p.Model)] = p
+			p.Source = "manual"
+			manual[priceKey(p.Provider, p.Model)] = p
 		}
+	}
+	return manual, nil
+}
+
+func (s *Store) usagePrices(cached usageCatalog) (map[[2]string]UsagePrice, error) {
+	prices := make(map[[2]string]UsagePrice)
+	for _, p := range defaultUsagePrices {
+		p.Source = "default"
+		prices[priceKey(p.Provider, p.Model)] = p
 	}
 	rows, err := s.db.Query("SELECT DISTINCT provider, model FROM api_usage WHERE provider != 'local' AND model != ''")
 	if err != nil {
@@ -137,15 +163,38 @@ func (s *Store) usagePrices() (map[[2]string]UsagePrice, error) {
 			prices[k] = p
 		}
 	}
-	return prices, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, p := range cached.Prices {
+		key := priceKey(p.Provider, p.Model)
+		if base, found := prices[key]; found {
+			if p.PerMinute == 0 && base.PerMinute > 0 {
+				p.PerMinute, p.DurationBilling = base.PerMinute, base.DurationBilling
+			}
+			prices[key] = p
+		}
+	}
+	manual, err := s.manualUsagePrices()
+	if err != nil {
+		return nil, err
+	}
+	for key, p := range manual {
+		prices[key] = p
+	}
+	return prices, nil
 }
 
 func (s *Store) APIUsage(now time.Time) (UsageReport, error) {
-	prices, err := s.usagePrices()
+	cached := s.usageCatalog()
+	prices, err := s.usagePrices(cached)
 	if err != nil {
 		return UsageReport{}, err
 	}
 	report := UsageReport{Prices: make([]UsagePrice, 0, len(prices))}
+	if !cached.Updated.IsZero() {
+		report.CatalogUpdated = cached.Updated.Format(time.RFC3339)
+	}
 	for _, p := range prices {
 		report.Prices = append(report.Prices, p)
 	}

@@ -95,15 +95,15 @@ async function refresh() {
   }
 }
 
-async function save() {
-  if (!report.value) return
+async function save(reset = false) {
+  if (!selectedPrice.value) return
   saving.value = true
   message.value = ''
   failure.value = ''
   try {
-    await SaveAPIUsagePrices(report.value.prices)
+    await SaveAPIUsagePrices([{ ...selectedPrice.value, source: reset ? 'reset' : 'manual' }])
     await refresh()
-    if (!failure.value) message.value = 'Precios guardados.'
+    if (!failure.value) message.value = reset ? 'Tarifa automática restaurada.' : 'Tarifa guardada.'
   } catch (error) {
     failure.value = String(error)
   } finally {
@@ -247,7 +247,12 @@ onMounted(() => {
             Los precios se aplican también al historial. Las tarifas faltantes se excluyen del
             costo.
           </p>
-          <form v-if="selectedPrice" @submit.prevent="save">
+          <p v-if="report.catalogUpdated">
+            Catálogo LiteLLM actualizado el
+            {{ new Date(report.catalogUpdated).toLocaleString('es') }}.
+          </p>
+          <p v-else>Consumo usa las tarifas de referencia mientras se descarga el catálogo.</p>
+          <form v-if="selectedPrice" @submit.prevent="save()">
             <label class="price-model">
               Modelo
               <select v-model="priceKey">
@@ -286,6 +291,23 @@ onMounted(() => {
                 ><input v-model="selectedPrice.durationBilling" type="checkbox" /> Priorizar
                 minutos</label
               >
+              <small>{{
+                selectedPrice.source === 'manual'
+                  ? 'Tarifa manual'
+                  : selectedPrice.source === 'catalog'
+                    ? 'Fuente: LiteLLM'
+                    : selectedPrice.source === 'default'
+                      ? 'Tarifa de referencia'
+                      : 'Sin tarifa disponible'
+              }}</small>
+              <button
+                v-if="selectedPrice.source === 'manual'"
+                type="button"
+                :disabled="loading || saving"
+                @click="save(true)"
+              >
+                Restaurar automática
+              </button>
               <button type="submit" :disabled="loading || saving">
                 {{ saving ? 'Guardando…' : 'Guardar precios' }}
               </button>

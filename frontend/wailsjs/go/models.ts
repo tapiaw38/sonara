@@ -486,6 +486,7 @@ export namespace storage {
 	    audioOutput: number;
 	    perMinute: number;
 	    perMillionChars: number;
+	    source: string;
 	    durationBilling: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -503,12 +504,14 @@ export namespace storage {
 	        this.audioOutput = source["audioOutput"];
 	        this.perMinute = source["perMinute"];
 	        this.perMillionChars = source["perMillionChars"];
+	        this.source = source["source"];
 	        this.durationBilling = source["durationBilling"];
 	    }
 	}
 	export class UsageReport {
 	    periods: UsagePeriod[];
 	    prices: UsagePrice[];
+	    catalogUpdated: string;
 
 	    static createFrom(source: any = {}) {
 	        return new UsageReport(source);
@@ -518,6 +521,7 @@ export namespace storage {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.periods = this.convertValues(source["periods"], UsagePeriod);
 	        this.prices = this.convertValues(source["prices"], UsagePrice);
+	        this.catalogUpdated = source["catalogUpdated"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -538,5 +542,6 @@ export namespace storage {
 		    return a;
 		}
 	}
+
 }
 

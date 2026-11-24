@@ -141,6 +141,7 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Unlock()
 
 	if database != nil {
+		go a.refreshUsageCatalog(ctx, database)
 		// Restoring the key here is what makes it survive a restart; it reaches
 		// the gateway before the UI can send its first request.
 		if key := database.Setting(storage.SettingAPIKey); key != "" {
