@@ -20,6 +20,7 @@ type Engine struct {
 	worker     *resident
 	cudaFailed bool
 	closed     bool
+	disabled   bool
 }
 
 type resident struct {
@@ -34,6 +35,16 @@ func (e *Engine) Close() {
 	defer e.mu.Unlock()
 	e.closed = true
 	e.stop()
+}
+
+// SetEnabled unloads the model when another provider is selected.
+func (e *Engine) SetEnabled(enabled bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.disabled = !enabled
+	if e.disabled {
+		e.stop()
+	}
 }
 
 func (e *Engine) stop() {
@@ -53,6 +64,9 @@ func (e *Engine) synthesize(ctx context.Context, v *Voice, text string, speed fl
 	defer e.mu.Unlock()
 	if e.closed {
 		return nil, fmt.Errorf("Kokoro ya se cerró")
+	}
+	if e.disabled {
+		return nil, fmt.Errorf("Kokoro ya no es la voz seleccionada")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

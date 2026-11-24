@@ -95,8 +95,10 @@ Transcription runs in the cloud by default; the local engines are optional.
 
   Run these commands from the repository root with a C compiler installed.
   Sonara starts the worker on the first question and keeps its model loaded until
-  shutdown. Changing the interview language reloads the model. Existing
-  installations with only the CLI still work and show a note about the worker.
+  shutdown or until another voice provider is selected. Switching from Kokoro
+  to OpenAI or Azure ends the local practice and frees the worker’s RAM and VRAM.
+  Changing the interview language reloads the model. Installations with only
+  the CLI still work and show a note about the worker.
 
   **Optional NVIDIA GPU acceleration.** Install a compatible NVIDIA driver and
   the sherpa-onnx CUDA 12 / cuDNN 9 release (~191 MB). The CUDA 13 toolkit alone

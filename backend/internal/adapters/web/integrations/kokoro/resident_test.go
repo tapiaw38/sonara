@@ -54,8 +54,19 @@ done
 		t.Fatalf("starts=%q note=%q err=%v", started, note, err)
 	}
 	dir := engine.worker.dir
-	engine.Close()
+	engine.SetEnabled(false)
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("worker files survived Close: %v", err)
+		t.Fatalf("worker files survived switching providers: %v", err)
 	}
+	if _, err := engine.Speak(context.Background(), voice, "Otra pregunta.", .85, nil); err == nil {
+		t.Fatal("Kokoro started while another provider was selected")
+	}
+	engine.SetEnabled(true)
+	if engine.worker != nil {
+		t.Fatal("Kokoro loaded before synthesis")
+	}
+	if _, err := engine.Speak(context.Background(), voice, "Otra pregunta.", .85, nil); err != nil {
+		t.Fatal(err)
+	}
+
 }

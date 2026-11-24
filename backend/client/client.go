@@ -376,6 +376,7 @@ func (c *Client) SetPracticeVoiceProvider(name string) error {
 	}
 	c.mu.Lock()
 	c.practiceVoiceProvider = name
+	c.kokoro.SetEnabled(name == providers.Local)
 	c.mu.Unlock()
 	return nil
 }

@@ -140,7 +140,7 @@ func (a *App) SetMeetingProvider(name string) error {
 	return nil
 }
 
-// SetPracticeVoiceProvider changes the provider for the next Practice session.
+// SetPracticeVoiceProvider changes the provider and stops a running local voice before unloading it.
 func (a *App) SetPracticeVoiceProvider(name string) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")
@@ -150,6 +150,9 @@ func (a *App) SetPracticeVoiceProvider(name string) error {
 	}
 	if err := a.updateCapabilityProviders(func(p *storage.CapabilityProviders) { p.PracticeVoice = name }); err != nil {
 		return err
+	}
+	if name != "local" && a.backend.PracticeVoiceProvider() == "local" {
+		a.StopPractice()
 	}
 	return a.backend.SetPracticeVoiceProvider(name)
 }

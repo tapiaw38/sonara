@@ -67,7 +67,9 @@ func (a *App) PracticeRealtime() error {
 			}
 			lastNote = note
 			logf("practice: %s", note)
-			a.emit("practice:voice-note", note)
+			if note != "Kokoro usa GPU (CUDA)." {
+				a.emit("practice:voice-note", note)
+			}
 		})
 		if err != nil {
 			return err
