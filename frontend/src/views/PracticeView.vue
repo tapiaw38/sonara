@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue'
 import { PracticeRealtime, StopPractice } from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
+import PracticeTurnText from '../components/PracticeTurnText.vue'
 import { usePanelResize } from '../composables/usePanelResize'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
@@ -16,7 +17,14 @@ const active = ref(false)
 const busy = ref(false)
 const phase = ref<Phase>('idle')
 const message = ref('')
-type BilingualText = { turnId: number; en: string; es: string; interrupted?: boolean }
+type BilingualText = {
+  turnId: number
+  original: string
+  language: string
+  translation?: string
+  lines?: { original: string; translation: string }[]
+  interrupted?: boolean
+}
 const transcripts = ref<BilingualText[]>([])
 const suggestions = ref<BilingualText[]>([])
 const closedTurns = new Set<number>()
@@ -211,11 +219,7 @@ onBeforeUnmount(() => {
             Tu respuesta sugerida aparecerá acá.
           </p>
           <div v-for="entry in suggestions" :key="entry.turnId" class="practice-entry">
-            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
-            <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
-            <p v-if="entry.es" class="transcript-translation" lang="es">
-              <span>ES</span>{{ entry.es }}
-            </p>
+            <PracticeTurnText :entry="entry" />
           </div>
         </div>
         <div
@@ -242,11 +246,7 @@ onBeforeUnmount(() => {
         <div ref="transcriptPanel" class="transcript-body" role="log">
           <p v-if="!transcripts.length" class="transcript-text">Esperando al simulador…</p>
           <div v-for="entry in transcripts" :key="entry.turnId" class="practice-entry">
-            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
-            <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
-            <p v-if="entry.es" class="transcript-translation" lang="es">
-              <span>ES</span>{{ entry.es }}
-            </p>
+            <PracticeTurnText :entry="entry" />
           </div>
         </div>
         <div
@@ -316,18 +316,10 @@ onBeforeUnmount(() => {
 .practice-entry {
   flex-shrink: 0;
 }
-.practice-interrupted {
-  display: block;
-  opacity: 0.75;
-}
 .practice-entry + .practice-entry {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid rgb(41 42 53 / var(--surface-opacity));
-}
-.practice-results .transcript-text,
-.practice-results .transcript-translation {
-  overflow-wrap: anywhere;
 }
 @media (max-width: 620px) {
   .practice-results {

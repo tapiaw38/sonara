@@ -13,6 +13,7 @@ import (
 // agent routing picks a slower reasoning model for anything that mentions code,
 // and a translation must never pay that latency. It always uses the fast tier.
 type TranslateUsecase interface {
+	ExecuteAligned(ctx context.Context, text, language string) ([]TranslationLine, error)
 	// ExecuteStream hands each token to onDelta as it arrives and returns the
 	// full translation.
 	ExecuteStream(ctx context.Context, text string, onDelta func(string)) (string, error)

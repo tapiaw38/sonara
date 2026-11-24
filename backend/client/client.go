@@ -138,6 +138,14 @@ func (c *Client) TranslateTo(ctx context.Context, text, language string) (string
 	return c.translate.ExecuteTo(ctx, text, language, nil)
 }
 
+type TranslationLine = assistant.TranslationLine
+
+// TranslateAligned returns translations paired with the exact source text.
+func (c *Client) TranslateAligned(ctx context.Context, text, language string) ([]TranslationLine, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Translation)
+	return c.translate.ExecuteAligned(ctx, text, language)
+}
+
 // Close stops the local Whisper server if Sonara started it.
 func (c *Client) Close() { c.local.Stop() }
 
