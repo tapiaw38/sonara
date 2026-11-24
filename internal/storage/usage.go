@@ -67,9 +67,10 @@ type UsagePeriod struct {
 	Models    []UsageGroup `json:"models"`
 }
 type UsageReport struct {
-	Periods        []UsagePeriod `json:"periods"`
-	Prices         []UsagePrice  `json:"prices"`
-	CatalogUpdated string        `json:"catalogUpdated"`
+	Projection     UsageProjection `json:"projection"`
+	Periods        []UsagePeriod   `json:"periods"`
+	Prices         []UsagePrice    `json:"prices"`
+	CatalogUpdated string          `json:"catalogUpdated"`
 }
 
 func (s *Store) RecordUsage(e usage.Entry) error {
@@ -218,6 +219,10 @@ func (s *Store) APIUsage(now time.Time) (UsageReport, error) {
 			return UsageReport{}, err
 		}
 		report.Periods = append(report.Periods, result)
+	}
+	report.Projection, err = s.usageProjection(today, now, report.Periods[1], report.Periods[2])
+	if err != nil {
+		return UsageReport{}, err
 	}
 	return report, nil
 }
