@@ -181,7 +181,7 @@ func (a *App) applyDiarization(ctx context.Context, run *meetingRun, track strin
 	if track == storage.TrackMicrophone {
 		speakers = a.MeetingPeople()
 	}
-	spans, err := a.diarizer.Diarize(ctx, audio.WAV(pcm), speakers)
+	spans, err := a.diarizer.Diarize(a.apiUsageContext(ctx), audio.WAV(pcm), speakers)
 	if err != nil {
 		if ctx.Err() == nil {
 			logf("meeting %s: diarization of %s skipped: %v", run.sessionID, track, err)

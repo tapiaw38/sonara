@@ -24,6 +24,8 @@ export function DiscardPendingSegment():Promise<boolean>;
 
 export function ExportMeetingTranscript(arg1:string):Promise<string>;
 
+export function GetAPIUsage():Promise<storage.UsageReport>;
+
 export function GetAzureOpenAISettings():Promise<app.AzureOpenAIForm>;
 
 export function GetCapabilityProviders():Promise<storage.CapabilityProviders>;
@@ -63,6 +65,8 @@ export function RecordVoiceSample():Promise<void>;
 export function RenameMeetingSpeaker(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Record<string, string>>;
 
 export function RetryMeetingSegments(arg1:string):Promise<number>;
+
+export function SaveAPIUsagePrices(arg1:Array<storage.UsagePrice>):Promise<void>;
 
 export function SaveSessionProfile(arg1:string,arg2:storage.SessionProfile):Promise<void>;
 

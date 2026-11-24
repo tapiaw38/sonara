@@ -9,10 +9,12 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sonara/backend/usage"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"sonara/backend/internal/domain"
 	"sonara/backend/internal/platform/config"
@@ -112,11 +114,13 @@ func (g *gateway) newResponsesRequest(ctx context.Context, in domain.Request, mo
 	return req, nil
 }
 
-func (g *gateway) Respond(ctx context.Context, in domain.Request, model, instructions string) (string, error) {
+func (g *gateway) Respond(ctx context.Context, in domain.Request, model, instructions string) (_ string, callErr error) {
 	req, err := g.newResponsesRequest(ctx, in, model, instructions, false)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "openai", model, usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -126,6 +130,7 @@ func (g *gateway) Respond(ctx context.Context, in domain.Request, model, instruc
 	if err != nil {
 		return "", err
 	}
+	meter.Observe(responseBody)
 	var result responseResult
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return "", fmt.Errorf("OpenAI returned an invalid response")
@@ -197,11 +202,13 @@ func parseStreamEvent(line string) (delta string, done bool, failure string) {
 // RespondStream streams the answer, handing each token to onDelta as it lands
 // and returning the full text. The caller sees the first words in a few hundred
 // milliseconds instead of waiting for the whole completion.
-func (g *gateway) RespondStream(ctx context.Context, in domain.Request, model, instructions string, onDelta func(string)) (string, error) {
+func (g *gateway) RespondStream(ctx context.Context, in domain.Request, model, instructions string, onDelta func(string)) (_ string, callErr error) {
 	req, err := g.newResponsesRequest(ctx, in, model, instructions, true)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "openai", model, usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -215,10 +222,10 @@ func (g *gateway) RespondStream(ctx context.Context, in domain.Request, model, i
 		}
 		return "", fmt.Errorf("OpenAI request failed with status %d", resp.StatusCode)
 	}
-	return readResponseStream(io.LimitReader(resp.Body, 8<<20), onDelta)
+	return readResponseStream(io.LimitReader(resp.Body, 8<<20), onDelta, meter)
 }
 
-func readResponseStream(body io.Reader, onDelta func(string)) (string, error) {
+func readResponseStream(body io.Reader, onDelta func(string), meters ...*usage.Meter) (string, error) {
 	var text strings.Builder
 	completed := false
 	scanner := bufio.NewScanner(body)
@@ -226,6 +233,7 @@ func readResponseStream(body io.Reader, onDelta func(string)) (string, error) {
 	// 64KB token limit is not enough.
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for scanner.Scan() {
+		usage.ObserveSSE(scanner.Bytes(), meters...)
 		delta, done, failure := parseStreamEvent(scanner.Text())
 		if failure != "" {
 			return "", fmt.Errorf("OpenAI request failed: %s", failure)
@@ -260,7 +268,7 @@ func (g *gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	return g.TranscribeWithPrompt(ctx, audio, filename, language, "")
 }
 
-func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filename, language, prompt string) (domain.Transcript, error) {
+func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filename, language, prompt string) (_ domain.Transcript, callErr error) {
 	apiKey := g.configuredKey()
 	if apiKey == "" {
 		return domain.Transcript{}, fmt.Errorf("OpenAI is not configured")
@@ -278,6 +286,9 @@ func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filena
 	req.Header.Set("Content-Type", contentType)
 
 	started := time.Now()
+	meter := usage.Start(ctx, "openai", g.cfg.TranscribeModel, usage.Live)
+	meter.AudioSeconds = usage.WAVSeconds(audio)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	// Do returns once the response headers are in, so this split separates
 	// "waiting for OpenAI" from "downloading the transcript".
@@ -300,6 +311,7 @@ func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filena
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, fmt.Errorf("OpenAI transcription failed with status %d", resp.StatusCode)
 	}
+	meter.Observe(resultBody)
 	var result struct {
 		Text string `json:"text"`
 	}
@@ -311,7 +323,7 @@ func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filena
 }
 
 // Speak turns text into spoken audio (wav) using OpenAI's TTS endpoint.
-func (g *gateway) Speak(ctx context.Context, text, voice, model string) ([]byte, error) {
+func (g *gateway) Speak(ctx context.Context, text, voice, model string) (_ []byte, callErr error) {
 	apiKey := g.configuredKey()
 	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI is not configured")
@@ -336,6 +348,9 @@ func (g *gateway) Speak(ctx context.Context, text, voice, model string) ([]byte,
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	meter := usage.Start(ctx, "openai", model, usage.TTS)
+	meter.Characters = int64(utf8.RuneCountInString(text))
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -356,6 +371,7 @@ func (g *gateway) Speak(ctx context.Context, text, voice, model string) ([]byte,
 	if len(audio) == 0 {
 		return nil, fmt.Errorf("OpenAI TTS returned no audio")
 	}
+	meter.AudioSeconds = usage.WAVSeconds(audio)
 	return audio, nil
 }
 

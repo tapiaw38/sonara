@@ -42,6 +42,10 @@ export function ExportMeetingTranscript(arg1) {
   return window['go']['app']['App']['ExportMeetingTranscript'](arg1);
 }
 
+export function GetAPIUsage() {
+  return window['go']['app']['App']['GetAPIUsage']();
+}
+
 export function GetAzureOpenAISettings() {
   return window['go']['app']['App']['GetAzureOpenAISettings']();
 }
@@ -120,6 +124,10 @@ export function RenameMeetingSpeaker(arg1, arg2, arg3, arg4) {
 
 export function RetryMeetingSegments(arg1) {
   return window['go']['app']['App']['RetryMeetingSegments'](arg1);
+}
+
+export function SaveAPIUsagePrices(arg1) {
+  return window['go']['app']['App']['SaveAPIUsagePrices'](arg1);
 }
 
 export function SaveSessionProfile(arg1, arg2) {

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"sonara/backend/usage"
 	"strings"
 	"sync"
 
@@ -21,12 +22,13 @@ import (
 // provider, chosen in Settings and persisted there — never an automatic
 // fallback chain. See providers.Registry/Selector/Transcriber.
 type Client struct {
-	mu       sync.RWMutex
-	cfg      config.Config
-	provider openai.Gateway
-	deepseek *deepseek.Gateway
-	azure    *azureopenai.Gateway
-	local    *localwhisper.Gateway
+	usageRecorder usage.Recorder
+	mu            sync.RWMutex
+	cfg           config.Config
+	provider      openai.Gateway
+	deepseek      *deepseek.Gateway
+	azure         *azureopenai.Gateway
+	local         *localwhisper.Gateway
 
 	textVision        *providers.Selector
 	liveTranscribe    *providers.Transcriber
@@ -70,7 +72,9 @@ type AzureConfig struct {
 	LiveDeployment       string
 }
 
-func New() *Client {
+func New() *Client { return NewWithUsage(nil) }
+
+func NewWithUsage(record usage.Recorder) *Client {
 	cfg := config.Load()
 	provider := openai.NewGateway(cfg)
 	cheap := deepseek.NewGateway(cfg)
@@ -89,7 +93,7 @@ func New() *Client {
 	liveTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
 	meetingTranscribe := providers.NewTranscriber(registry, providers.OpenAI)
 	return &Client{
-		cfg: cfg, provider: provider, deepseek: cheap, azure: azure, local: local,
+		usageRecorder: record, cfg: cfg, provider: provider, deepseek: cheap, azure: azure, local: local,
 		textVision: textVision, liveTranscribe: liveTranscribe, meetingTranscribe: meetingTranscribe,
 		respond:      assistant.NewRespondUsecase(textVision, cfg),
 		screen:       assistant.NewAnalyzeScreenUsecase(textVision, cfg),
@@ -104,6 +108,7 @@ func New() *Client {
 
 // Title names a session from its opening exchange.
 func (c *Client) Title(ctx context.Context, exchange string) (string, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Summary)
 	return c.title.Execute(ctx, exchange)
 }
 
@@ -112,6 +117,7 @@ func (c *Client) Title(ctx context.Context, exchange string) (string, error) {
 // real names found in the conversation itself, never invented. Uses
 // whichever provider TextProvider currently names.
 func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (map[string]string, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Names)
 	return c.suggestNames.Execute(ctx, transcript)
 }
 
@@ -119,11 +125,13 @@ func (c *Client) SuggestSpeakerNames(ctx context.Context, transcript string) (ma
 // fast tier, token by token. Independent of RespondStream so a reply and its
 // translation can run at the same time.
 func (c *Client) TranslateStream(ctx context.Context, text string, onDelta func(string)) (string, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Translation)
 	return c.translate.ExecuteStream(ctx, text, onDelta)
 }
 
 // TranslateTo returns a translation into Spanish or English.
 func (c *Client) TranslateTo(ctx context.Context, text, language string) (string, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Translation)
 	return c.translate.ExecuteTo(ctx, text, language, nil)
 }
 
@@ -254,6 +262,7 @@ func (c *Client) MeetingProvider() string { return c.meetingTranscribe.Provider(
 
 // TranscribeMeeting is Transcribe for meeting recordings.
 func (c *Client) TranscribeMeeting(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Meeting)
 	return toTranscript(c.meeting.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language}))
 }
 
@@ -273,6 +282,7 @@ func (c *Client) SetAPIKey(key string) error {
 }
 
 func (c *Client) Respond(ctx context.Context, message, mode, sessionContext string) (Response, error) {
+	ctx = usage.With(ctx, c.usageRecorder, responseFunction(mode))
 	output, err := c.respond.Execute(ctx, assistant.RespondInput{Message: message, Mode: mode, Context: sessionContext})
 	if err != nil {
 		return Response{}, err
@@ -283,6 +293,7 @@ func (c *Client) Respond(ctx context.Context, message, mode, sessionContext stri
 // RespondStream is Respond with each token handed to onDelta as it arrives, so
 // the UI can show the answer forming instead of waiting for the full reply.
 func (c *Client) RespondStream(ctx context.Context, message, mode, sessionContext string, onDelta func(string)) (Response, error) {
+	ctx = usage.With(ctx, c.usageRecorder, responseFunction(mode))
 	output, err := c.respond.ExecuteStream(ctx, assistant.RespondInput{Message: message, Mode: mode, Context: sessionContext}, onDelta)
 	if err != nil {
 		return Response{}, err
@@ -291,6 +302,7 @@ func (c *Client) RespondStream(ctx context.Context, message, mode, sessionContex
 }
 
 func (c *Client) AnalyzeScreen(ctx context.Context, imageData, prompt string) (Response, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Copilot)
 	output, err := c.screen.Execute(ctx, assistant.AnalyzeScreenInput{ImageData: imageData, Prompt: prompt})
 	if err != nil {
 		return Response{}, err
@@ -299,11 +311,13 @@ func (c *Client) AnalyzeScreen(ctx context.Context, imageData, prompt string) (R
 }
 
 func (c *Client) Transcribe(ctx context.Context, audio []byte, filename, language string) (Transcript, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Live)
 	return toTranscript(c.transcribe.Execute(ctx, assistant.TranscribeInput{Audio: audio, Filename: filename, Language: language}))
 }
 
 // TranscribePractice gives the selected transcriber context for spoken interview answers.
 func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language string) (Transcript, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Practice)
 	prompt := "Respuesta espontánea de una persona en una entrevista. Transcribí lo que realmente se oye, con puntuación natural. Conservá nombres, siglas, vocabulario técnico y cambios de idioma. No completes palabras dudosas ni agregues texto durante el silencio."
 	if language == "en" {
 		prompt = "A candidate speaking spontaneously in an interview. Transcribe only what is audible, with natural punctuation. Preserve names, acronyms, technical terms, and language switches. Do not fill in unclear words or add text during silence."
@@ -316,6 +330,7 @@ func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language 
 // interviewer voice. Always OpenAI, by design: unlike text/vision/transcribe,
 // this capability has no Settings-level provider choice.
 func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
 	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
 }
 
@@ -329,4 +344,15 @@ func toTranscript(output *domain.Transcript, err error) (Transcript, error) {
 		UploadBytes: output.UploadBytes, ProcessingMS: output.ProcessingMS,
 		WaitMS: output.WaitMS, TotalMS: output.TotalMS,
 	}, err
+}
+
+func responseFunction(mode string) string {
+	switch mode {
+	case "practice", "practice-turn", "practice-suggestion":
+		return usage.Practice
+	case "summary", "memory":
+		return usage.Summary
+	default:
+		return usage.Copilot
+	}
 }

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sonara/backend/usage"
 	"strings"
 	"sync"
 	"syscall"
@@ -139,7 +140,7 @@ func (g *Gateway) RespondStream(context.Context, domain.Request, string, string,
 	return "", errTextUnsupported
 }
 
-func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, language string) (domain.Transcript, error) {
+func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, language string) (_ domain.Transcript, callErr error) {
 	if err := g.ensureServer(ctx); err != nil {
 		return domain.Transcript{}, err
 	}
@@ -173,6 +174,9 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	started := time.Now()
+	meter := usage.Start(ctx, "local", "whisper-local", usage.Live)
+	meter.AudioSeconds = usage.WAVSeconds(audio)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	out.WaitMS = int(time.Since(started).Milliseconds())
 	if err != nil {

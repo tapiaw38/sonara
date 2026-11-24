@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sonara/backend/usage"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,12 +103,12 @@ func (g *Gemini) Diarize(ctx context.Context, wav []byte, _ int) ([]Span, error)
 	// Best-effort cleanup on an independent context: a canceled caller must
 	// not skip deleting what was already uploaded. Google expires it by
 	// itself after 48h either way.
-	defer g.cleanup(fileName, apiKey)
+	defer g.cleanup(ctx, fileName, apiKey)
 	return g.requestDiarization(ctx, apiKey, fileURI, mimeType, wavDurationMS(wav))
 }
 
-func (g *Gemini) cleanup(fileName, apiKey string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (g *Gemini) cleanup(parent context.Context, fileName, apiKey string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
 	defer cancel()
 	if err := g.deleteFile(ctx, apiKey, fileName); err != nil {
 		logx.Logf("could not delete the meeting audio uploaded to Gemini: %v", err)
@@ -129,7 +130,7 @@ func (g *Gemini) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri
 	start.Header.Set("X-Goog-Upload-Command", "start")
 	start.Header.Set("X-Goog-Upload-Header-Content-Length", strconv.Itoa(len(wav)))
 	start.Header.Set("X-Goog-Upload-Header-Content-Type", mimeType)
-	startResp, err := g.client.Do(start)
+	startResp, err := g.filesDo(start)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -150,7 +151,7 @@ func (g *Gemini) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri
 	put.Header.Set("Content-Length", strconv.Itoa(len(wav)))
 	put.Header.Set("X-Goog-Upload-Offset", "0")
 	put.Header.Set("X-Goog-Upload-Command", "upload, finalize")
-	putResp, err := g.client.Do(put)
+	putResp, err := g.filesDo(put)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -172,18 +173,18 @@ func (g *Gemini) uploadFile(ctx context.Context, apiKey string, wav []byte) (uri
 	for file.State == "PROCESSING" {
 		select {
 		case <-ctx.Done():
-			g.cleanup(decoded.File.Name, apiKey)
+			g.cleanup(ctx, decoded.File.Name, apiKey)
 			return "", "", "", ctx.Err()
 		case <-time.After(time.Second):
 		}
 		file, err = g.getFile(ctx, apiKey, decoded.File.Name)
 		if err != nil {
-			g.cleanup(decoded.File.Name, apiKey)
+			g.cleanup(ctx, decoded.File.Name, apiKey)
 			return "", "", "", err
 		}
 	}
 	if file.State != "ACTIVE" || file.URI == "" || file.MimeType == "" {
-		g.cleanup(decoded.File.Name, apiKey)
+		g.cleanup(ctx, decoded.File.Name, apiKey)
 		return "", "", "", fmt.Errorf("Gemini no devolvió un archivo de audio usable (estado %q)", file.State)
 	}
 	return file.URI, decoded.File.Name, file.MimeType, nil
@@ -196,7 +197,7 @@ func (g *Gemini) getFile(ctx context.Context, apiKey, fileName string) (geminiFi
 		return file, err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
-	resp, err := g.client.Do(req)
+	resp, err := g.filesDo(req)
 	if err != nil {
 		return file, err
 	}
@@ -218,7 +219,7 @@ func (g *Gemini) deleteFile(ctx context.Context, apiKey, fileName string) error 
 		return err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
-	resp, err := g.client.Do(req)
+	resp, err := g.filesDo(req)
 	if err != nil {
 		return err
 	}
@@ -228,6 +229,13 @@ func (g *Gemini) deleteFile(ctx context.Context, apiKey, fileName string) error 
 		return fmt.Errorf("estado %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (g *Gemini) filesDo(req *http.Request) (*http.Response, error) {
+	m := usage.Start(req.Context(), "gemini", "gemini-files", usage.Diarization)
+	resp, err := g.client.Do(req)
+	m.Finish(err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300)
+	return resp, err
 }
 
 type geminiInput struct {
@@ -276,7 +284,7 @@ func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeTy
 			{Type: "audio", URI: fileURI, MimeType: mimeType},
 		},
 		ResponseFormat: geminiResponseFormat{Type: "text", MimeType: "application/json", Schema: diarizeSchema},
-	})
+	}, float64(durationMS)/1000)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +298,7 @@ func (g *Gemini) requestDiarization(ctx context.Context, apiKey, fileURI, mimeTy
 // interact is the shared POST /interactions call: build the request, check
 // the HTTP and interaction status, and concatenate the model's text output.
 // Callers each decode that text into their own expected JSON shape.
-func (g *Gemini) interact(ctx context.Context, apiKey string, request geminiRequest) (string, error) {
+func (g *Gemini) interact(ctx context.Context, apiKey string, request geminiRequest, seconds float64) (_ string, callErr error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", err
@@ -301,6 +309,9 @@ func (g *Gemini) interact(ctx context.Context, apiKey string, request geminiRequ
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	meter := usage.Start(ctx, "gemini", request.Model, usage.Diarization)
+	meter.AudioSeconds = seconds
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -313,6 +324,7 @@ func (g *Gemini) interact(ctx context.Context, apiKey string, request geminiRequ
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("Gemini respondió con estado %d", resp.StatusCode)
 	}
+	meter.Observe(respBody)
 	var decoded geminiInteraction
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
 		return "", fmt.Errorf("Gemini devolvió una respuesta inválida")
@@ -375,7 +387,7 @@ func (g *Gemini) DetectEcho(ctx context.Context, sampleWav, meetingWav []byte) (
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo subir el audio de la reunión: %w", err)
 	}
-	defer g.cleanup(fileName, apiKey)
+	defer g.cleanup(ctx, fileName, apiKey)
 	text, err := g.interact(ctx, apiKey, geminiRequest{
 		Model: geminiModelName(),
 		Input: []geminiInput{
@@ -384,7 +396,7 @@ func (g *Gemini) DetectEcho(ctx context.Context, sampleWav, meetingWav []byte) (
 			{Type: "audio", URI: fileURI, MimeType: mimeType},
 		},
 		ResponseFormat: geminiResponseFormat{Type: "text", MimeType: "application/json", Schema: echoSchema},
-	})
+	}, usage.WAVSeconds(sampleWav)+usage.WAVSeconds(meetingWav))
 	if err != nil {
 		return nil, err
 	}

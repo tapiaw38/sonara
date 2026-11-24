@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sonara/backend/usage"
 	"strconv"
 )
 
@@ -49,7 +50,7 @@ type Sherpa struct{}
 // Available reports whether the CLI is installed.
 func (Sherpa) Available() bool { return sherpaBin() != "" }
 
-func (Sherpa) Diarize(ctx context.Context, wav []byte, speakers int) ([]Span, error) {
+func (Sherpa) Diarize(ctx context.Context, wav []byte, speakers int) (_ []Span, callErr error) {
 	bin := sherpaBin()
 	if bin == "" {
 		return nil, fmt.Errorf("no hay motor de separación: falta la clave de Gemini o sherpa-onnx en %s", sherpaDir())
@@ -71,6 +72,10 @@ func (Sherpa) Diarize(ctx context.Context, wav []byte, speakers int) ([]Span, er
 	if speakers > 0 {
 		clustering = "--clustering.num-clusters=" + strconv.Itoa(speakers)
 	}
+
+	meter := usage.Start(ctx, "local", "sherpa-onnx", usage.Diarization)
+	meter.AudioSeconds = usage.WAVSeconds(wav)
+	defer func() { meter.Finish(callErr == nil) }()
 	output, err := exec.CommandContext(ctx, bin, clustering,
 		"--segmentation.num-threads=4", "--embedding.num-threads=4",
 		"--segmentation.pyannote-model="+filepath.Join(dir, "sherpa-onnx-pyannote-segmentation-3-0", "model.onnx"),

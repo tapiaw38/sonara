@@ -12,6 +12,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sonara/backend/usage"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,10 +75,11 @@ type chatMessage struct {
 }
 
 type chatRequest struct {
-	Model     string        `json:"model"`
-	Messages  []chatMessage `json:"messages"`
-	MaxTokens int           `json:"max_tokens"`
-	Stream    bool          `json:"stream,omitempty"`
+	StreamOptions map[string]bool `json:"stream_options,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []chatMessage   `json:"messages"`
+	MaxTokens     int             `json:"max_tokens"`
+	Stream        bool            `json:"stream,omitempty"`
 }
 
 type chatResult struct {
@@ -102,7 +104,7 @@ func (g *Gateway) newChatRequest(ctx context.Context, in domain.Request, model, 
 	if in.ImageData != "" {
 		return nil, errors.New("DeepSeek does not accept images")
 	}
-	body, err := json.Marshal(chatRequest{
+	payload := chatRequest{
 		Model: g.modelFor(model),
 		Messages: []chatMessage{
 			{Role: "system", Content: instructions},
@@ -110,7 +112,11 @@ func (g *Gateway) newChatRequest(ctx context.Context, in domain.Request, model, 
 		},
 		MaxTokens: g.cfg.MaxOutputTokens,
 		Stream:    stream,
-	})
+	}
+	if stream {
+		payload.StreamOptions = map[string]bool{"include_usage": true}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +141,13 @@ func failure(status int, body []byte) error {
 	return fmt.Errorf("DeepSeek request failed with status %d", status)
 }
 
-func (g *Gateway) Respond(ctx context.Context, in domain.Request, model, instructions string) (string, error) {
+func (g *Gateway) Respond(ctx context.Context, in domain.Request, model, instructions string) (_ string, callErr error) {
 	req, err := g.newChatRequest(ctx, in, model, instructions, false)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "deepseek", g.modelFor(model), usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -152,6 +160,7 @@ func (g *Gateway) Respond(ctx context.Context, in domain.Request, model, instruc
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", failure(resp.StatusCode, body)
 	}
+	meter.Observe(body)
 	var result chatResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", errors.New("DeepSeek returned an invalid response")
@@ -193,11 +202,13 @@ func parseStreamLine(line string) (delta string, done bool, failureMessage strin
 	return result.Choices[0].Delta.Content, false, ""
 }
 
-func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, model, instructions string, onDelta func(string)) (string, error) {
+func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, model, instructions string, onDelta func(string)) (_ string, callErr error) {
 	req, err := g.newChatRequest(ctx, in, model, instructions, true)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "deepseek", g.modelFor(model), usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -207,15 +218,16 @@ func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, model, i
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		return "", failure(resp.StatusCode, body)
 	}
-	return readStream(io.LimitReader(resp.Body, 8<<20), onDelta)
+	return readStream(io.LimitReader(resp.Body, 8<<20), onDelta, meter)
 }
 
-func readStream(body io.Reader, onDelta func(string)) (string, error) {
+func readStream(body io.Reader, onDelta func(string), meters ...*usage.Meter) (string, error) {
 	var text strings.Builder
 	completed := false
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for scanner.Scan() {
+		usage.ObserveSSE(scanner.Bytes(), meters...)
 		delta, done, failed := parseStreamLine(scanner.Text())
 		if failed != "" {
 			return text.String(), fmt.Errorf("DeepSeek request failed: %s", failed)
@@ -258,7 +270,7 @@ func checkASRAudio(audio []byte) error {
 
 // Transcribe sends one block to /v1/tools/asr. DeepSeek has no language
 // parameter (it detects the language itself), so language is ignored here.
-func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, _ string) (domain.Transcript, error) {
+func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, _ string) (_ domain.Transcript, callErr error) {
 	apiKey := g.key()
 	if apiKey == "" {
 		return domain.Transcript{}, ErrNotConfigured
@@ -290,6 +302,9 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, _ stri
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	started := time.Now()
+	meter := usage.Start(ctx, "deepseek", "deepseek-asr", usage.Live)
+	meter.AudioSeconds = usage.WAVSeconds(audio)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	out.WaitMS = int(time.Since(started).Milliseconds())
 	if err != nil {
@@ -310,6 +325,7 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, _ stri
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, fmt.Errorf("DeepSeek transcription failed with status %d", resp.StatusCode)
 	}
+	meter.Observe(result)
 	var decoded struct {
 		RequestID string `json:"request_id"`
 		Text      string `json:"text"`

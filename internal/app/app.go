@@ -133,7 +133,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.mu.Lock()
 	a.ctx = ctx
-	a.backend = sonaraBackend.New()
+	a.backend = sonaraBackend.NewWithUsage(recordAPIUsage(database))
 	a.store = database
 	a.voiceCancel()
 	a.voiceContext, a.voiceCancel = context.WithCancel(ctx)
