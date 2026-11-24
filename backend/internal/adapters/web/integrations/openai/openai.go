@@ -25,7 +25,7 @@ type Gateway interface {
 	Respond(context.Context, domain.Request, string, string) (string, error)
 	RespondStream(context.Context, domain.Request, string, string, func(string)) (string, error)
 	Transcribe(context.Context, []byte, string, string) (domain.Transcript, error)
-	Speak(context.Context, string, string, string) ([]byte, error)
+	Speak(context.Context, string, string, string, float64) ([]byte, error)
 }
 
 type gateway struct {
@@ -323,7 +323,7 @@ func (g *gateway) TranscribeWithPrompt(ctx context.Context, audio []byte, filena
 }
 
 // Speak turns text into spoken audio (wav) using OpenAI's TTS endpoint.
-func (g *gateway) Speak(ctx context.Context, text, voice, model string) (_ []byte, callErr error) {
+func (g *gateway) Speak(ctx context.Context, text, voice, model string, speed float64) (_ []byte, callErr error) {
 	apiKey := g.configuredKey()
 	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI is not configured")
@@ -333,12 +333,13 @@ func (g *gateway) Speak(ctx context.Context, text, voice, model string) (_ []byt
 		instructions = "Sound like a person having a one-on-one conversation. Speak with warm, understated curiosity, natural contractions where written, and subtle changes in pitch and pace. Pause briefly between thoughts, link words naturally, and make the final question sound genuinely inquisitive. Use the language, dialect, and exact words of the input."
 	}
 	body, err := json.Marshal(struct {
-		Model          string `json:"model"`
-		Voice          string `json:"voice"`
-		Input          string `json:"input"`
-		ResponseFormat string `json:"response_format"`
-		Instructions   string `json:"instructions,omitempty"`
-	}{Model: model, Voice: voice, Input: text, ResponseFormat: "wav", Instructions: instructions})
+		Model          string  `json:"model"`
+		Voice          string  `json:"voice"`
+		Input          string  `json:"input"`
+		ResponseFormat string  `json:"response_format"`
+		Instructions   string  `json:"instructions,omitempty"`
+		Speed          float64 `json:"speed"`
+	}{Model: model, Voice: voice, Input: text, ResponseFormat: "wav", Instructions: instructions, Speed: speed})
 	if err != nil {
 		return nil, err
 	}

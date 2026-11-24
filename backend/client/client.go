@@ -330,19 +330,19 @@ func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language 
 }
 
 // Speak synthesizes through the configured Practice voice provider.
-func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
+func (c *Client) Speak(ctx context.Context, text string, speed float64) ([]byte, error) {
 	if c.PracticeVoiceProvider() == providers.Azure {
-		return c.SpeakAzurePractice(ctx, text)
+		return c.SpeakAzurePractice(ctx, text, speed)
 	}
 	if c.PracticeVoiceProvider() == providers.Local {
-		speak, err := c.OpenKokoroPractice("es")
+		speak, err := c.OpenKokoroPractice("es", speed)
 		if err != nil {
 			return nil, err
 		}
 		return speak(ctx, text)
 	}
 	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
-	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
+	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text, Speed: speed})
 }
 
 func (c *Client) PracticeVoiceProvider() string {
@@ -379,8 +379,8 @@ func (c *Client) CheckAzurePractice() error {
 }
 
 // The running Azure session keeps its selected audio provider until it ends.
-func (c *Client) SpeakAzurePractice(ctx context.Context, text string) ([]byte, error) {
-	return c.azure.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, "alloy", "")
+func (c *Client) SpeakAzurePractice(ctx context.Context, text string, speed float64) ([]byte, error) {
+	return c.azure.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, "alloy", speed)
 }
 
 func (c *Client) TranscribeAzurePractice(ctx context.Context, wav []byte, language string) (Transcript, error) {
@@ -412,12 +412,12 @@ func responseFunction(mode string) string {
 }
 
 // OpenKokoroPractice validates and pins the local voice for a Practice session.
-func (c *Client) OpenKokoroPractice(language string) (func(context.Context, string) ([]byte, error), error) {
+func (c *Client) OpenKokoroPractice(language string, speed float64) (func(context.Context, string) ([]byte, error), error) {
 	voice, err := kokoro.Open(language)
 	if err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context, text string) ([]byte, error) {
-		return voice.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text)
+		return voice.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, speed)
 	}, nil
 }

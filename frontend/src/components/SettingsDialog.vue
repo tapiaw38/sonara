@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import {
   GetAzureOpenAISettings,
   GetCapabilityProviders,
+  GetPracticeVoiceSpeed,
   SetAzureOpenAIConfig,
   SetDeepSeekAPIKey,
   SetGeminiAPIKey,
@@ -12,6 +13,7 @@ import {
   SetOpenAIAPIKey,
   SetTextProvider,
   SetPracticeVoiceProvider,
+  SetPracticeVoiceSpeed,
   SetVisionProvider,
   AIEndpoint,
   ProviderStatus,
@@ -103,6 +105,9 @@ const providerVision = ref('openai')
 const providerLiveTranscribe = ref('openai')
 const providerMeeting = ref('openai')
 const providerVoice = ref('openai')
+const voiceSpeed = ref(1)
+const savingVoiceSpeed = ref(false)
+const voiceSpeedFormat = new Intl.NumberFormat('es', { maximumFractionDigits: 2 })
 const liveMode = ref('batch')
 const providersMessage = ref('')
 
@@ -131,6 +136,7 @@ async function loadProviders() {
     providerMeeting.value = providers.meeting
     providerVoice.value = providers.practiceVoice
     liveMode.value = providers.liveMode || 'batch'
+    voiceSpeed.value = await GetPracticeVoiceSpeed()
   } catch {
     // Keep the "openai" defaults the refs already have.
   }
@@ -249,7 +255,7 @@ async function setProvider(
       providerLiveTranscribe.value = name
     } else if (capability === 'voice') {
       await SetPracticeVoiceProvider(name)
-      providerVoice.value = name
+      await loadProviders()
     } else {
       await SetMeetingProvider(name)
       providerMeeting.value = name
@@ -258,6 +264,19 @@ async function setProvider(
   } catch (error) {
     providersMessage.value = String(error || 'No se pudo cambiar el proveedor')
     await loadProviders() // revert the dropdown to what is actually active
+  }
+}
+
+async function saveVoiceSpeed() {
+  savingVoiceSpeed.value = true
+  providersMessage.value = ''
+  try {
+    await SetPracticeVoiceSpeed(voiceSpeed.value)
+  } catch (error) {
+    providersMessage.value = String(error)
+    await loadProviders()
+  } finally {
+    savingVoiceSpeed.value = false
   }
 }
 
@@ -399,6 +418,21 @@ onMounted(async () => {
           >Kokoro genera la voz sin conexión. Práctica usa el proveedor de transcripción en vivo y
           el proveedor de texto seleccionados. Instalación en el README.</small
         >
+        <label for="voice-speed">
+          Velocidad de la voz
+          <output for="voice-speed">{{ voiceSpeedFormat.format(voiceSpeed) }}×</output>
+        </label>
+        <input
+          id="voice-speed"
+          v-model.number="voiceSpeed"
+          type="range"
+          min="0.8"
+          max="1.3"
+          step="0.05"
+          :disabled="savingVoiceSpeed"
+          @change="saveVoiceSpeed"
+        />
+        <small class="provider-hint">Se aplica al iniciar la próxima práctica.</small>
         <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
         <select
           id="live-mode"

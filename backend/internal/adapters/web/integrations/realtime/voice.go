@@ -30,7 +30,7 @@ type VoiceSession struct {
 	events    chan VoiceEvent
 }
 
-func DialVoice(ctx context.Context, baseURL, key, instructions string) (*VoiceSession, error) {
+func DialVoice(ctx context.Context, baseURL, key, instructions string, speed float64) (*VoiceSession, error) {
 	if key == "" {
 		return nil, fmt.Errorf("falta la clave de OpenAI para voz a voz")
 	}
@@ -64,7 +64,7 @@ func DialVoice(ctx context.Context, baseURL, key, instructions string) (*VoiceSe
 						"type": "semantic_vad", "eagerness": "low", "create_response": false, "interrupt_response": true,
 					},
 				},
-				"output": map[string]any{"format": format, "voice": "marin"},
+				"output": map[string]any{"format": format, "voice": "marin", "speed": speed},
 			},
 		},
 	}); err != nil {

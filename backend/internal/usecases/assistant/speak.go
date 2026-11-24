@@ -7,11 +7,12 @@ type SpeakUsecase interface {
 }
 
 type SpeakInput struct {
-	Text string
+	Text  string
+	Speed float64
 }
 
 type speaker interface {
-	Speak(ctx context.Context, text, voice, model string) ([]byte, error)
+	Speak(ctx context.Context, text, voice, model string, speed float64) ([]byte, error)
 }
 
 type speakUsecase struct {
@@ -25,5 +26,5 @@ func NewSpeakUsecase(gateway speaker, model, voice string) SpeakUsecase {
 }
 
 func (u *speakUsecase) Execute(ctx context.Context, input SpeakInput) ([]byte, error) {
-	return u.gateway.Speak(ctx, input.Text, u.voice, u.model)
+	return u.gateway.Speak(ctx, input.Text, u.voice, u.model, input.Speed)
 }

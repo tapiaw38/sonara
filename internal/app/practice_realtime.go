@@ -45,18 +45,22 @@ func (a *App) PracticeRealtime() error {
 		a.mu.Unlock()
 	}()
 
-	switch a.backend.PracticeVoiceProvider() {
+	voiceProvider := a.backend.PracticeVoiceProvider()
+	speed := a.practiceVoiceSpeed(voiceProvider)
+	switch voiceProvider {
 	case "azure":
 		if err := a.backend.CheckAzurePractice(); err != nil {
 			return err
 		}
-		err := a.runBatchPractice(ctx, language, generation, a.backend.TranscribeAzurePractice, a.backend.SpeakAzurePractice)
+		err := a.runBatchPractice(ctx, language, generation, a.backend.TranscribeAzurePractice, func(ctx context.Context, text string) ([]byte, error) {
+			return a.backend.SpeakAzurePractice(ctx, text, speed)
+		})
 		if ctx.Err() != nil {
 			return nil
 		}
 		return err
 	case "local":
-		speak, err := a.backend.OpenKokoroPractice(language)
+		speak, err := a.backend.OpenKokoroPractice(language, speed)
 		if err != nil {
 			return err
 		}
@@ -74,7 +78,7 @@ func (a *App) PracticeRealtime() error {
 	if sessionContext != "" {
 		instructions += "\n\n" + sessionContext
 	}
-	session, err := a.backend.OpenPracticeVoice(ctx, instructions+"\n\n"+practice.InterviewLanguageInstruction(language))
+	session, err := a.backend.OpenPracticeVoice(ctx, instructions+"\n\n"+practice.InterviewLanguageInstruction(language), speed)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil

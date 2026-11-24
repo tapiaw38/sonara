@@ -74,10 +74,10 @@ func (c *Client) OpenMeetingLive(ctx context.Context, language string) (*LiveSes
 }
 
 // OpenPracticeVoice opens OpenAI's conversational Realtime API for Practice.
-func (c *Client) OpenPracticeVoice(ctx context.Context, instructions string) (*realtime.VoiceSession, error) {
+func (c *Client) OpenPracticeVoice(ctx context.Context, instructions string, speed float64) (*realtime.VoiceSession, error) {
 	ctx = usage.With(ctx, c.usageRecorder, usage.Practice)
 	c.mu.RLock()
 	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
 	c.mu.RUnlock()
-	return realtime.DialVoice(ctx, base, key, instructions)
+	return realtime.DialVoice(ctx, base, key, instructions, speed)
 }

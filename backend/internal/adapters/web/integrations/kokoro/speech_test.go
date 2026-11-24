@@ -35,11 +35,12 @@ for arg do
   case "$arg" in
     --kokoro-lang=*) lang=${arg#*=} ;;
     --sid=*) sid=${arg#*=} ;;
+    --kokoro-length-scale=*) scale=${arg#*=} ;;
     --output-filename=*) out=${arg#*=} ;;
   esac
 done
-case "$lang:$sid:$arg" in
-  "es:28:¿Listo?"|"en-us:2:Ready?") cp "$KOKORO_TEST_WAV" "$out" ;;
+case "$lang:$sid:$scale:$arg" in
+  "es:28:1.176471:¿Listo?"|"en-us:2:1.176471:Ready?") cp "$KOKORO_TEST_WAV" "$out" ;;
   *) exit 1 ;;
 esac
 `
@@ -54,14 +55,14 @@ esac
 		}
 		var records []usage.Entry
 		ctx := usage.With(context.Background(), func(e usage.Entry) { records = append(records, e) }, usage.TTS)
-		if _, err := voice.Speak(ctx, example.text); err != nil {
+		if _, err := voice.Speak(ctx, example.text, 0.85); err != nil {
 			t.Fatal(err)
 		}
 		if len(records) != 1 || records[0].Provider != "local" || records[0].Function != usage.TTS ||
 			records[0].Model != model || records[0].AudioSeconds != 1 || records[0].Characters == 0 || !records[0].OK {
 			t.Fatalf("unexpected usage: %+v", records)
 		}
-		if _, err := voice.Speak(ctx, "force failure"); err == nil || len(records) != 2 || records[1].OK {
+		if _, err := voice.Speak(ctx, "force failure", 0.85); err == nil || len(records) != 2 || records[1].OK {
 			t.Fatalf("failed synthesis not recorded: %v, %+v", err, records)
 		}
 	}

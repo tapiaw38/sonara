@@ -54,6 +54,10 @@ export function GetCapabilityProviders() {
   return window['go']['app']['App']['GetCapabilityProviders']();
 }
 
+export function GetPracticeVoiceSpeed() {
+  return window['go']['app']['App']['GetPracticeVoiceSpeed']();
+}
+
 export function GetSessionProfile(arg1) {
   return window['go']['app']['App']['GetSessionProfile'](arg1);
 }
@@ -208,6 +212,10 @@ export function SetOpenAIAPIKey(arg1) {
 
 export function SetPracticeVoiceProvider(arg1) {
   return window['go']['app']['App']['SetPracticeVoiceProvider'](arg1);
+}
+
+export function SetPracticeVoiceSpeed(arg1) {
+  return window['go']['app']['App']['SetPracticeVoiceSpeed'](arg1);
 }
 
 export function SetTextProvider(arg1) {

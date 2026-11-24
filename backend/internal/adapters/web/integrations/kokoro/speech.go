@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,7 +49,7 @@ func openAt(root, language string) (*Voice, error) {
 	return voice, nil
 }
 
-func (v *Voice) Speak(ctx context.Context, text string) (_ []byte, callErr error) {
+func (v *Voice) Speak(ctx context.Context, text string, speed float64) (_ []byte, callErr error) {
 	dir, err := os.MkdirTemp("", "sonara-kokoro-")
 	if err != nil {
 		return nil, err
@@ -63,6 +64,7 @@ func (v *Voice) Speak(ctx context.Context, text string) (_ []byte, callErr error
 		"--kokoro-tokens="+filepath.Join(v.dir, "tokens.txt"),
 		"--kokoro-data-dir="+filepath.Join(v.dir, "espeak-ng-data"),
 		"--kokoro-lang="+v.lang, "--sid="+v.sid, "--num-threads=2",
+		"--kokoro-length-scale="+strconv.FormatFloat(1/speed, 'f', 6, 64),
 		"--output-filename="+output, "--", text)
 	meter := usage.Start(ctx, "local", model, usage.TTS)
 	meter.Characters = int64(utf8.RuneCountInString(text))
