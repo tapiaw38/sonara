@@ -129,19 +129,21 @@ function updateHistory(entries: BilingualText[], panel: HTMLElement | null, text
   }
 }
 
+// A late translation of a line already on screen still lands after the
+// practice stopped or the turn was interrupted.
+const shown = (entries: BilingualText[], text: BilingualText) =>
+  entries.some((entry) => entry.turnId === text.turnId)
 const offQuestion = EventsOn('practice:question', (text: BilingualText) => {
-  if (active.value || busy.value) updateHistory(transcripts.value, transcriptPanel.value, text)
+  if (active.value || busy.value || shown(transcripts.value, text))
+    updateHistory(transcripts.value, transcriptPanel.value, text)
 })
 const offSuggestion = EventsOn('practice:suggestion', (text: BilingualText) => {
-  if (active.value || busy.value) updateHistory(suggestions.value, suggestionPanel.value, text)
+  if (active.value || busy.value || shown(suggestions.value, text))
+    updateHistory(suggestions.value, suggestionPanel.value, text)
 })
 
 const offInterrupted = EventsOn('practice:interrupted', (turnId: number) => {
   closedTurns.add(turnId)
-  for (const entries of [transcripts.value, suggestions.value]) {
-    const entry = entries.find((item) => item.turnId === turnId)
-    if (entry) entry.interrupted = true
-  }
 })
 
 onBeforeUnmount(() => {

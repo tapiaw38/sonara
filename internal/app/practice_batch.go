@@ -135,7 +135,9 @@ func (a *App) runBatchPractice(
 			return err
 		}
 		playback = p
-		current := func() bool { return ctx.Err() == nil && !p.interrupted.Load() }
+		// Interrupting stops the voice only: the question, the suggested
+		// answer and their translations still complete.
+		current := func() bool { return ctx.Err() == nil }
 		a.publishPracticeTextWhen(ctx, p.id, "practice:question", question, language, current)
 		go a.requestPracticeSuggestionWhen(ctx, p.id, language, answer, question, sessionContext, current)
 		answer = ""

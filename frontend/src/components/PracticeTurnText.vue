@@ -15,7 +15,6 @@ const target = computed(() => (props.entry.language === 'en' ? 'es' : 'en'))
 </script>
 
 <template>
-  <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
   <template v-if="entry.lines?.length">
     <span class="language-label" aria-label="Idioma de la traducción">
       {{ target.toUpperCase() }}
@@ -41,10 +40,6 @@ const target = computed(() => (props.entry.language === 'en' ? 'es' : 'en'))
 }
 .transcript-text {
   color: #c9cad3;
-}
-.practice-interrupted {
-  display: block;
-  opacity: 0.75;
 }
 .language-label {
   display: block;

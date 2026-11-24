@@ -77,23 +77,23 @@ func (a *App) publishPracticeTextWhen(ctx context.Context, answerID uint64, even
 		target = "es"
 	}
 	a.emit(event, text)
+	// The text is on screen now, so its translation always finishes: in its
+	// own goroutine, detached from the turn and the session, so interrupting
+	// the interviewer or ending the practice stops what comes next but never
+	// leaves a line half translated. Bounded by its own timeouts.
 	go func() {
-		requestCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		detached := context.Background()
+		requestCtx, cancel := context.WithTimeout(detached, 8*time.Second)
 		lines, err := a.backend.TranslateAligned(requestCtx, original, target)
 		cancel()
-		if !current() || ctx.Err() != nil {
-			return
-		}
 		if err == nil {
 			text.Lines = lines
 		} else {
-			text.Translation = retryPracticeText(ctx, answerID, event+" translation", current, func(requestCtx context.Context) (string, error) {
+			text.Translation = retryPracticeText(detached, answerID, event+" translation", func() bool { return true }, func(requestCtx context.Context) (string, error) {
 				return a.backend.TranslateTo(requestCtx, original, target)
 			})
 		}
-		if current() && ctx.Err() == nil {
-			a.emit(event, text)
-		}
+		a.emit(event, text)
 	}()
 }
 
