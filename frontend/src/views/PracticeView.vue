@@ -17,6 +17,7 @@ const active = ref(false)
 const busy = ref(false)
 const phase = ref<Phase>('idle')
 const message = ref('')
+const voiceNote = ref('')
 type BilingualText = {
   turnId: number
   original: string
@@ -70,6 +71,7 @@ async function start() {
   if (active.value || busy.value) return
   const current = ++run
   message.value = ''
+  voiceNote.value = ''
   answerLive.value = ''
   voiceHold.value = false
   active.value = true
@@ -102,6 +104,10 @@ function stop() {
       if (current === run) busy.value = false
     })
 }
+
+const offVoiceNote = EventsOn('practice:voice-note', (note: string) => {
+  if (active.value) voiceNote.value = note
+})
 
 const offVoiceHold = EventsOn('practice:voice-hold', (hold: boolean) => {
   if (active.value) voiceHold.value = hold
@@ -148,6 +154,7 @@ const offInterrupted = EventsOn('practice:interrupted', (turnId: number) => {
 
 onBeforeUnmount(() => {
   offVoiceHold()
+  offVoiceNote()
   offQuestion()
   offSuggestion()
   offInterrupted()
@@ -203,6 +210,7 @@ onBeforeUnmount(() => {
       </p>
       <small v-if="active && voiceHold" role="status"> Sigo escuchando… </small>
       <button v-if="started && active" class="end-button" @click="stop">Terminar práctica</button>
+      <small v-if="voiceNote" role="status">{{ voiceNote }}</small>
       <small v-if="message" class="meeting-message" role="alert">{{ message }}</small>
     </section>
     <div

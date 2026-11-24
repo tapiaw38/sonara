@@ -54,15 +54,17 @@ esac
 			t.Fatal(err)
 		}
 		var records []usage.Entry
+		engine := &Engine{}
+		defer engine.Close()
 		ctx := usage.With(context.Background(), func(e usage.Entry) { records = append(records, e) }, usage.TTS)
-		if _, err := voice.Speak(ctx, example.text, 0.85); err != nil {
+		if _, err := engine.Speak(ctx, voice, example.text, 0.85, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(records) != 1 || records[0].Provider != "local" || records[0].Function != usage.TTS ||
 			records[0].Model != model || records[0].AudioSeconds != 1 || records[0].Characters == 0 || !records[0].OK {
 			t.Fatalf("unexpected usage: %+v", records)
 		}
-		if _, err := voice.Speak(ctx, "force failure", 0.85); err == nil || len(records) != 2 || records[1].OK {
+		if _, err := engine.Speak(ctx, voice, "force failure", 0.85, nil); err == nil || len(records) != 2 || records[1].OK {
 			t.Fatalf("failed synthesis not recorded: %v, %+v", err, records)
 		}
 	}

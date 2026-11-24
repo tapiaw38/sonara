@@ -60,7 +60,15 @@ func (a *App) PracticeRealtime() error {
 		}
 		return err
 	case "local":
-		speak, err := a.backend.OpenKokoroPractice(language, speed)
+		var lastNote string
+		speak, err := a.backend.OpenKokoroPractice(language, speed, func(note string) {
+			if note == lastNote {
+				return
+			}
+			lastNote = note
+			logf("practice: %s", note)
+			a.emit("practice:voice-note", note)
+		})
 		if err != nil {
 			return err
 		}

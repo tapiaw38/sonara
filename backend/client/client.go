@@ -23,6 +23,7 @@ import (
 // provider, chosen in Settings and persisted there — never an automatic
 // fallback chain. See providers.Registry/Selector/Transcriber.
 type Client struct {
+	kokoro                kokoro.Engine
 	usageRecorder         usage.Recorder
 	practiceVoiceProvider string
 	mu                    sync.RWMutex
@@ -147,7 +148,10 @@ func (c *Client) TranslateAligned(ctx context.Context, text, language string) ([
 }
 
 // Close stops the local Whisper server if Sonara started it.
-func (c *Client) Close() { c.local.Stop() }
+func (c *Client) Close() {
+	c.kokoro.Close()
+	c.local.Stop()
+}
 
 func (c *Client) Status() string {
 	c.mu.RLock()
@@ -343,7 +347,7 @@ func (c *Client) Speak(ctx context.Context, text string, speed float64) ([]byte,
 		return c.SpeakAzurePractice(ctx, text, speed)
 	}
 	if c.PracticeVoiceProvider() == providers.Local {
-		speak, err := c.OpenKokoroPractice("es", speed)
+		speak, err := c.OpenKokoroPractice("es", speed, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -420,12 +424,12 @@ func responseFunction(mode string) string {
 }
 
 // OpenKokoroPractice validates and pins the local voice for a Practice session.
-func (c *Client) OpenKokoroPractice(language string, speed float64) (func(context.Context, string) ([]byte, error), error) {
+func (c *Client) OpenKokoroPractice(language string, speed float64, note func(string)) (func(context.Context, string) ([]byte, error), error) {
 	voice, err := kokoro.Open(language)
 	if err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context, text string) ([]byte, error) {
-		return voice.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, speed)
+		return c.kokoro.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), voice, text, speed, note)
 	}, nil
 }

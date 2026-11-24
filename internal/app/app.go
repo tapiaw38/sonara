@@ -232,6 +232,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	// Before the store closes: pending meeting blocks still have to be written.
 	a.stopMeetingAndWait(15 * time.Second)
+	a.StopPractice()
 	a.echoCanceller.Stop()
 	if a.backend != nil {
 		a.backend.Close()
