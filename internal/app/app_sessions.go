@@ -67,7 +67,10 @@ func (a *App) OpenSession(id string) (storage.OpenSessionResult, error) {
 	a.latestVisualContext = visual
 	a.pendingAudio = nil
 	a.transcript = "Sesión reabierta"
+	a.transcriptFinal = false
 	a.translation, a.voiceReply = "", ""
+	a.translationLines, a.voiceReplyLines = nil, nil
+	a.voiceReplyTranslation = ""
 	a.voiceSequence++
 	a.streaming = false
 	a.droppedSegments = 0
@@ -195,8 +198,11 @@ func (a *App) NewSession() bool {
 	a.latestVisualContext = ""
 	a.pendingAudio = nil
 	a.transcript = "Esperando audio de la reunión…"
+	a.transcriptFinal = false
 	a.translation = ""
+	a.translationLines = nil
 	a.voiceReply = ""
+	a.voiceReplyLines, a.voiceReplyTranslation = nil, ""
 	a.voiceSequence++
 	a.streaming = false
 	a.droppedSegments = 0

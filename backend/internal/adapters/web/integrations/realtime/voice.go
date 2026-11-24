@@ -81,6 +81,16 @@ func (s *VoiceSession) Append(pcm []byte) error   { return s.transport.Append(pc
 func (s *VoiceSession) Events() <-chan VoiceEvent { return s.events }
 func (s *VoiceSession) Close() error              { return s.transport.Close() }
 
+// SetSpeed updates the output rate between responses.
+func (s *VoiceSession) SetSpeed(speed float64) error {
+	return s.transport.send(map[string]any{
+		"type": "session.update",
+		"session": map[string]any{"type": "realtime", "audio": map[string]any{
+			"output": map[string]any{"speed": speed},
+		}},
+	})
+}
+
 // Respond starts one response after the application has classified the input.
 func (s *VoiceSession) Respond() error {
 	return s.transport.send(map[string]any{"type": "response.create"})

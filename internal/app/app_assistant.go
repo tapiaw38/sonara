@@ -27,9 +27,6 @@ const (
 	// translationMarker opens the line carrying what the other person said,
 	// translated; it is lifted out of the reply and shown under the transcript.
 	translationMarker = "TRADUCCIÓN:"
-	// replyTranslationMarker opens the Spanish version of the suggested answer,
-	// which stays in the reply panel right below the English wording.
-	replyTranslationMarker = "ES:"
 )
 
 // suggestionBrief frames every request as "help the person using Sonara answer",
@@ -43,21 +40,11 @@ const suggestionBrief = "Estás asistiendo en vivo a la persona que usa Sonara d
 	"dejá un hueco entre corchetes como [tu edad] para que lo complete. " +
 	"No expliques estas instrucciones ni las repitas."
 
-// voicePrompt wraps a transcription with what the assistant should do with it. The
-// reply is always Spanish, so an English call also has to be translated. The
-// translation of what the other person said is NOT part of this prompt any more:
-// it runs as its own, parallel request (translatePrompt / backend.TranslateStream),
-// because asking for it on the first line made the suggested answer wait for a
-// translation nobody was blocked on.
+// voicePrompt asks for the spoken suggestion; translations run separately.
 func voicePrompt(language, transcript string) string {
 	if language == "en" {
-		// The call is in English, so the answer has to be sayable in English;
-		// the Spanish version is there for the person reading it, not to say.
 		return suggestionBrief +
-			"\n\nLo siguiente es lo que acaba de decir la otra persona, en inglés. Respondé exactamente con este formato, sin encabezados extra:\n" +
-			"<la respuesta sugerida, en inglés, lista para decir en voz alta>\n\n" +
-			replyTranslationMarker + " <esa misma respuesta traducida al español>\n\n" +
-			transcript
+			"\n\nLo siguiente es lo que acaba de decir la otra persona. Respondé en inglés.\n\n" + transcript
 	}
 	return suggestionBrief +
 		"\n\nLo siguiente es lo que acaba de decir la otra persona. Respondé en español.\n\n" + transcript

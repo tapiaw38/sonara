@@ -190,13 +190,17 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 	a.replySequence++
 	replyID := a.replySequence
 	a.transcript = transcript
+	a.transcriptFinal = true
 	a.translation, a.voiceReply = "", ""
+	a.translationLines, a.voiceReplyLines = nil, nil
+	a.voiceReplyTranslation = ""
 	a.voiceSequence++
 	a.streaming = true
 	a.listenStatus = "Escuchando audio de la reunión" // the reply itself shows it is being written
 	mode := a.assistantMode
 	contextText := a.buildSessionContextLocked()
 	backend := a.backend
+	voiceContext := a.voiceContext
 	a.mu.Unlock()
 	go func() {
 		defer cancel()
@@ -204,11 +208,11 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 			a.finishVoiceResponse(session, replyID, transcript, "", fmt.Errorf("backend no inicializado"))
 			return
 		}
+		target := "en"
 		if language == "en" {
-			// What they said, in Spanish, runs beside the reply instead of in
-			// front of it. A failure here only loses the translation line.
-			go a.streamTranslation(ctx, backend, session, replyID, transcript, queuedAt)
+			target = "es"
 		}
+		go a.translateCopilotText(voiceContext, backend, session, replyID, transcript, target, false)
 		var streamed strings.Builder
 		asked := time.Now()
 		var firstToken time.Duration
@@ -236,6 +240,12 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 				sinceMS(queuedAt, asked.Add(firstToken)))
 		}
 		a.finishVoiceResponse(session, replyID, transcript, output.Text, err)
+		if err == nil {
+			_, reply := splitTranslation(output.Text)
+			if strings.TrimSpace(reply) != "" && !strings.Contains(reply, "```") {
+				a.translateCopilotText(voiceContext, backend, session, replyID, reply, target, true)
+			}
+		}
 	}()
 }
 
@@ -248,32 +258,39 @@ func sinceMS(start, end time.Time) int64 {
 	return end.Sub(start).Milliseconds()
 }
 
-// streamTranslation fills a.translation with the Spanish version of what the
-// other person said. Guarded by session and reply id like the reply itself, so
-// a late translation can never land on the next turn.
-func (a *App) streamTranslation(ctx context.Context, backend *sonaraBackend.Client, session, replyID uint64, transcript string, queuedAt time.Time) {
-	asked := time.Now()
-	var first time.Duration
-	var streamed strings.Builder
-	_, err := backend.TranslateStream(ctx, transcript, func(delta string) {
-		streamed.WriteString(delta)
-		if first == 0 {
-			first = time.Since(asked)
-		}
-		a.mu.Lock()
-		if a.sessionGeneration == session && a.replySequence == replyID {
-			a.translation = strings.TrimSpace(streamed.String())
-		}
-		a.mu.Unlock()
-	})
-	if err != nil {
+// A completed reply can precede its translation. Publish only while the
+// same transcript is displayed.
+func (a *App) translateCopilotText(ctx context.Context, backend *sonaraBackend.Client, session, replyID uint64, original, target string, reply bool) {
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	alignedCtx, finishAlignment := context.WithTimeout(ctx, 8*time.Second)
+	lines, err := backend.TranslateAligned(alignedCtx, original, target)
+	finishAlignment()
+	var block string
+	if err != nil && ctx.Err() == nil {
+		block, err = backend.TranslateTo(ctx, original, target)
+	}
+	if err != nil || ctx.Err() != nil {
 		if ctx.Err() == nil {
-			logf("translation failed for turn %d reply %d: %v", session, replyID, err)
+			logf("copilot: translation failed for reply %d", replyID)
 		}
 		return
 	}
-	logf("translation for session %d reply %d: first token %dms, voice end -> first token %dms",
-		session, replyID, first.Milliseconds(), sinceMS(queuedAt, asked.Add(first)))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionGeneration != session || a.replySequence != replyID {
+		return
+	}
+	if reply {
+		if a.voiceReply == original {
+			a.voiceReplyLines, a.voiceReplyTranslation = lines, block
+		}
+	} else if a.transcript == original {
+		a.translationLines = lines
+		if block != "" {
+			a.translation = block
+		}
+	}
 }
 
 func (a *App) finishVoiceResponse(session, replyID uint64, transcript, response string, err error) {

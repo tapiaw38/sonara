@@ -17,6 +17,7 @@ import {
   StopListening,
 } from '../../wailsjs/go/app/App'
 import type { Message, TranscriptEntry } from '../types'
+import TranscriptTurnText from '../components/TranscriptTurnText.vue'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
 const props = defineProps<{ assistantMode: string }>()
@@ -98,6 +99,9 @@ const manualSend = ref(localStorage.getItem('sonara-manual-send') === '1')
 const pendingSeconds = ref(0)
 const droppedSegments = ref(0)
 const translation = ref('')
+const translationLines = ref<TranscriptEntry['lines']>([])
+const transcriptLanguage = ref('en')
+const transcriptFinal = ref(false)
 // Past finished turns, oldest first, so a quick back-and-forth doesn't erase
 // the one before it: the panel only ever showed the latest, so a second
 // phrase silently threw the first one away.
@@ -115,10 +119,13 @@ function onTranscriptScroll() {
     followTranscript.value = panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72
 }
 function archiveCurrentTranscript() {
-  // Only a real, answered turn is worth keeping: idle/status placeholders
-  // ("Esperando audio…", "Sesión reabierta", …) never got a translation.
-  if (!transcript.value || !translation.value) return
-  transcriptHistory.value.push({ text: transcript.value, translation: translation.value })
+  if (!transcript.value || !transcriptFinal.value) return
+  transcriptHistory.value.push({
+    original: transcript.value,
+    language: transcriptLanguage.value,
+    translation: translation.value,
+    lines: translationLines.value,
+  })
   if (transcriptHistory.value.length > MAX_TRANSCRIPT_HISTORY) transcriptHistory.value.shift()
 }
 const streamingIndex = ref<number | null>(null)
@@ -431,7 +438,10 @@ async function refreshListening() {
       transcript.value = state.transcript
     }
     transcriptPartial.value = state.partial
-    translation.value = state.translation
+    transcriptFinal.value = state.transcriptFinal
+    translation.value = state.partial ? '' : state.translation
+    translationLines.value = state.partial ? [] : (state.translationLines ?? [])
+    transcriptLanguage.value = state.language
     if (followTranscript.value) {
       void nextTick(() => {
         const panel = transcriptPanel.value
@@ -450,14 +460,26 @@ async function refreshListening() {
       messages.value.push({
         role: 'assistant',
         text: state.response,
+        voiceSequence: state.sequence,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       })
       lastVoiceSequence.value = state.sequence
       streamingIndex.value = messages.value.length - 1
-    } else if (streamingIndex.value !== null) {
-      // Keep this compatible with streamed replies when the provider supports them.
-      messages.value[streamingIndex.value].text = state.response
-      if (!state.streaming) streamingIndex.value = null
+    }
+    const voiceMessage = messages.value.find((message) => message.voiceSequence === state.sequence)
+    if (voiceMessage) {
+      voiceMessage.text = state.response
+      if (!state.streaming) {
+        streamingIndex.value = null
+        if (state.responseTranslation || state.responseLines?.length) {
+          voiceMessage.voiceTranslation = {
+            original: state.response,
+            language: state.language,
+            translation: state.responseTranslation,
+            lines: state.responseLines ?? [],
+          }
+        }
+      }
     }
   } catch {
     // Keep the UI usable while an audio status poll fails.
@@ -503,7 +525,9 @@ async function resetAfterNewSession() {
   emptyConversationLabel.value = 'Escribe una pregunta o espera la próxima intervención.'
   transcript.value = 'Esperando audio de la reunión…'
   translation.value = ''
+  translationLines.value = []
   transcriptHistory.value = []
+  transcriptFinal.value = false
   followTranscript.value = true
   draft.value = ''
   lastVoiceSequence.value = (await ListeningStatus()).sequence
@@ -529,7 +553,9 @@ async function restoreOpenedSession(opened: {
     ? 'Escribe una pregunta o espera la próxima intervención.'
     : 'Esta sesión no tiene mensajes guardados.'
   translation.value = ''
+  translationLines.value = []
   transcriptHistory.value = []
+  transcriptFinal.value = false
   followTranscript.value = true
   draft.value = ''
   streamingIndex.value = null
@@ -631,12 +657,18 @@ onBeforeUnmount(() => {
           :key="index"
           class="transcript-turn transcript-turn-past"
         >
-          <p class="transcript-text">{{ entry.text }}</p>
-          <p class="transcript-translation"><span>ES</span>{{ entry.translation }}</p>
+          <TranscriptTurnText :entry="entry" />
         </div>
         <div class="transcript-turn">
-          <p class="transcript-text" :class="{ partial: transcriptPartial }">{{ transcript }}</p>
-          <p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p>
+          <TranscriptTurnText
+            :entry="{
+              original: transcript,
+              language: transcriptLanguage,
+              translation,
+              lines: translationLines,
+            }"
+            :partial="transcriptPartial"
+          />
         </div>
       </div>
       <div v-if="pendingSeconds > 0" class="pending-bar">
@@ -733,7 +765,10 @@ onBeforeUnmount(() => {
           <span class="message-role"
             >{{ message.role === 'user' ? 'TÚ' : 'SONARA' }} · {{ message.time }}</span
           >
-          <div class="message-content" v-html="formatMessage(message.text)"></div>
+          <div v-if="message.voiceTranslation" class="message-content">
+            <TranscriptTurnText :entry="message.voiceTranslation" />
+          </div>
+          <div v-else class="message-content" v-html="formatMessage(message.text)"></div>
         </div>
         <div v-if="agentWorking" class="typing-indicator">
           <span></span><span></span><span></span

@@ -347,11 +347,11 @@ func (c *Client) Speak(ctx context.Context, text string, speed float64) ([]byte,
 		return c.SpeakAzurePractice(ctx, text, speed)
 	}
 	if c.PracticeVoiceProvider() == providers.Local {
-		speak, err := c.OpenKokoroPractice("es", speed, nil)
+		speak, err := c.OpenKokoroPractice("es", nil)
 		if err != nil {
 			return nil, err
 		}
-		return speak(ctx, text)
+		return speak(ctx, text, speed)
 	}
 	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
 	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text, Speed: speed})
@@ -425,12 +425,12 @@ func responseFunction(mode string) string {
 }
 
 // OpenKokoroPractice validates and pins the local voice for a Practice session.
-func (c *Client) OpenKokoroPractice(language string, speed float64, note func(string)) (func(context.Context, string) ([]byte, error), error) {
+func (c *Client) OpenKokoroPractice(language string, note func(string)) (func(context.Context, string, float64) ([]byte, error), error) {
 	voice, err := kokoro.Open(language)
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, text string) ([]byte, error) {
+	return func(ctx context.Context, text string, speed float64) ([]byte, error) {
 		return c.kokoro.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), voice, text, speed, note)
 	}, nil
 }

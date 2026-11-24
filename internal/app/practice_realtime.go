@@ -47,12 +47,23 @@ func (a *App) PracticeRealtime() error {
 
 	voiceProvider := a.backend.PracticeVoiceProvider()
 	speed := a.practiceVoiceSpeed(voiceProvider)
+	logf("practice: voice provider=%s speed=%.2fx", voiceProvider, speed)
+	refreshSpeed := func() bool {
+		next := a.practiceVoiceSpeed(voiceProvider)
+		if next == speed {
+			return false
+		}
+		speed = next
+		logf("practice: voice provider=%s speed changed to %.2fx", voiceProvider, speed)
+		return true
+	}
 	switch voiceProvider {
 	case "azure":
 		if err := a.backend.CheckAzurePractice(); err != nil {
 			return err
 		}
 		err := a.runBatchPractice(ctx, language, generation, a.backend.TranscribeAzurePractice, func(ctx context.Context, text string) ([]byte, error) {
+			refreshSpeed()
 			return a.backend.SpeakAzurePractice(ctx, text, speed)
 		})
 		if ctx.Err() != nil {
@@ -61,7 +72,7 @@ func (a *App) PracticeRealtime() error {
 		return err
 	case "local":
 		var lastNote string
-		speak, err := a.backend.OpenKokoroPractice(language, speed, func(note string) {
+		speak, err := a.backend.OpenKokoroPractice(language, func(note string) {
 			if note == lastNote {
 				return
 			}
@@ -74,7 +85,10 @@ func (a *App) PracticeRealtime() error {
 		if err != nil {
 			return err
 		}
-		err = a.runBatchPractice(ctx, language, generation, a.backend.TranscribePractice, speak)
+		err = a.runBatchPractice(ctx, language, generation, a.backend.TranscribePractice, func(ctx context.Context, text string) ([]byte, error) {
+			refreshSpeed()
+			return speak(ctx, text, speed)
+		})
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -235,6 +249,11 @@ func (a *App) PracticeRealtime() error {
 		if inputID != "" {
 			transcripts.receive(client.VoiceEvent{Type: "input_audio_buffer.committed", ItemID: inputID})
 			transcripts.receive(client.VoiceEvent{Type: "conversation.item.input_audio_transcription.completed", ItemID: inputID, Text: answer})
+			if refreshSpeed() {
+				if err := session.SetSpeed(speed); err != nil {
+					return err
+				}
+			}
 			if err := session.Respond(); err != nil {
 				return err
 			}

@@ -267,11 +267,13 @@ async function setProvider(
   }
 }
 
-async function saveVoiceSpeed() {
+async function saveVoiceSpeed(event: Event) {
+  const speed = (event.target as HTMLInputElement).valueAsNumber
   savingVoiceSpeed.value = true
   providersMessage.value = ''
   try {
-    await SetPracticeVoiceSpeed(voiceSpeed.value)
+    await SetPracticeVoiceSpeed(speed)
+    voiceSpeed.value = speed
   } catch (error) {
     providersMessage.value = String(error)
     await loadProviders()
@@ -424,15 +426,16 @@ onMounted(async () => {
         </label>
         <input
           id="voice-speed"
-          v-model.number="voiceSpeed"
+          :value="voiceSpeed"
+          @input="voiceSpeed = ($event.target as HTMLInputElement).valueAsNumber"
           type="range"
-          min="0.8"
-          max="1.3"
+          min="0.5"
+          max="1.5"
           step="0.05"
           :disabled="savingVoiceSpeed"
           @change="saveVoiceSpeed"
         />
-        <small class="provider-hint">Se aplica al iniciar la próxima práctica.</small>
+        <small class="provider-hint">Se aplica cuando el entrevistador vuelve a hablar.</small>
         <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
         <select
           id="live-mode"

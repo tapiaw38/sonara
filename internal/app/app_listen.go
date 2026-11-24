@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sonaraBackend "sonara/backend/client"
 	"sonara/internal/audio"
 )
 
@@ -26,23 +27,27 @@ type meetSegment struct {
 }
 
 type ListeningState struct {
-	Listening  bool   `json:"listening"`
-	Transcript string `json:"transcript"`
+	Listening       bool   `json:"listening"`
+	Transcript      string `json:"transcript"`
+	TranscriptFinal bool   `json:"transcriptFinal"`
 	// Partial: Transcript is still being spoken (streaming), not final yet.
-	Partial         bool    `json:"partial"`
-	Status          string  `json:"status"`
-	Response        string  `json:"response"`
-	Sequence        uint64  `json:"sequence"`
-	ManualSend      bool    `json:"manualSend"`
-	PendingSeconds  float64 `json:"pendingSeconds"`
-	Streaming       bool    `json:"streaming"`
-	Language        string  `json:"language"`
-	Translation     string  `json:"translation"`
-	DroppedSegments uint64  `json:"droppedSegments"`
-	AudioSource     string  `json:"audioSource"`
-	SessionID       string  `json:"sessionId"`
-	AudioGuessing   bool    `json:"audioGuessing"`
-	AudioCandidates int     `json:"audioCandidates"`
+	Partial             bool                            `json:"partial"`
+	Status              string                          `json:"status"`
+	Response            string                          `json:"response"`
+	ResponseTranslation string                          `json:"responseTranslation"`
+	ResponseLines       []sonaraBackend.TranslationLine `json:"responseLines"`
+	Sequence            uint64                          `json:"sequence"`
+	ManualSend          bool                            `json:"manualSend"`
+	PendingSeconds      float64                         `json:"pendingSeconds"`
+	Streaming           bool                            `json:"streaming"`
+	Language            string                          `json:"language"`
+	Translation         string                          `json:"translation"`
+	TranslationLines    []sonaraBackend.TranslationLine `json:"translationLines"`
+	DroppedSegments     uint64                          `json:"droppedSegments"`
+	AudioSource         string                          `json:"audioSource"`
+	SessionID           string                          `json:"sessionId"`
+	AudioGuessing       bool                            `json:"audioGuessing"`
+	AudioCandidates     int                             `json:"audioCandidates"`
 	// Retractions counts replies taken back (anticipated replies that did not
 	// hold); the UI removes the message it started for each.
 	Retractions uint64 `json:"retractions"`
@@ -62,6 +67,7 @@ func (a *App) StartListening() bool {
 	a.listenerCancel = cancel
 	a.listenStatus = "Conectando audio de la reunión…"
 	a.transcript = "Esperando intervención…"
+	a.transcriptFinal = false
 	a.mu.Unlock()
 	go a.listenMeetAudio(ctx)
 	go a.listenMicForContext(ctx)
@@ -85,21 +91,23 @@ func (a *App) ListeningStatus() ListeningState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return ListeningState{
-		Listening: a.listening, Transcript: a.transcript, Status: a.listenStatus,
+		Listening: a.listening, Transcript: a.transcript, TranscriptFinal: a.transcriptFinal, Status: a.listenStatus,
 		Partial:  a.livePartial != "" && a.livePartial == a.transcript,
 		Response: a.voiceReply, Sequence: a.voiceSequence,
-		ManualSend:      a.manualSend,
-		PendingSeconds:  float64(len(a.pendingAudio)) / float64(audio.SampleRate*2),
-		Streaming:       a.streaming,
-		Language:        a.audioLanguage,
-		Translation:     a.translation,
-		Retractions:     a.voiceRetractions,
-		LiveMode:        liveModeOf(a.liveStreaming),
-		DroppedSegments: a.droppedSegments,
-		AudioSource:     a.selectedAudioSource,
-		SessionID:       a.sessionID,
-		AudioGuessing:   a.audioGuessing,
-		AudioCandidates: a.audioCandidates,
+		ResponseTranslation: a.voiceReplyTranslation, ResponseLines: a.voiceReplyLines,
+		ManualSend:       a.manualSend,
+		PendingSeconds:   float64(len(a.pendingAudio)) / float64(audio.SampleRate*2),
+		Streaming:        a.streaming,
+		Language:         a.audioLanguage,
+		Translation:      a.translation,
+		TranslationLines: a.translationLines,
+		Retractions:      a.voiceRetractions,
+		LiveMode:         liveModeOf(a.liveStreaming),
+		DroppedSegments:  a.droppedSegments,
+		AudioSource:      a.selectedAudioSource,
+		SessionID:        a.sessionID,
+		AudioGuessing:    a.audioGuessing,
+		AudioCandidates:  a.audioCandidates,
 	}
 }
 
@@ -511,6 +519,7 @@ func (a *App) setListeningFailure(status string) {
 	a.listenerCancel = nil
 	a.listenStatus = status
 	a.transcript = status
+	a.transcriptFinal = false
 	a.mu.Unlock()
 }
 
