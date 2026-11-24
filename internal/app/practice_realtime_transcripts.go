@@ -82,7 +82,7 @@ func (s *practiceVoiceTranscripts) receive(event client.VoiceEvent) {
 		s.startHelp(turn)
 	case "response.output_audio_transcript.delta", "response.output_audio_transcript.done":
 		turn := s.findResponse(event.ResponseID)
-		if turn == nil || turn.interrupted.Load() {
+		if turn == nil || turn.questionDone {
 			return
 		}
 		if event.Type == "response.output_audio_transcript.delta" {
@@ -97,8 +97,11 @@ func (s *practiceVoiceTranscripts) receive(event client.VoiceEvent) {
 		}
 	case "response.done":
 		turn := s.findResponse(event.ResponseID)
-		if turn != nil && turn.endedAt.IsZero() && (event.Status == "cancelled" || event.Status == "failed" || event.Status == "incomplete") {
-			s.interrupt(turn)
+		if turn != nil && (event.Status == "cancelled" || event.Status == "failed" || event.Status == "incomplete") {
+			if turn.endedAt.IsZero() {
+				s.interrupt(turn)
+			}
+			s.closeQuestion(turn)
 		}
 	}
 	s.flush()
@@ -125,7 +128,7 @@ func (s *practiceVoiceTranscripts) findResponse(id string) *practiceVoiceTurn {
 }
 
 func (s *practiceVoiceTranscripts) startHelp(turn *practiceVoiceTurn) {
-	if s.ctx.Err() != nil || turn.helpStarted || !turn.questionDone || turn.question == "" || turn.interrupted.Load() {
+	if s.ctx.Err() != nil || turn.helpStarted || !turn.questionDone || turn.question == "" {
 		return
 	}
 	if !turn.answerDone && (turn.endedAt.IsZero() || time.Since(turn.endedAt) < practiceTranscriptGrace) {
@@ -138,9 +141,11 @@ func (s *practiceVoiceTranscripts) startHelp(turn *practiceVoiceTurn) {
 	go s.app.requestPracticeSuggestionWhen(s.ctx, turn.id, s.language, turn.answer, turn.question, sessionContext, s.current(turn))
 }
 
-func (s *practiceVoiceTranscripts) current(turn *practiceVoiceTurn) func() bool {
+// current gates the turn's text. Interrupting stops the voice only: the
+// question transcript, the suggested answer and translations still complete.
+func (s *practiceVoiceTranscripts) current(_ *practiceVoiceTurn) func() bool {
 	return func() bool {
-		return s.ctx.Err() == nil && !turn.interrupted.Load()
+		return s.ctx.Err() == nil
 	}
 }
 
@@ -148,6 +153,16 @@ func (s *practiceVoiceTranscripts) interrupt(turn *practiceVoiceTurn) {
 	turn.interrupted.Store(true)
 	turn.endedAt = time.Now()
 	s.app.emit("practice:interrupted", turn.id)
+}
+
+// closeQuestion publishes whatever transcript a cut-short response reached,
+// for when the server ends it before its transcript is done.
+func (s *practiceVoiceTranscripts) closeQuestion(turn *practiceVoiceTurn) {
+	if question := strings.TrimSpace(turn.question); question != "" && !turn.questionDone {
+		turn.question, turn.questionDone = question, true
+		s.app.publishPracticeTextWhen(s.ctx, turn.id, "practice:question", question, s.language, s.current(turn))
+		s.startHelp(turn)
+	}
 }
 
 func (s *practiceVoiceTranscripts) played(responseID string) {

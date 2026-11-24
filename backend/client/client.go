@@ -9,6 +9,7 @@ import (
 
 	"sonara/backend/internal/adapters/web/integrations/azureopenai"
 	"sonara/backend/internal/adapters/web/integrations/deepseek"
+	"sonara/backend/internal/adapters/web/integrations/kokoro"
 	"sonara/backend/internal/adapters/web/integrations/localwhisper"
 	"sonara/backend/internal/adapters/web/integrations/openai"
 	"sonara/backend/internal/adapters/web/integrations/providers"
@@ -22,6 +23,7 @@ import (
 // provider, chosen in Settings and persisted there — never an automatic
 // fallback chain. See providers.Registry/Selector/Transcriber.
 type Client struct {
+	kokoro                kokoro.Engine
 	usageRecorder         usage.Recorder
 	practiceVoiceProvider string
 	mu                    sync.RWMutex
@@ -137,8 +139,19 @@ func (c *Client) TranslateTo(ctx context.Context, text, language string) (string
 	return c.translate.ExecuteTo(ctx, text, language, nil)
 }
 
+type TranslationLine = assistant.TranslationLine
+
+// TranslateAligned returns translations paired with the exact source text.
+func (c *Client) TranslateAligned(ctx context.Context, text, language string) ([]TranslationLine, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Translation)
+	return c.translate.ExecuteAligned(ctx, text, language)
+}
+
 // Close stops the local Whisper server if Sonara started it.
-func (c *Client) Close() { c.local.Stop() }
+func (c *Client) Close() {
+	c.kokoro.Close()
+	c.local.Stop()
+}
 
 func (c *Client) Status() string {
 	c.mu.RLock()
@@ -329,12 +342,19 @@ func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language 
 }
 
 // Speak synthesizes through the configured Practice voice provider.
-func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
+func (c *Client) Speak(ctx context.Context, text string, speed float64) ([]byte, error) {
 	if c.PracticeVoiceProvider() == providers.Azure {
-		return c.SpeakAzurePractice(ctx, text)
+		return c.SpeakAzurePractice(ctx, text, speed)
+	}
+	if c.PracticeVoiceProvider() == providers.Local {
+		speak, err := c.OpenKokoroPractice("es", speed, nil)
+		if err != nil {
+			return nil, err
+		}
+		return speak(ctx, text)
 	}
 	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
-	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
+	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text, Speed: speed})
 }
 
 func (c *Client) PracticeVoiceProvider() string {
@@ -351,11 +371,12 @@ func (c *Client) PracticeVoiceProvider() string {
 }
 
 func (c *Client) SetPracticeVoiceProvider(name string) error {
-	if name != providers.OpenAI && name != providers.Azure {
+	if name != providers.OpenAI && name != providers.Azure && name != providers.Local {
 		return fmt.Errorf("proveedor de voz inválido")
 	}
 	c.mu.Lock()
 	c.practiceVoiceProvider = name
+	c.kokoro.SetEnabled(name == providers.Local)
 	c.mu.Unlock()
 	return nil
 }
@@ -371,8 +392,8 @@ func (c *Client) CheckAzurePractice() error {
 }
 
 // The running Azure session keeps its selected audio provider until it ends.
-func (c *Client) SpeakAzurePractice(ctx context.Context, text string) ([]byte, error) {
-	return c.azure.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, "alloy", "")
+func (c *Client) SpeakAzurePractice(ctx context.Context, text string, speed float64) ([]byte, error) {
+	return c.azure.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, "alloy", speed)
 }
 
 func (c *Client) TranscribeAzurePractice(ctx context.Context, wav []byte, language string) (Transcript, error) {
@@ -401,4 +422,15 @@ func responseFunction(mode string) string {
 	default:
 		return usage.Copilot
 	}
+}
+
+// OpenKokoroPractice validates and pins the local voice for a Practice session.
+func (c *Client) OpenKokoroPractice(language string, speed float64, note func(string)) (func(context.Context, string) ([]byte, error), error) {
+	voice, err := kokoro.Open(language)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, text string) ([]byte, error) {
+		return c.kokoro.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), voice, text, speed, note)
+	}, nil
 }

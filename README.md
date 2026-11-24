@@ -66,6 +66,60 @@ Transcription runs in the cloud by default; the local engines are optional.
   - `3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx` (speaker embedding model).
   - `SONARA_DIARIZE_THRESHOLD` tunes how readily voices are split.
 
+- **Kokoro local voice for Practice** (Linux x86-64): select **Kokoro local (gratis)**
+  in **Configuración → Uso → Voz (Práctica)**. The int8 v1.0 archive is about
+  127 MiB. It includes Spanish `ef_dora` (28) and US English `af_bella` (2).
+  TTS uses sherpa-onnx 1.12.40 for its Spanish phonemizer and can coexist with
+  sherpa-onnx 2.x for speaker separation. Only synthesis runs locally by
+  selecting Kokoro. Practice still uses the configured live transcriber and text
+  provider.
+
+  ```sh
+  dir="$HOME/.local/share/sherpa-onnx"
+  cli=sherpa-onnx-v1.12.40-linux-x64-static.tar.bz2
+  shared=sherpa-onnx-v1.12.40-linux-x64-shared-lib.tar.bz2
+  model=kokoro-int8-multi-lang-v1_0.tar.bz2
+  mkdir -p "$dir"
+  gh release download v1.12.40 -R k2-fsa/sherpa-onnx -p "$cli" -D "$dir" --skip-existing
+  gh release download tts-models -R k2-fsa/sherpa-onnx -p "$model" -D "$dir" --skip-existing
+  tar -xjf "$dir/$cli" -C "$dir"
+  tar -xjf "$dir/$model" -C "$dir"
+  gh release download v1.12.40 -R k2-fsa/sherpa-onnx -p "$shared" -D "$dir" --skip-existing
+  tar -xjf "$dir/$shared" -C "$dir"
+  cpu_lib="$dir/${shared%.tar.bz2}/lib"
+  cc -O2 -I"$dir/${cli%.tar.bz2}/include" \
+    backend/internal/adapters/web/integrations/kokoro/worker/main.c \
+    -L"$cpu_lib" -Wl,-rpath,"$cpu_lib" -lsherpa-onnx-c-api \
+    -o "$dir/sonara-kokoro-worker"
+  ```
+
+  Run these commands from the repository root with a C compiler installed.
+  Sonara starts the worker on the first question and keeps its model loaded until
+  shutdown or until another voice provider is selected. Switching from Kokoro
+  to OpenAI or Azure ends the local practice and frees the worker’s RAM and VRAM.
+  Changing the interview language reloads the model. Installations with only
+  the CLI still work and show a note about the worker.
+
+  **Optional NVIDIA GPU acceleration.** Install a compatible NVIDIA driver and
+  the sherpa-onnx CUDA 12 / cuDNN 9 release (~191 MB). The CUDA 13 toolkit alone
+  cannot supply the CUDA 12 library versions this release expects. If the CUDA
+  12 runtime libraries are unavailable system-wide, install them under the
+  app's sherpa directory with `uv`. This leaves system libraries intact.
+
+  ```sh
+  gpu=sherpa-onnx-v1.12.40-cuda-12.x-cudnn-9.x-linux-x64-gpu.tar.bz2
+  gh release download v1.12.40 -R k2-fsa/sherpa-onnx -p "$gpu" -D "$dir" --skip-existing
+  tar -xjf "$dir/$gpu" -C "$dir"
+  uv pip install --target "$dir/cuda-runtime" --link-mode=copy --no-deps \
+    'nvidia-cuda-runtime-cu12<13' 'nvidia-cublas-cu12<13' 'nvidia-curand-cu12<11' \
+    'nvidia-cufft-cu12>=11,<12' 'nvidia-cudnn-cu12>=9,<10'
+  ```
+
+  Sonara prefers CUDA when the GPU release is installed. If CUDA fails, the
+  app shows a note and uses the resident CPU model for the rest of that run.
+  For libraries in another location, set `SONARA_KOKORO_CUDA_LIBS` to their
+  colon-separated library directories in the environment that launches Sonara.
+
 ## Development
 
 ```sh

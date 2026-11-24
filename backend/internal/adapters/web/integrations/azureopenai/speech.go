@@ -29,16 +29,17 @@ func checkSpeech(cfg Config) error {
 	return nil
 }
 
-func (g *Gateway) Speak(ctx context.Context, text, voice, _ string) (_ []byte, callErr error) {
+func (g *Gateway) Speak(ctx context.Context, text, voice string, speed float64) (_ []byte, callErr error) {
 	cfg := g.config()
 	if err := checkSpeech(cfg); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(struct {
-		Input  string `json:"input"`
-		Voice  string `json:"voice"`
-		Format string `json:"response_format"`
-	}{text, voice, "wav"})
+		Input  string  `json:"input"`
+		Voice  string  `json:"voice"`
+		Format string  `json:"response_format"`
+		Speed  float64 `json:"speed"`
+	}{text, voice, "wav", speed})
 	if err != nil {
 		return nil, err
 	}

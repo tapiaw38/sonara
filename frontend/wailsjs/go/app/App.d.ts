@@ -30,6 +30,8 @@ export function GetAzureOpenAISettings():Promise<app.AzureOpenAIForm>;
 
 export function GetCapabilityProviders():Promise<storage.CapabilityProviders>;
 
+export function GetPracticeVoiceSpeed():Promise<number>;
+
 export function GetSessionProfile(arg1:string):Promise<storage.SessionProfile>;
 
 export function GetUIPreferences():Promise<storage.UIPreferences>;
@@ -107,6 +109,8 @@ export function SetMicrophone(arg1:string):Promise<string>;
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
 
 export function SetPracticeVoiceProvider(arg1:string):Promise<void>;
+
+export function SetPracticeVoiceSpeed(arg1:number):Promise<void>;
 
 export function SetTextProvider(arg1:string):Promise<void>;
 

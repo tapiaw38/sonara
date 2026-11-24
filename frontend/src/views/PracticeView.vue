@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue'
 import { PracticeRealtime, StopPractice } from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
+import PracticeTurnText from '../components/PracticeTurnText.vue'
 import { usePanelResize } from '../composables/usePanelResize'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
@@ -16,7 +17,15 @@ const active = ref(false)
 const busy = ref(false)
 const phase = ref<Phase>('idle')
 const message = ref('')
-type BilingualText = { turnId: number; en: string; es: string; interrupted?: boolean }
+const voiceNote = ref('')
+type BilingualText = {
+  turnId: number
+  original: string
+  language: string
+  translation?: string
+  lines?: { original: string; translation: string }[]
+  interrupted?: boolean
+}
 const transcripts = ref<BilingualText[]>([])
 const suggestions = ref<BilingualText[]>([])
 const closedTurns = new Set<number>()
@@ -62,6 +71,7 @@ async function start() {
   if (active.value || busy.value) return
   const current = ++run
   message.value = ''
+  voiceNote.value = ''
   answerLive.value = ''
   voiceHold.value = false
   active.value = true
@@ -95,6 +105,10 @@ function stop() {
     })
 }
 
+const offVoiceNote = EventsOn('practice:voice-note', (note: string) => {
+  if (active.value) voiceNote.value = note
+})
+
 const offVoiceHold = EventsOn('practice:voice-hold', (hold: boolean) => {
   if (active.value) voiceHold.value = hold
 })
@@ -121,23 +135,26 @@ function updateHistory(entries: BilingualText[], panel: HTMLElement | null, text
   }
 }
 
+// A late translation of a line already on screen still lands after the
+// practice stopped or the turn was interrupted.
+const shown = (entries: BilingualText[], text: BilingualText) =>
+  entries.some((entry) => entry.turnId === text.turnId)
 const offQuestion = EventsOn('practice:question', (text: BilingualText) => {
-  if (active.value || busy.value) updateHistory(transcripts.value, transcriptPanel.value, text)
+  if (active.value || busy.value || shown(transcripts.value, text))
+    updateHistory(transcripts.value, transcriptPanel.value, text)
 })
 const offSuggestion = EventsOn('practice:suggestion', (text: BilingualText) => {
-  if (active.value || busy.value) updateHistory(suggestions.value, suggestionPanel.value, text)
+  if (active.value || busy.value || shown(suggestions.value, text))
+    updateHistory(suggestions.value, suggestionPanel.value, text)
 })
 
 const offInterrupted = EventsOn('practice:interrupted', (turnId: number) => {
   closedTurns.add(turnId)
-  for (const entries of [transcripts.value, suggestions.value]) {
-    const entry = entries.find((item) => item.turnId === turnId)
-    if (entry) entry.interrupted = true
-  }
 })
 
 onBeforeUnmount(() => {
   offVoiceHold()
+  offVoiceNote()
   offQuestion()
   offSuggestion()
   offInterrupted()
@@ -193,6 +210,7 @@ onBeforeUnmount(() => {
       </p>
       <small v-if="active && voiceHold" role="status"> Sigo escuchando… </small>
       <button v-if="started && active" class="end-button" @click="stop">Terminar práctica</button>
+      <small v-if="voiceNote" role="status">{{ voiceNote }}</small>
       <small v-if="message" class="meeting-message" role="alert">{{ message }}</small>
     </section>
     <div
@@ -211,11 +229,7 @@ onBeforeUnmount(() => {
             Tu respuesta sugerida aparecerá acá.
           </p>
           <div v-for="entry in suggestions" :key="entry.turnId" class="practice-entry">
-            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
-            <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
-            <p v-if="entry.es" class="transcript-translation" lang="es">
-              <span>ES</span>{{ entry.es }}
-            </p>
+            <PracticeTurnText :entry="entry" />
           </div>
         </div>
         <div
@@ -242,11 +256,7 @@ onBeforeUnmount(() => {
         <div ref="transcriptPanel" class="transcript-body" role="log">
           <p v-if="!transcripts.length" class="transcript-text">Esperando al simulador…</p>
           <div v-for="entry in transcripts" :key="entry.turnId" class="practice-entry">
-            <small v-if="entry.interrupted" class="practice-interrupted">Turno interrumpido</small>
-            <p v-if="entry.en" class="transcript-text" lang="en">{{ entry.en }}</p>
-            <p v-if="entry.es" class="transcript-translation" lang="es">
-              <span>ES</span>{{ entry.es }}
-            </p>
+            <PracticeTurnText :entry="entry" />
           </div>
         </div>
         <div
@@ -316,18 +326,10 @@ onBeforeUnmount(() => {
 .practice-entry {
   flex-shrink: 0;
 }
-.practice-interrupted {
-  display: block;
-  opacity: 0.75;
-}
 .practice-entry + .practice-entry {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid rgb(41 42 53 / var(--surface-opacity));
-}
-.practice-results .transcript-text,
-.practice-results .transcript-translation {
-  overflow-wrap: anywhere;
 }
 @media (max-width: 620px) {
   .practice-results {

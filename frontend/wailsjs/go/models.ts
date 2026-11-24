@@ -322,6 +322,40 @@ export namespace storage {
 		    return a;
 		}
 	}
+	export class ProviderProjection {
+	    name: string;
+	    cost: usage.Projection;
+	    unpriced: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ProviderProjection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.cost = this.convertValues(source["cost"], usage.Projection);
+	        this.unpriced = source["unpriced"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SessionProfile {
 	    scenario: string;
 	    company: string;
@@ -512,7 +546,48 @@ export namespace storage {
 	        this.durationBilling = source["durationBilling"];
 	    }
 	}
+	export class UsageProjection {
+	    observedDays: number;
+	    elapsedDays: number;
+	    monthDays: number;
+	    monthHasData: boolean;
+	    total: usage.Projection;
+	    providers: ProviderProjection[];
+
+	    static createFrom(source: any = {}) {
+	        return new UsageProjection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.observedDays = source["observedDays"];
+	        this.elapsedDays = source["elapsedDays"];
+	        this.monthDays = source["monthDays"];
+	        this.monthHasData = source["monthHasData"];
+	        this.total = this.convertValues(source["total"], usage.Projection);
+	        this.providers = this.convertValues(source["providers"], ProviderProjection);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class UsageReport {
+	    projection: UsageProjection;
 	    periods: UsagePeriod[];
 	    prices: UsagePrice[];
 	    catalogUpdated: string;
@@ -523,6 +598,7 @@ export namespace storage {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projection = this.convertValues(source["projection"], UsageProjection);
 	        this.periods = this.convertValues(source["periods"], UsagePeriod);
 	        this.prices = this.convertValues(source["prices"], UsagePrice);
 	        this.catalogUpdated = source["catalogUpdated"];
@@ -545,6 +621,27 @@ export namespace storage {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace usage {
+
+	export class Projection {
+	    weekUSD: number;
+	    thirtyDayUSD: number;
+	    monthPaceUSD: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Projection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.weekUSD = source["weekUSD"];
+	        this.thirtyDayUSD = source["thirtyDayUSD"];
+	        this.monthPaceUSD = source["monthPaceUSD"];
+	    }
 	}
 
 }

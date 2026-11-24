@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"sonara/backend/client"
 	"sonara/internal/practice"
 )
 
@@ -34,9 +35,11 @@ func (a *App) nextPracticeAnswer() uint64 {
 }
 
 type practiceText struct {
-	TurnID  uint64 `json:"turnId"`
-	English string `json:"en"`
-	Spanish string `json:"es"`
+	TurnID      uint64                   `json:"turnId"`
+	Original    string                   `json:"original"`
+	Language    string                   `json:"language"`
+	Translation string                   `json:"translation,omitempty"`
+	Lines       []client.TranslationLine `json:"lines,omitempty"`
 }
 
 func (a *App) requestPracticeSuggestionWhen(ctx context.Context, answerID uint64, language, answer, question, sessionContext string, current func() bool) {
@@ -61,38 +64,36 @@ func (a *App) requestPracticeSuggestionWhen(ctx context.Context, answerID uint64
 }
 
 func partialPracticeText(answerID uint64, original, language string) practiceText {
-	if language == "en" {
-		return practiceText{TurnID: answerID, English: original}
-	}
-	return practiceText{TurnID: answerID, Spanish: original}
+	return practiceText{TurnID: answerID, Original: original, Language: language}
 }
 
 func (a *App) publishPracticeTextWhen(ctx context.Context, answerID uint64, event, original, language string, current func() bool) {
 	if !current() {
 		return
 	}
-	text := practiceText{TurnID: answerID, Spanish: original}
+	text := partialPracticeText(answerID, original, language)
 	target := "en"
 	if language == "en" {
-		text = practiceText{TurnID: answerID, English: original}
 		target = "es"
 	}
 	a.emit(event, text)
+	// The text is on screen now, so its translation always finishes: in its
+	// own goroutine, detached from the turn and the session, so interrupting
+	// the interviewer or ending the practice stops what comes next but never
+	// leaves a line half translated. Bounded by its own timeouts.
 	go func() {
-		translated := retryPracticeText(ctx, answerID, event+" translation", current, func(requestCtx context.Context) (string, error) {
-			return a.backend.TranslateTo(requestCtx, original, target)
-		})
-		if translated == "" {
-			translated = "Traducción no disponible."
-		}
-		if target == "es" {
-			text.Spanish = translated
+		detached := context.Background()
+		requestCtx, cancel := context.WithTimeout(detached, 8*time.Second)
+		lines, err := a.backend.TranslateAligned(requestCtx, original, target)
+		cancel()
+		if err == nil {
+			text.Lines = lines
 		} else {
-			text.English = translated
+			text.Translation = retryPracticeText(detached, answerID, event+" translation", func() bool { return true }, func(requestCtx context.Context) (string, error) {
+				return a.backend.TranslateTo(requestCtx, original, target)
+			})
 		}
-		if current() {
-			a.emit(event, text)
-		}
+		a.emit(event, text)
 	}()
 }
 

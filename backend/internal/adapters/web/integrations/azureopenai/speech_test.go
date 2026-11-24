@@ -19,8 +19,8 @@ func TestSpeakUsesAzureDeploymentAndRecordsConsumption(t *testing.T) {
 			r.Header.Get("api-key") != "example-key" || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("unexpected Azure speech request")
 		}
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["input"] != "¿Qué tal?" || body["voice"] != "alloy" || body["response_format"] != "wav" {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["input"] != "¿Qué tal?" || body["voice"] != "alloy" || body["response_format"] != "wav" || body["speed"] != 0.85 {
 			t.Errorf("invalid body: %v, %v", body, err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -32,7 +32,7 @@ func TestSpeakUsesAzureDeploymentAndRecordsConsumption(t *testing.T) {
 	g.SetConfig(Config{Endpoint: server.URL, APIKey: "example-key", SpeechDeployment: "interviewer"})
 	var records []usage.Entry
 	ctx := usage.With(context.Background(), func(e usage.Entry) { records = append(records, e) }, usage.TTS)
-	if wav, err := g.Speak(ctx, "¿Qué tal?", "alloy", ""); err != nil || usage.WAVSeconds(wav) != 1 {
+	if wav, err := g.Speak(ctx, "¿Qué tal?", "alloy", 0.85); err != nil || usage.WAVSeconds(wav) != 1 {
 		t.Fatalf("seconds %f, err %v", usage.WAVSeconds(wav), err)
 	}
 	if len(records) != 1 || records[0].Provider != "azure" || records[0].Model != "interviewer" || records[0].Characters != 9 || !records[0].OK {
@@ -43,7 +43,7 @@ func TestSpeakUsesAzureDeploymentAndRecordsConsumption(t *testing.T) {
 func TestSpeakMissingDeploymentFailsBeforeNetwork(t *testing.T) {
 	g := NewGateway()
 	g.SetConfig(Config{Endpoint: "http://127.0.0.1:1", APIKey: "example-key"})
-	_, err := g.Speak(context.Background(), "Hello", "alloy", "")
+	_, err := g.Speak(context.Background(), "Hello", "alloy", 0.85)
 	if err == nil || !strings.Contains(err.Error(), "deployment de voz") {
 		t.Fatalf("got %v", err)
 	}

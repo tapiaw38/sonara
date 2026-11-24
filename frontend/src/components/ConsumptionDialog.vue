@@ -192,6 +192,100 @@ onMounted(() => {
           </div>
         </dl>
         <section
+          v-if="report.projection"
+          class="usage-projection"
+          aria-labelledby="projection-title"
+        >
+          <h3 id="projection-title">Proyección de costo</h3>
+          <dl class="usage-summary projection-summary">
+            <div>
+              <dt>Proyección 7 días</dt>
+              <dd>
+                {{
+                  report.projection.observedDays
+                    ? currency.format(report.projection.total.weekUSD)
+                    : '—'
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>Proyección mensual (30 días)</dt>
+              <dd>
+                {{
+                  report.projection.observedDays
+                    ? currency.format(report.projection.total.thirtyDayUSD)
+                    : '—'
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>Ritmo del mes en curso</dt>
+              <dd>
+                {{
+                  report.projection.monthHasData
+                    ? currency.format(report.projection.total.monthPaceUSD)
+                    : '—'
+                }}
+              </dd>
+            </div>
+          </dl>
+          <p class="projection-note">
+            Estimación en USD. Excluye consumos sin tarifa.
+            <template v-if="report.projection.observedDays">
+              Basada en {{ report.projection.observedDays }}
+              {{ report.projection.observedDays === 1 ? 'día con datos' : 'días con datos' }}
+              de los últimos 7.
+            </template>
+            <template v-else>Sin datos en los últimos 7 días.</template>
+            <template v-if="report.projection.monthHasData">
+              Ritmo del mes calculado con {{ report.projection.elapsedDays }} días transcurridos de
+              {{ report.projection.monthDays }}.
+            </template>
+          </p>
+          <details v-if="report.projection.providers.length" class="key-group">
+            <summary>Proyección por proveedor</summary>
+            <div class="projection-table">
+              <table class="usage-groups" aria-label="Proyección por proveedor">
+                <thead>
+                  <tr>
+                    <th scope="col">Proveedor</th>
+                    <th scope="col" class="row-cost">7 días</th>
+                    <th scope="col" class="row-cost">30 días</th>
+                    <th scope="col" class="row-cost">Mes en curso</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in report.projection.providers" :key="row.name">
+                    <td>
+                      {{ labels[row.name] ?? row.name }}
+                      <small v-if="row.unpriced"> · Tarifas faltantes</small>
+                    </td>
+                    <td class="row-cost">
+                      <strong>{{
+                        report.projection.observedDays ? currency.format(row.cost.weekUSD) : '—'
+                      }}</strong>
+                    </td>
+                    <td class="row-cost">
+                      <strong>{{
+                        report.projection.observedDays
+                          ? currency.format(row.cost.thirtyDayUSD)
+                          : '—'
+                      }}</strong>
+                    </td>
+                    <td class="row-cost">
+                      <strong>{{
+                        report.projection.monthHasData
+                          ? currency.format(row.cost.monthPaceUSD)
+                          : '—'
+                      }}</strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+        <section
           v-if="groups.length"
           class="usage-breakdown"
           aria-labelledby="usage-breakdown-title"
@@ -467,6 +561,23 @@ onMounted(() => {
   border-radius: 5px;
   background: #161720;
   color: inherit;
+}
+.usage-projection h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.projection-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.usage-dialog .projection-note {
+  margin-top: 6px;
+  color: #9b9daa;
+  font-size: 11px;
+}
+.projection-table {
+  overflow-x: auto;
+  padding: 0 8px 8px;
 }
 @media (max-width: 650px) {
   .usage-summary {

@@ -45,8 +45,36 @@ func (a *App) PracticeRealtime() error {
 		a.mu.Unlock()
 	}()
 
-	if a.backend.PracticeVoiceProvider() == "azure" {
-		err := a.runAzurePractice(ctx, language, generation)
+	voiceProvider := a.backend.PracticeVoiceProvider()
+	speed := a.practiceVoiceSpeed(voiceProvider)
+	switch voiceProvider {
+	case "azure":
+		if err := a.backend.CheckAzurePractice(); err != nil {
+			return err
+		}
+		err := a.runBatchPractice(ctx, language, generation, a.backend.TranscribeAzurePractice, func(ctx context.Context, text string) ([]byte, error) {
+			return a.backend.SpeakAzurePractice(ctx, text, speed)
+		})
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	case "local":
+		var lastNote string
+		speak, err := a.backend.OpenKokoroPractice(language, speed, func(note string) {
+			if note == lastNote {
+				return
+			}
+			lastNote = note
+			logf("practice: %s", note)
+			if note != "Kokoro usa GPU (CUDA)." {
+				a.emit("practice:voice-note", note)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		err = a.runBatchPractice(ctx, language, generation, a.backend.TranscribePractice, speak)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -60,7 +88,7 @@ func (a *App) PracticeRealtime() error {
 	if sessionContext != "" {
 		instructions += "\n\n" + sessionContext
 	}
-	session, err := a.backend.OpenPracticeVoice(ctx, instructions+"\n\n"+practice.InterviewLanguageInstruction(language))
+	session, err := a.backend.OpenPracticeVoice(ctx, instructions+"\n\n"+practice.InterviewLanguageInstruction(language), speed)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil

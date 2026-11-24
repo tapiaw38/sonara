@@ -56,7 +56,7 @@ func TestVoiceSessionStreamsAndTruncatesAudio(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	session, err := DialVoice(ctx, server.URL+"/v1", "test-key", "Interview in English.")
+	session, err := DialVoice(ctx, server.URL+"/v1", "test-key", "Interview in English.", 0.85)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +66,10 @@ func TestVoiceSessionStreamsAndTruncatesAudio(t *testing.T) {
 	body, _ := config["session"].(map[string]any)
 	audio, _ := body["audio"].(map[string]any)
 	input, _ := audio["input"].(map[string]any)
+	output, _ := audio["output"].(map[string]any)
 	detection, _ := input["turn_detection"].(map[string]any)
 	transcription, _ := input["transcription"].(map[string]any)
-	if config["type"] != "session.update" || body["type"] != "realtime" ||
+	if output["speed"] != 0.85 || config["type"] != "session.update" || body["type"] != "realtime" ||
 		transcription["model"] != "gpt-transcribe" || detection["type"] != "semantic_vad" || detection["eagerness"] != "low" ||
 		detection["create_response"] != false || detection["interrupt_response"] != true {
 		t.Fatalf("unexpected session config: %v", config)
