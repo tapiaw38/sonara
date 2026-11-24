@@ -45,6 +45,14 @@ func (a *App) PracticeRealtime() error {
 		a.mu.Unlock()
 	}()
 
+	if a.backend.PracticeVoiceProvider() == "azure" {
+		err := a.runAzurePractice(ctx, language, generation)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+
 	instructions := "Sos quien entrevista para el puesto del perfil. El candidato habla primero. Presentate brevemente, hacé una sola pregunta por turno y adaptá tus repreguntas a sus respuestas."
 	if language == "en" {
 		instructions = "You are interviewing the candidate for the role in the profile. The candidate speaks first. Introduce yourself briefly, ask one question per turn, and follow up on their answers."
@@ -121,6 +129,9 @@ func (a *App) PracticeRealtime() error {
 	var player *practiceVoicePlayer
 	var playbackDone <-chan error
 	var responseID, discardedResponse, discardedItem string
+	var audioQueue practiceVoiceAudioQueue
+	var responsePending bool
+	var drainedResponse string
 	var endpointAt time.Time
 	transcripts := practiceVoiceTranscripts{app: a, ctx: ctx, language: language, generation: generation}
 	defer transcripts.finish()
@@ -132,20 +143,61 @@ func (a *App) PracticeRealtime() error {
 			<-player.done
 		}
 	}()
+	handleAudio := func(event client.VoiceEvent) error {
+		if event.Type == "response.output_audio.done" {
+			if player != nil && !player.finished {
+				player.finished = true
+				close(player.audio)
+			}
+			return nil
+		}
+		if player == nil {
+			if !endpointAt.IsZero() {
+				logf("practice realtime: endpoint to first audio chunk=%s", time.Since(endpointAt).Round(time.Millisecond))
+				endpointAt = time.Time{}
+			}
+			var err error
+			player, err = startPracticeVoicePlayer(ctx, event.ResponseID, event.ItemID, event.ContentIndex)
+			if err != nil {
+				return err
+			}
+			playbackDone = player.done
+			a.emit("practice:phase", "speaking")
+		}
+		if player.finished {
+			return nil // Late or duplicated audio for a part already closed.
+		}
+		select {
+		case player.audio <- event.Audio:
+			return nil
+		default:
+			return fmt.Errorf("la salida de voz superó el búfer de reproducción")
+		}
+	}
 	finishPlayback := func(err error) error {
 		finished := player
 		player, playbackDone = nil, nil
 		if err != nil {
 			return fmt.Errorf("falló la reproducción de voz: %w", err)
 		}
-		transcripts.played(finished.responseID)
+		if err := audioQueue.drain(func(event client.VoiceEvent) bool {
+			return player == nil || player.matches(event)
+		}, handleAudio); err != nil {
+			return err
+		}
+		if player == nil || player.responseID != finished.responseID {
+			if responsePending && finished.responseID == responseID {
+				drainedResponse = finished.responseID
+			} else {
+				transcripts.played(finished.responseID)
+			}
+		}
 		return nil
 	}
 	var control practiceVoiceControl
-	var responsePending bool
 	submitAnswer := func() error {
 		wasHolding := control.holding
-		inputID, answer, err := control.drain(time.Now(), !responsePending, session.DeleteInput)
+		inputID, answer, err := control.drain(time.Now(), !responsePending && player == nil, session.DeleteInput)
 		if err != nil {
 			return err
 		}
@@ -189,7 +241,12 @@ func (a *App) PracticeRealtime() error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			a.emit("practice:phase", "listening")
+			if player == nil {
+				a.emit("practice:phase", "listening")
+				if err := submitAnswer(); err != nil {
+					return err
+				}
+			}
 		case event, ok := <-session.Events():
 			if ctx.Err() != nil {
 				return nil
@@ -214,10 +271,19 @@ func (a *App) PracticeRealtime() error {
 				responseID = event.ResponseID
 			case "response.done":
 				responsePending = false
+				if player == nil && drainedResponse == event.ResponseID && event.Status == "completed" {
+					transcripts.played(event.ResponseID)
+					drainedResponse = ""
+				}
 			case "input_audio_buffer.speech_started":
 				discardedResponse = responseID
 				endpointAt = time.Time{}
 				start := time.Now()
+				hadQueuedAudio := len(audioQueue) > 0
+				audioQueue = nil
+				if hadQueuedAudio && transcripts.active != nil && transcripts.active.endedAt.IsZero() {
+					transcripts.interrupt(transcripts.active)
+				}
 				select {
 				case err := <-playbackDone:
 					if err := finishPlayback(err); err != nil {
@@ -243,35 +309,24 @@ func (a *App) PracticeRealtime() error {
 				} else {
 					a.emit("practice:phase", "transcribing")
 				}
-			case "response.output_audio.delta":
-				if event.ItemID == discardedItem || (discardedResponse != "" && event.ResponseID == discardedResponse) || len(event.Audio) == 0 {
+			case "response.output_audio.delta", "response.output_audio.done":
+				if event.ResponseID != responseID || event.ItemID == discardedItem ||
+					(discardedResponse != "" && event.ResponseID == discardedResponse) {
 					continue
 				}
-				if player == nil {
-					if !endpointAt.IsZero() {
-						logf("practice realtime: endpoint to first audio chunk=%s", time.Since(endpointAt).Round(time.Millisecond))
-						endpointAt = time.Time{}
-					}
-					player, err = startPracticeVoicePlayer(ctx, event.ResponseID, event.ItemID, event.ContentIndex)
-					if err != nil {
+				if event.Type == "response.output_audio.delta" && len(event.Audio) == 0 {
+					continue
+				}
+				if player != nil && !player.matches(event) {
+					if err := audioQueue.enqueue(event); err != nil {
 						return err
 					}
-					playbackDone = player.done
-					a.emit("practice:phase", "speaking")
+					continue
 				}
-				if event.ItemID != player.itemID || player.finished {
-					return fmt.Errorf("OpenAI envió audio fuera de orden")
+				if err := handleAudio(event); err != nil {
+					return err
 				}
-				select {
-				case player.audio <- event.Audio:
-				default:
-					return fmt.Errorf("la salida de voz superó el búfer de reproducción")
-				}
-			case "response.output_audio.done":
-				if player != nil && event.ItemID == player.itemID && !player.finished {
-					player.finished = true
-					close(player.audio)
-				}
+
 			}
 			transcripts.receive(event)
 			if event.Type == "response.done" {
@@ -281,6 +336,30 @@ func (a *App) PracticeRealtime() error {
 			}
 		}
 	}
+}
+
+// Realtime can finish one audio item and send the next while PipeWire is
+// still draining the first. Keep the next item's deltas and done event in order.
+type practiceVoiceAudioQueue []client.VoiceEvent
+
+func (q *practiceVoiceAudioQueue) enqueue(event client.VoiceEvent) error {
+	if len(*q) >= 256 {
+		return fmt.Errorf("la salida de voz superó el búfer de reproducción")
+	}
+	*q = append(*q, event)
+	return nil
+}
+
+func (q *practiceVoiceAudioQueue) drain(canPlay func(client.VoiceEvent) bool, play func(client.VoiceEvent) error) error {
+	for len(*q) > 0 && canPlay((*q)[0]) {
+		event := (*q)[0]
+		(*q)[0] = client.VoiceEvent{}
+		*q = (*q)[1:]
+		if err := play(event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type practiceVoicePlayer struct {
@@ -293,6 +372,10 @@ type practiceVoicePlayer struct {
 	finished     bool
 	started      atomic.Int64
 	written      atomic.Int64
+}
+
+func (p *practiceVoicePlayer) matches(event client.VoiceEvent) bool {
+	return p.responseID == event.ResponseID && p.itemID == event.ItemID && p.contentIndex == event.ContentIndex
 }
 
 // PipeWire buffers output internally. Until we read its actual playback clock,

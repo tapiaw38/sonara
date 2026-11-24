@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	sonaraBackend "sonara/backend/client"
@@ -50,11 +51,11 @@ func TestSetProviderRejectsUnknownName(t *testing.T) {
 func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 	a, database := testMeetingApp(t)
 	a.backend = sonaraBackend.New()
-	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "secret-key", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "voice", "secret-key", false); err != nil {
 		t.Fatal(err)
 	}
 	// Edit only the endpoint, leaving apiKey blank: the stored key must survive.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "voice", "", false); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := database.AzureOpenAISettings()
@@ -62,12 +63,12 @@ func TestAzureConfigPreservesStoredKeyWhenNotRetyped(t *testing.T) {
 		t.Fatalf("stored = %+v, err %v", stored, err)
 	}
 	form, err := a.GetAzureOpenAISettings()
-	if err != nil || !form.HasKey || form.Endpoint != "https://y.openai.azure.com" || form.LiveDeployment != "live" {
+	if err != nil || !form.HasKey || form.Endpoint != "https://y.openai.azure.com" || form.LiveDeployment != "live" || form.SpeechDeployment != "voice" {
 		t.Fatalf("form = %+v, err %v (the key itself must never be echoed back)", form, err)
 	}
 
 	// clearKey explicitly removes it even with endpoint/deployments present.
-	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "", true); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://y.openai.azure.com", "2024-06-01", "2024-08-01-preview", "chat", "transcribe", "live", "voice", "", true); err != nil {
 		t.Fatal(err)
 	}
 	form, _ = a.GetAzureOpenAISettings()
@@ -85,10 +86,44 @@ func TestProviderStatusReportsWhatIsSetUp(t *testing.T) {
 	if status := a.ProviderStatus(); status.Azure || status.DeepSeek || status.Gemini {
 		t.Fatalf("nothing set up yet: %+v", status)
 	}
-	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "", "", "chat", "stt", "", "0123456789abcdef0123456789", false); err != nil {
+	if err := a.SetAzureOpenAIConfig("https://x.openai.azure.com", "", "", "chat", "stt", "", "", "0123456789abcdef0123456789", false); err != nil {
 		t.Fatal(err)
 	}
 	if status := a.ProviderStatus(); !status.Azure || !status.AzureTranscribe {
 		t.Fatalf("Azure saved: %+v", status)
+	}
+}
+
+func TestPracticeVoiceDefaultsToAzureAndKeepsExplicitSelection(t *testing.T) {
+	a, database := testMeetingApp(t)
+	a.backend = sonaraBackend.New()
+	if err := a.SetTextProvider("azure"); err != nil {
+		t.Fatal(err)
+	}
+	if a.backend.PracticeVoiceProvider() != "azure" {
+		t.Fatal("Azure text should default voice to Azure")
+	}
+	got, err := a.GetCapabilityProviders()
+	if err != nil || got.PracticeVoice != "azure" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := a.SetPracticeVoiceProvider("openai"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.CapabilityProviders()
+	if err != nil || stored.PracticeVoice != "openai" || stored.Text != "azure" || a.backend.PracticeVoiceProvider() != "openai" {
+		t.Fatalf("stored %+v, %v", stored, err)
+	}
+}
+
+func TestPracticeWithAzureVoiceReportsMissingDeploymentBeforeCapture(t *testing.T) {
+	a, _ := testMeetingApp(t)
+	a.backend = sonaraBackend.New()
+	if err := a.SetTextProvider("azure"); err != nil {
+		t.Fatal(err)
+	}
+	err := a.PracticeRealtime()
+	if err == nil || !strings.Contains(err.Error(), "deployment de voz de Azure") {
+		t.Fatalf("expected Azure voice config error, got %v", err)
 	}
 }

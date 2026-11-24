@@ -13,8 +13,9 @@ type recordingStreamer struct {
 	model, instructions, prompt string
 }
 
-func (r *recordingStreamer) Respond(context.Context, domain.Request, string, string) (string, error) {
-	return "", nil
+func (r *recordingStreamer) Respond(_ context.Context, in domain.Request, model, instructions string) (string, error) {
+	r.model, r.instructions, r.prompt = model, instructions, in.Prompt
+	return "Hello world", nil
 }
 
 func (r *recordingStreamer) RespondStream(_ context.Context, in domain.Request, model, instructions string, onDelta func(string)) (string, error) {
@@ -46,5 +47,14 @@ func TestTranslateEmptyTextSkipsTheCall(t *testing.T) {
 	u := NewTranslateUsecase(&fakeResponder{err: context.Canceled}, config.Config{})
 	if out, err := u.ExecuteStream(context.Background(), "  ", nil); out != "" || err != nil {
 		t.Fatalf("out=%q err=%v", out, err)
+	}
+}
+
+func TestTranslateWithoutDeltaUsesBufferedResponse(t *testing.T) {
+	gw := &recordingStreamer{}
+	u := NewTranslateUsecase(gw, config.Config{FastModel: "fast"})
+	got, err := u.ExecuteTo(context.Background(), "Hola mundo", "en", nil)
+	if err != nil || got != "Hello world" || gw.model != "fast" || !strings.Contains(gw.prompt, "Traducí al inglés") {
+		t.Fatalf("translation=%q model=%q prompt=%q err=%v", got, gw.model, gw.prompt, err)
 	}
 }

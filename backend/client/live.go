@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"sonara/backend/usage"
 
 	"sonara/backend/internal/adapters/web/integrations/providers"
 	"sonara/backend/internal/adapters/web/integrations/realtime"
@@ -31,6 +32,7 @@ const (
 // no fallback to another provider: a choice without streaming is an error
 // that says so.
 func (c *Client) OpenLive(ctx context.Context, language string) (*LiveSession, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Live)
 	return c.dialLive(ctx, c.liveTranscribe.Provider(), language, "la transcripción en vivo")
 }
 
@@ -67,11 +69,13 @@ func (c *Client) dialLive(ctx context.Context, provider, language, what string) 
 // provider. Any provider without streaming is not an error the caller shows:
 // it simply keeps uploading blocks.
 func (c *Client) OpenMeetingLive(ctx context.Context, language string) (*LiveSession, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Meeting)
 	return c.dialLive(ctx, c.meetingTranscribe.Provider(), language, "el streaming de reuniones")
 }
 
 // OpenPracticeVoice opens OpenAI's conversational Realtime API for Practice.
 func (c *Client) OpenPracticeVoice(ctx context.Context, instructions string) (*realtime.VoiceSession, error) {
+	ctx = usage.With(ctx, c.usageRecorder, usage.Practice)
 	c.mu.RLock()
 	key, base := c.cfg.OpenAIKey, c.cfg.OpenAIBaseURL
 	c.mu.RUnlock()

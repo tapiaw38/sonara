@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sonara/backend/usage"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,7 @@ func AzureEndpointFor(resource string) (string, error) {
 }
 
 type Session struct {
+	meter        *liveUsage
 	conn         *websocket.Conn
 	events       chan Event
 	writeMu      sync.Mutex
@@ -126,13 +128,23 @@ func Dial(ctx context.Context, opts Options) (*Session, error) {
 	if opts.AzureKey {
 		header = http.Header{"api-key": []string{opts.APIKey}}
 	}
+	provider, model := "openai", opts.Model
+	if opts.AzureKey {
+		provider = "azure"
+	}
+	if model == "" {
+		model = DefaultModel
+	}
 	conn, err := dialWithRetry(ctx, opts.URL, header)
 	if err != nil {
+		usage.Start(ctx, provider, model, usage.Live).Finish(false)
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	s := &Session{conn: conn, events: make(chan Event, 128), cancel: cancel}
+	s := &Session{conn: conn, events: make(chan Event, 128), cancel: cancel,
+		meter: &liveUsage{ctx: ctx, provider: provider, model: model, items: make(map[string]*usage.Meter)}}
 	if err := s.send(sessionUpdate(opts)); err != nil {
+		usage.Start(ctx, provider, model, usage.Live).Finish(false)
 		conn.Close()
 		cancel()
 		return nil, err
@@ -210,6 +222,10 @@ func sessionUpdate(opts Options) map[string]any {
 func (s *Session) send(v any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	return s.sendLocked(v)
+}
+
+func (s *Session) sendLocked(v any) error {
 	if s.writeTimeout > 0 {
 		if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
 			return err
@@ -222,19 +238,45 @@ func (s *Session) send(v any) error {
 // resampled to the 24 kHz the endpoint expects.
 func (s *Session) Append(pcm16k []byte) error {
 	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	out := s.rs.convert(pcm16k)
-	s.writeMu.Unlock()
-	return s.send(map[string]any{"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(out)})
+	if err := s.sendLocked(map[string]any{"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(out)}); err != nil {
+		return err
+	}
+	if s.meter != nil {
+		s.meter.mu.Lock()
+		s.meter.bytes += len(out)
+		s.meter.mu.Unlock()
+	}
+	return nil
 }
 
-// Commit ends the current turn: the server transcribes what was appended.
 func (s *Session) Commit() error {
-	return s.send(map[string]any{"type": "input_audio_buffer.commit"})
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.meter.mu.Lock()
+	defer s.meter.mu.Unlock()
+	s.meter.commit()
+	err := s.sendLocked(map[string]any{"type": "input_audio_buffer.commit"})
+	if err != nil {
+		last := len(s.meter.commits) - 1
+		s.meter.commits[last].Finish(false)
+		s.meter.commits[last] = nil
+		s.meter.commits = s.meter.commits[:last]
+	}
+	return err
 }
 
-// Clear drops what was appended since the last commit (silence, mostly).
 func (s *Session) Clear() error {
-	return s.send(map[string]any{"type": "input_audio_buffer.clear"})
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.sendLocked(map[string]any{"type": "input_audio_buffer.clear"}); err != nil {
+		return err
+	}
+	s.meter.mu.Lock()
+	s.meter.bytes = 0
+	s.meter.mu.Unlock()
+	return nil
 }
 
 func (s *Session) Events() <-chan Event { return s.events }
@@ -261,6 +303,7 @@ type serverEvent struct {
 
 func (s *Session) read(ctx context.Context) {
 	defer close(s.events)
+	defer s.meter.finish()
 	emit := func(e Event) bool {
 		select {
 		case s.events <- e:
@@ -282,6 +325,7 @@ func (s *Session) read(ctx context.Context) {
 		if json.Unmarshal(data, &ev) != nil {
 			continue
 		}
+		s.meter.receive(ev, data)
 		var out Event
 		switch ev.Type {
 		case "conversation.item.input_audio_transcription.delta":

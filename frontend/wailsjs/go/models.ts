@@ -20,6 +20,7 @@ export namespace app {
 	    chatDeployment: string;
 	    transcribeDeployment: string;
 	    liveDeployment: string;
+	    speechDeployment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AzureOpenAIForm(source);
@@ -34,6 +35,7 @@ export namespace app {
 	        this.chatDeployment = source["chatDeployment"];
 	        this.transcribeDeployment = source["transcribeDeployment"];
 	        this.liveDeployment = source["liveDeployment"];
+	        this.speechDeployment = source["speechDeployment"];
 	    }
 	}
 	export class CaptureStatus {
@@ -228,6 +230,7 @@ export namespace storage {
 	
 	export class CapabilityProviders {
 	    text: string;
+	    practiceVoice: string;
 	    vision: string;
 	    liveTranscribe: string;
 	    meeting: string;
@@ -240,6 +243,7 @@ export namespace storage {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
+	        this.practiceVoice = source["practiceVoice"];
 	        this.vision = source["vision"];
 	        this.liveTranscribe = source["liveTranscribe"];
 	        this.meeting = source["meeting"];
@@ -379,6 +383,168 @@ export namespace storage {
 	        this.transcriptPanelHeight = source["transcriptPanelHeight"];
 	        this.responsePanelShare = source["responsePanelShare"];
 	    }
+	}
+	export class UsageTotals {
+	    calls: number;
+	    errors: number;
+	    input: number;
+	    output: number;
+	    audioSeconds: number;
+	    characters: number;
+	    usd: number;
+	    unpriced: number;
+
+	    static createFrom(source: any = {}) {
+	        return new UsageTotals(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.calls = source["calls"];
+	        this.errors = source["errors"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.audioSeconds = source["audioSeconds"];
+	        this.characters = source["characters"];
+	        this.usd = source["usd"];
+	        this.unpriced = source["unpriced"];
+	    }
+	}
+	export class UsageGroup {
+	    name: string;
+	    totals: UsageTotals;
+
+	    static createFrom(source: any = {}) {
+	        return new UsageGroup(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.totals = this.convertValues(source["totals"], UsageTotals);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class UsagePeriod {
+	    id: string;
+	    totals: UsageTotals;
+	    providers: UsageGroup[];
+	    functions: UsageGroup[];
+	    models: UsageGroup[];
+
+	    static createFrom(source: any = {}) {
+	        return new UsagePeriod(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.totals = this.convertValues(source["totals"], UsageTotals);
+	        this.providers = this.convertValues(source["providers"], UsageGroup);
+	        this.functions = this.convertValues(source["functions"], UsageGroup);
+	        this.models = this.convertValues(source["models"], UsageGroup);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class UsagePrice {
+	    provider: string;
+	    model: string;
+	    enabled: boolean;
+	    input: number;
+	    output: number;
+	    audioInput: number;
+	    audioOutput: number;
+	    perMinute: number;
+	    perMillionChars: number;
+	    source: string;
+	    durationBilling: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new UsagePrice(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.enabled = source["enabled"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.audioInput = source["audioInput"];
+	        this.audioOutput = source["audioOutput"];
+	        this.perMinute = source["perMinute"];
+	        this.perMillionChars = source["perMillionChars"];
+	        this.source = source["source"];
+	        this.durationBilling = source["durationBilling"];
+	    }
+	}
+	export class UsageReport {
+	    periods: UsagePeriod[];
+	    prices: UsagePrice[];
+	    catalogUpdated: string;
+
+	    static createFrom(source: any = {}) {
+	        return new UsageReport(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.periods = this.convertValues(source["periods"], UsagePeriod);
+	        this.prices = this.convertValues(source["prices"], UsagePrice);
+	        this.catalogUpdated = source["catalogUpdated"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

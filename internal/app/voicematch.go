@@ -45,7 +45,7 @@ func (a *App) runVoiceMatch(run *meetingRun) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), diarize.FinalTimeout)
 	defer cancel()
-	spans, err := a.diarizer.DetectEcho(ctx, sample, audio.WAV(pcm))
+	spans, err := a.diarizer.DetectEcho(a.apiUsageContext(ctx), sample, audio.WAV(pcm))
 	if err != nil {
 		logf("meeting %s: echo detection failed: %v", run.sessionID, err)
 		note := "No se pudo detectar el eco: " + err.Error()

@@ -7,7 +7,8 @@ import { useColumnSplit } from '../composables/useColumnSplit'
 
 const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
 
-type Phase = 'idle' | 'listening' | 'speaking' | 'capturing' | 'transcribing' | 'thinking'
+type Phase =
+  'idle' | 'listening' | 'speaking' | 'capturing' | 'transcribing' | 'thinking' | 'synthesizing'
 
 const started = ref(false)
 const voiceHold = ref(false)
@@ -37,6 +38,7 @@ const phaseLabel: Record<Phase, string> = {
   capturing: 'Voz detectada…',
   transcribing: 'Transcribiendo…',
   thinking: 'Preparando respuesta…',
+  synthesizing: 'Preparando voz…',
 }
 
 let run = 0

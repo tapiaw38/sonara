@@ -22,6 +22,7 @@ import MeetingView from './views/MeetingView.vue'
 import PracticeView from './views/PracticeView.vue'
 import TopBar from './components/TopBar.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
+import ConsumptionDialog from './components/ConsumptionDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import SessionSetupDialog from './components/SessionSetupDialog.vue'
 import type { AudioSourceOption, SessionRow } from './types'
@@ -47,6 +48,7 @@ const assistantModeLabel = computed(
 
 const endpoint = ref('')
 const showSettings = ref(false)
+const showConsumption = ref(false)
 const showSessionSetup = ref(false)
 const sessionSetupMessage = ref('')
 const sessionScenario = ref('General')
@@ -309,6 +311,7 @@ async function toggleAlwaysOnTop() {
       @show-meeting="view = 'meeting'"
       @show-practice="view = 'practice'"
       @open-settings="showSettings = true"
+      @open-consumption="showConsumption = true"
       @toggle-always-on-top="toggleAlwaysOnTop"
       @refresh-audio-sources="refreshAudioSources"
       @select-audio-source="selectAudioSource"
@@ -374,6 +377,7 @@ async function toggleAlwaysOnTop() {
       </div>
     </section>
 
+    <ConsumptionDialog v-if="showConsumption" @close="showConsumption = false" />
     <SettingsDialog
       v-model:show="showSettings"
       v-model:endpoint="endpoint"

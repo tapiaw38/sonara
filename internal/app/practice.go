@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,17 +40,16 @@ type practiceText struct {
 }
 
 func (a *App) requestPracticeSuggestionWhen(ctx context.Context, answerID uint64, language, answer, question, sessionContext string, current func() bool) {
-	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	request := practice.InterviewLanguageInstruction(language) + "\n\n" +
 		"Lo último que dijo el candidato:\n" + answer + "\n\nÚltima pregunta del entrevistador:\n" + question
-	result, err := a.backend.Respond(requestCtx, request, "practice-suggestion", sessionContext)
+	suggestion := retryPracticeText(ctx, answerID, "suggestion", current, func(requestCtx context.Context) (string, error) {
+		result, err := a.backend.Respond(requestCtx, request, "practice-suggestion", sessionContext)
+		return result.Text, err
+	})
 	if !current() {
 		return
 	}
-	suggestion := strings.TrimSpace(result.Text)
-	if err != nil || suggestion == "" {
-		logf("practice: could not generate suggestion for turn %d", answerID)
+	if suggestion == "" {
 		message := "No se pudo generar la respuesta sugerida."
 		if language == "en" {
 			message = "Could not generate a suggested answer."
@@ -79,11 +79,10 @@ func (a *App) publishPracticeTextWhen(ctx context.Context, answerID uint64, even
 	}
 	a.emit(event, text)
 	go func() {
-		translationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		translated, err := a.backend.TranslateTo(translationCtx, original, target)
-		translated = strings.TrimSpace(translated)
-		if err != nil || translated == "" {
+		translated := retryPracticeText(ctx, answerID, event+" translation", current, func(requestCtx context.Context) (string, error) {
+			return a.backend.TranslateTo(requestCtx, original, target)
+		})
+		if translated == "" {
 			translated = "Traducción no disponible."
 		}
 		if target == "es" {
@@ -95,6 +94,41 @@ func (a *App) publishPracticeTextWhen(ctx context.Context, answerID uint64, even
 			a.emit(event, text)
 		}
 	}()
+}
+
+// retryPracticeText retries the same provider once. The voice session and
+// playback keep running while a text request is in flight.
+func retryPracticeText(ctx context.Context, turnID uint64, operation string, current func() bool, request func(context.Context) (string, error)) string {
+	for attempt := 1; attempt <= 2; attempt++ {
+		if ctx.Err() != nil || !current() {
+			break
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		value, err := request(requestCtx)
+		cancel()
+		if ctx.Err() != nil || !current() {
+			break
+		}
+		value = strings.TrimSpace(value)
+		if err == nil && value != "" {
+			return value
+		}
+		reason := "empty response"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "timeout"
+		} else if err != nil {
+			reason = "request failed"
+		}
+		logf("practice: %s turn=%d attempt=%d: %s", operation, turnID, attempt, reason)
+		if attempt == 1 {
+			select {
+			case <-time.After(250 * time.Millisecond):
+			case <-ctx.Done():
+				return ""
+			}
+		}
+	}
+	return ""
 }
 
 // practiceMicrophone returns a stable PipeWire node name that pw-record can target.

@@ -133,7 +133,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.mu.Lock()
 	a.ctx = ctx
-	a.backend = sonaraBackend.New()
+	a.backend = sonaraBackend.NewWithUsage(recordAPIUsage(database))
 	a.store = database
 	a.voiceCancel()
 	a.voiceContext, a.voiceCancel = context.WithCancel(ctx)
@@ -141,6 +141,7 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Unlock()
 
 	if database != nil {
+		go a.refreshUsageCatalog(ctx, database)
 		// Restoring the key here is what makes it survive a restart; it reaches
 		// the gateway before the UI can send its first request.
 		if key := database.Setting(storage.SettingAPIKey); key != "" {
@@ -181,7 +182,7 @@ func (a *App) startup(ctx context.Context) {
 				APIKey: azure.APIKey, Endpoint: azure.Endpoint,
 				ChatAPIVersion: azure.ChatAPIVersion, TranscribeAPIVersion: azure.TranscribeAPIVersion,
 				ChatDeployment: azure.ChatDeployment, TranscribeDeployment: azure.TranscribeDeployment,
-				LiveDeployment: azure.LiveDeployment,
+				LiveDeployment: azure.LiveDeployment, SpeechDeployment: azure.SpeechDeployment,
 			}); err != nil {
 				logf("stored Azure OpenAI settings rejected: %v", err)
 			}
@@ -189,6 +190,11 @@ func (a *App) startup(ctx context.Context) {
 		if chosen, err := database.CapabilityProviders(); err != nil {
 			logf("stored provider selection unreadable: %v", err)
 		} else {
+			if chosen.PracticeVoice != "" {
+				if err := a.backend.SetPracticeVoiceProvider(chosen.PracticeVoice); err != nil {
+					logf("stored voice provider rejected: %v", err)
+				}
+			}
 			chosen = defaultedProviders(chosen)
 			if err := a.backend.SetTextProvider(chosen.Text); err != nil {
 				logf("stored text provider rejected: %v", err)

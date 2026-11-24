@@ -2149,3 +2149,105 @@ button:focus-visible,
     display: none;
   }
 }
+
+.meeting-secondary {
+  padding: 5px 9px;
+}
+.link-button {
+  padding: 0;
+  color: #8fb8a9;
+  background: none;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.meeting-mic button {
+  padding: 0 11px;
+  border-radius: 6px;
+  color: #b9f2df;
+  background: rgb(29 58 49 / var(--surface-opacity));
+  transition: background 0.15s ease;
+}
+.meeting-mic button:not(:disabled):hover {
+  background: rgb(38 72 61 / var(--surface-opacity));
+}
+.meeting-mic button:disabled,
+.meeting-mic select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.meeting-note {
+  margin: 0;
+  color: #80818f;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.sample-status {
+  padding: 0 6px;
+  color: #86d6b0;
+  font-size: 10px;
+  align-self: center;
+}
+.record-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  color: #071711;
+  background: rgb(98 215 179 / var(--surface-opacity));
+  font-size: 11px;
+  font-weight: 700;
+  transition: background 0.15s ease;
+}
+.record-button:not(:disabled):hover {
+  background: rgb(118 230 196 / var(--surface-opacity));
+}
+.record-button span {
+  margin-right: 8px;
+  font-size: 9px;
+}
+.record-button.stop {
+  color: #f5e1e5;
+  background: rgb(101 56 69 / var(--surface-opacity));
+}
+.record-button.stop:not(:disabled):hover {
+  background: rgb(122 70 85 / var(--surface-opacity));
+}
+.record-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.meeting-secondary {
+  min-height: 30px;
+  padding: 5px 8px;
+  color: #b9f2df;
+  border: 1px solid rgb(62 126 108 / var(--surface-opacity));
+  border-radius: 7px;
+  background: rgb(20 40 34 / var(--surface-opacity));
+  font-size: 11px;
+  transition: background 0.15s ease;
+}
+.meeting-secondary:not(:disabled):hover {
+  background: rgb(27 57 47 / var(--surface-opacity));
+}
+.meeting-secondary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.speaker-chip {
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: #a9c9bd;
+  background: rgb(25 38 34 / var(--surface-opacity));
+  font:
+    11px 'DM Mono',
+    monospace;
+  transition: background 0.15s ease;
+}
+.speaker-chip:hover {
+  background: rgb(33 49 44 / var(--surface-opacity));
+}

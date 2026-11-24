@@ -25,6 +25,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sonara/backend/usage"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,7 +59,8 @@ type Config struct {
 	// gpt-live-transcribe: it sends text while the person is still talking,
 	// which the gpt-4o-*-transcribe models (TranscribeDeployment) only do
 	// after a pause. Empty falls back to TranscribeDeployment.
-	LiveDeployment string
+	LiveDeployment   string
+	SpeechDeployment string
 }
 
 type Gateway struct {
@@ -88,6 +90,7 @@ func (g *Gateway) SetConfig(cfg Config) {
 	cfg.ChatDeployment = strings.TrimSpace(cfg.ChatDeployment)
 	cfg.TranscribeDeployment = strings.TrimSpace(cfg.TranscribeDeployment)
 	cfg.LiveDeployment = strings.TrimSpace(cfg.LiveDeployment)
+	cfg.SpeechDeployment = strings.TrimSpace(cfg.SpeechDeployment)
 	g.cfg = cfg
 	g.mu.Unlock()
 }
@@ -143,9 +146,10 @@ type imageURL struct {
 }
 
 type chatRequest struct {
-	Messages  []chatMessage `json:"messages"`
-	MaxTokens int           `json:"max_tokens,omitempty"`
-	Stream    bool          `json:"stream,omitempty"`
+	StreamOptions map[string]bool `json:"stream_options,omitempty"`
+	Messages      []chatMessage   `json:"messages"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
+	Stream        bool            `json:"stream,omitempty"`
 }
 
 type chatResult struct {
@@ -182,13 +186,17 @@ func (g *Gateway) newChatRequest(ctx context.Context, in domain.Request, instruc
 	if !g.Configured() {
 		return nil, cfg, fmt.Errorf("Azure OpenAI no está configurado")
 	}
-	body, err := json.Marshal(chatRequest{
+	payload := chatRequest{
 		Messages: []chatMessage{
 			{Role: "system", Content: instructions},
 			{Role: "user", Content: userContent(in)},
 		},
 		Stream: stream,
-	})
+	}
+	if stream {
+		payload.StreamOptions = map[string]bool{"include_usage": true}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, cfg, err
 	}
@@ -214,11 +222,13 @@ func failure(status int, body []byte) error {
 
 // Respond ignores model: Azure's deployment, not a model string in the
 // request body, picks which model answers.
-func (g *Gateway) Respond(ctx context.Context, in domain.Request, _ string, instructions string) (string, error) {
-	req, _, err := g.newChatRequest(ctx, in, instructions, false)
+func (g *Gateway) Respond(ctx context.Context, in domain.Request, _ string, instructions string) (_ string, callErr error) {
+	req, cfg, err := g.newChatRequest(ctx, in, instructions, false)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "azure", cfg.ChatDeployment, usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -231,6 +241,7 @@ func (g *Gateway) Respond(ctx context.Context, in domain.Request, _ string, inst
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", failure(resp.StatusCode, body)
 	}
+	meter.Observe(body)
 	var result chatResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("Azure OpenAI returned an invalid response")
@@ -270,12 +281,13 @@ func parseStreamLine(line string) (delta string, done bool, failureMessage strin
 	return result.Choices[0].Delta.Content, false, ""
 }
 
-func readStream(body io.Reader, onDelta func(string)) (string, error) {
+func readStream(body io.Reader, onDelta func(string), meters ...*usage.Meter) (string, error) {
 	var text strings.Builder
 	completed := false
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for scanner.Scan() {
+		usage.ObserveSSE(scanner.Bytes(), meters...)
 		delta, done, failed := parseStreamLine(scanner.Text())
 		if failed != "" {
 			return text.String(), fmt.Errorf("Azure OpenAI request failed: %s", failed)
@@ -303,11 +315,13 @@ func readStream(body io.Reader, onDelta func(string)) (string, error) {
 	return text.String(), nil
 }
 
-func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, _ string, instructions string, onDelta func(string)) (string, error) {
-	req, _, err := g.newChatRequest(ctx, in, instructions, true)
+func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, _ string, instructions string, onDelta func(string)) (_ string, callErr error) {
+	req, cfg, err := g.newChatRequest(ctx, in, instructions, true)
 	if err != nil {
 		return "", err
 	}
+	meter := usage.Start(ctx, "azure", cfg.ChatDeployment, usage.Copilot)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -317,14 +331,14 @@ func (g *Gateway) RespondStream(ctx context.Context, in domain.Request, _ string
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		return "", failure(resp.StatusCode, body)
 	}
-	return readStream(io.LimitReader(resp.Body, 8<<20), onDelta)
+	return readStream(io.LimitReader(resp.Body, 8<<20), onDelta, meter)
 }
 
 // Transcribe uploads to Azure's audio/transcriptions endpoint for the
 // configured deployment. Diagnostics mirror the OpenAI/DeepSeek gateways:
 // a slow upload and a slow queue on Azure's side look identical from a
 // single duration, so they are kept apart.
-func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, language string) (domain.Transcript, error) {
+func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, language string) (_ domain.Transcript, callErr error) {
 	cfg := g.config()
 	if !g.TranscribeConfigured() {
 		return domain.Transcript{}, fmt.Errorf("Azure OpenAI (transcripción) no está configurado")
@@ -344,6 +358,9 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	req.Header.Set("Content-Type", contentType)
 
 	started := time.Now()
+	meter := usage.Start(ctx, "azure", cfg.TranscribeDeployment, usage.Live)
+	meter.AudioSeconds = usage.WAVSeconds(audio)
+	defer func() { meter.Finish(callErr == nil) }()
 	resp, err := g.client.Do(req)
 	out.WaitMS = int(time.Since(started).Milliseconds())
 	if err != nil {
@@ -364,6 +381,7 @@ func (g *Gateway) Transcribe(ctx context.Context, audio []byte, filename, langua
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, failure(resp.StatusCode, resultBody)
 	}
+	meter.Observe(resultBody)
 	var result struct {
 		Text string `json:"text"`
 	}

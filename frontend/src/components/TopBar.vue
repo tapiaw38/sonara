@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (event: 'show-meeting'): void
   (event: 'show-practice'): void
   (event: 'open-settings'): void
+  (event: 'open-consumption'): void
   (event: 'toggle-always-on-top'): void
   (event: 'refresh-audio-sources'): void
   (event: 'select-audio-source', target: string): void
@@ -128,6 +129,24 @@ function toggleAudioSources() {
         @click="emit('open-settings')"
       >
         ⚙
+      </button>
+      <button
+        class="overlay-button"
+        title="Consumo"
+        aria-label="Consumo"
+        @click="emit('open-consumption')"
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path d="M4 4v16h16M8 16v-4m4 4V8m4 8V5" />
+        </svg>
       </button>
       <button
         class="overlay-button"

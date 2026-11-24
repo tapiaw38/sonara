@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"sonara/internal/pipewire"
@@ -33,5 +34,30 @@ func TestPracticeMicrophoneRequiresAvailableDevice(t *testing.T) {
 	}
 	if _, err := a.practiceMicrophone(context.Background()); err == nil {
 		t.Fatal("expected an error when there are no microphones")
+	}
+}
+
+func TestPracticeTextRecoversFromFirstRequestFailure(t *testing.T) {
+	attempts := 0
+	got := retryPracticeText(context.Background(), 1, "translation", func() bool { return true }, func(context.Context) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return "", errors.New("first request failed")
+		}
+		return " Hola ", nil
+	})
+	if got != "Hola" || attempts != 2 {
+		t.Fatalf("got %q after %d attempts, want Hola after 2", got, attempts)
+	}
+}
+
+func TestPracticeTextDoesNotRetryInterruptedTurn(t *testing.T) {
+	attempts := 0
+	got := retryPracticeText(context.Background(), 1, "translation", func() bool { return attempts == 0 }, func(context.Context) (string, error) {
+		attempts++
+		return "", errors.New("turn interrupted")
+	})
+	if got != "" || attempts != 1 {
+		t.Fatalf("got %q after %d attempts, want no text after 1", got, attempts)
 	}
 }
