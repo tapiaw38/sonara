@@ -605,8 +605,25 @@ onBeforeUnmount(() => {
       :style="panelHeightStyle(transcriptPanelHeight)"
     >
       <div class="panel-heading">
-        <span>Transcripción</span
-        ><span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span>
+        <span>Transcripción</span>
+        <span
+          v-if="listening"
+          class="heading-audio"
+          :class="{ active: audioDetected }"
+          role="status"
+        >
+          <span class="mini-wave" aria-hidden="true"
+            ><i
+              v-for="(level, index) in levels"
+              :key="index"
+              :class="{ active: level > 0.05 }"
+              :style="{ height: `${2 + level * 14}px` }"
+            ></i></span
+          ><small>{{
+            audioDetected ? listenStatus || 'Sonido detectado' : 'Esperando sonido…'
+          }}</small>
+        </span>
+        <span class="live-label" :class="statusClass"><i></i>{{ statusLabel }}</span>
       </div>
       <div ref="transcriptPanel" class="transcript-body" @scroll.passive="onTranscriptScroll">
         <div
@@ -620,20 +637,6 @@ onBeforeUnmount(() => {
         <div class="transcript-turn">
           <p class="transcript-text" :class="{ partial: transcriptPartial }">{{ transcript }}</p>
           <p v-if="translation" class="transcript-translation"><span>ES</span>{{ translation }}</p>
-        </div>
-        <div v-if="listening" class="audio-pulse" :class="{ active: audioDetected }">
-          <span></span><span></span><span></span
-          ><small>{{
-            audioDetected ? listenStatus || 'Sonido detectado' : 'Esperando sonido…'
-          }}</small>
-        </div>
-        <div v-if="audioDetected" class="wave">
-          <i
-            v-for="(level, index) in levels"
-            :key="index"
-            :class="{ active: level > 0.05 }"
-            :style="{ height: `${3 + level * 42}px` }"
-          ></i>
         </div>
       </div>
       <div v-if="pendingSeconds > 0" class="pending-bar">

@@ -2251,3 +2251,41 @@ button:focus-visible,
 .speaker-chip:hover {
   background: rgb(33 49 44 / var(--surface-opacity));
 }
+
+/* Copilot transcript heading: live audio level next to the title. */
+.heading-audio {
+  min-width: 0;
+  margin: 0 12px 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mini-wave {
+  height: 18px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.mini-wave i {
+  width: 2px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: rgb(85 214 176 / 0.25);
+  transition: height 0.1s linear;
+}
+.mini-wave i.active {
+  background: #55d6b0;
+}
+.heading-audio small {
+  overflow: hidden;
+  max-width: 180px;
+  color: #8d8f9d;
+  font:
+    10px 'DM Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.heading-audio.active small {
+  color: #9fe7cf;
+}
