@@ -52,7 +52,7 @@ func (u *respondUsecase) plan(input RespondInput) (request domain.Request, model
 	prompt := input.Message
 	if context := strings.TrimSpace(input.Context); context != "" {
 		label := "Context from this Sonara session (use only when relevant)"
-		if mode == "practice" || mode == "practice-turn" || mode == "practice-suggestion" {
+		if mode == "practice" || mode == "practice-turn" || mode == "practice-question" || mode == "practice-suggestion" {
 			label = "Interview context and conversation so far (use it)"
 		}
 		prompt = label + ":\n" + context + "\n\nLatest request:\n" + input.Message
@@ -84,7 +84,7 @@ func (u *respondUsecase) ExecuteStream(ctx context.Context, input RespondInput, 
 
 func normalizeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "practice-suggestion", "summary", "memory":
+	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "practice-question", "practice-suggestion", "summary", "memory":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return "interview"
@@ -100,7 +100,7 @@ func chooseAgent(message, mode string) (string, string, string) {
 		return "interviewer", "fast", "Redactá únicamente lo que el candidato podría decir en respuesta a la última pregunta del entrevistador. Respetá el idioma configurado indicado al comienzo de la solicitud. " +
 			practiceSuggestionInstructions
 	}
-	if mode == "practice" || mode == "practice-turn" {
+	if mode == "practice" || mode == "practice-turn" || mode == "practice-question" {
 		instructions := "Sos quien entrevista en una conversación hablada. Leé tu pregunta anterior y la respuesta del candidato, junto con el contexto de la entrevista. Respondé con una reacción breve y natural a lo que dijo (sin elogios vacíos) y una sola pregunta bien elaborada que profundice en algo concreto de su respuesta o avance hacia el objetivo de la entrevista; en total dos o tres frases fáciles de decir en voz alta. Variá cómo enlazás las preguntas: a veces alcanza con preguntar directamente. Si te piden aclarar o repetir, hacelo antes de avanzar. Usá lenguaje cotidiano y frases breves. Sin listas ni marcas de estilo." +
 			" Si el contexto trae el perfil de la entrevista, actuá como alguien de esa empresa entrevistando para ese puesto, y elegí preguntas reales de ese tipo:" +
 			" técnica, sobre el stack y los problemas del puesto, pidiendo detalle o un ejemplo concreto; conductual, sobre situaciones vividas, repreguntando por su rol, decisiones y resultado; diseño de sistemas, con un escenario que se va complicando (escala, fallas, trade-offs); producto y negocio, con casos, métricas y priorización; general, una mezcla." +
@@ -111,6 +111,8 @@ func chooseAgent(message, mode string) (string, string, string) {
 		if mode == "practice-turn" {
 			instructions += " Respetá el idioma configurado indicado al comienzo de la solicitud, aunque el candidato o el historial usen otro idioma. Entregá ambas partes en este orden: lo que diría el entrevistador, el separador literal [[SUGGESTION]] en una línea aparte, y debajo la respuesta que podría decir el candidato a esa pregunta. " +
 				"Usá el mismo idioma en ambas partes. Para la parte del candidato, seguí estas instrucciones: " + practiceSuggestionInstructions
+		} else if mode == "practice-question" {
+			instructions += " Respetá el idioma de entrevista indicado en la solicitud."
 		} else {
 			instructions += " Usá el idioma del candidato."
 		}

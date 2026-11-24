@@ -86,7 +86,7 @@ export function SetAudioLanguage(arg1:string):Promise<string>;
 
 export function SetAudioSource(arg1:string):Promise<string>;
 
-export function SetAzureOpenAIConfig(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:boolean):Promise<void>;
+export function SetAzureOpenAIConfig(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:boolean):Promise<void>;
 
 export function SetDeepSeekAPIKey(arg1:string):Promise<void>;
 
@@ -105,6 +105,8 @@ export function SetMeetingProvider(arg1:string):Promise<void>;
 export function SetMicrophone(arg1:string):Promise<string>;
 
 export function SetOpenAIAPIKey(arg1:string):Promise<void>;
+
+export function SetPracticeVoiceProvider(arg1:string):Promise<void>;
 
 export function SetTextProvider(arg1:string):Promise<void>;
 

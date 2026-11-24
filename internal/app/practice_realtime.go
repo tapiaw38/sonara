@@ -45,6 +45,14 @@ func (a *App) PracticeRealtime() error {
 		a.mu.Unlock()
 	}()
 
+	if a.backend.PracticeVoiceProvider() == "azure" {
+		err := a.runAzurePractice(ctx, language, generation)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+
 	instructions := "Sos quien entrevista para el puesto del perfil. El candidato habla primero. Presentate brevemente, hacé una sola pregunta por turno y adaptá tus repreguntas a sus respuestas."
 	if language == "en" {
 		instructions = "You are interviewing the candidate for the role in the profile. The candidate speaks first. Introduce yourself briefly, ask one question per turn, and follow up on their answers."

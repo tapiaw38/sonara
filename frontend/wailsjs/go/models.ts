@@ -20,6 +20,7 @@ export namespace app {
 	    chatDeployment: string;
 	    transcribeDeployment: string;
 	    liveDeployment: string;
+	    speechDeployment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AzureOpenAIForm(source);
@@ -34,6 +35,7 @@ export namespace app {
 	        this.chatDeployment = source["chatDeployment"];
 	        this.transcribeDeployment = source["transcribeDeployment"];
 	        this.liveDeployment = source["liveDeployment"];
+	        this.speechDeployment = source["speechDeployment"];
 	    }
 	}
 	export class CaptureStatus {
@@ -228,6 +230,7 @@ export namespace storage {
 	
 	export class CapabilityProviders {
 	    text: string;
+	    practiceVoice: string;
 	    vision: string;
 	    liveTranscribe: string;
 	    meeting: string;
@@ -240,6 +243,7 @@ export namespace storage {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
+	        this.practiceVoice = source["practiceVoice"];
 	        this.vision = source["vision"];
 	        this.liveTranscribe = source["liveTranscribe"];
 	        this.meeting = source["meeting"];

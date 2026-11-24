@@ -22,6 +22,12 @@ func defaultedProviders(p storage.CapabilityProviders) storage.CapabilityProvide
 	if p.Text == "" {
 		p.Text = "openai"
 	}
+	if p.PracticeVoice == "" {
+		p.PracticeVoice = "openai"
+		if p.Text == "azure" {
+			p.PracticeVoice = "azure"
+		}
+	}
 	if p.Vision == "" {
 		p.Vision = "openai"
 	}
@@ -134,6 +140,20 @@ func (a *App) SetMeetingProvider(name string) error {
 	return nil
 }
 
+// SetPracticeVoiceProvider changes the provider for the next Practice session.
+func (a *App) SetPracticeVoiceProvider(name string) error {
+	if a.backend == nil {
+		return fmt.Errorf("backend no inicializado")
+	}
+	if name != "openai" && name != "azure" {
+		return fmt.Errorf("proveedor de voz inválido")
+	}
+	if err := a.updateCapabilityProviders(func(p *storage.CapabilityProviders) { p.PracticeVoice = name }); err != nil {
+		return err
+	}
+	return a.backend.SetPracticeVoiceProvider(name)
+}
+
 // AzureOpenAIForm is what Settings sends back and forth: no APIKey field in
 // either direction once saved — same "never echoed back" policy as every
 // other key in this app. HasKey tells the UI whether one is already stored,
@@ -146,6 +166,7 @@ type AzureOpenAIForm struct {
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
 	LiveDeployment       string `json:"liveDeployment"`
+	SpeechDeployment     string `json:"speechDeployment"`
 }
 
 // GetAzureOpenAISettings returns everything except the key itself, for
@@ -165,7 +186,7 @@ func (a *App) GetAzureOpenAISettings() (AzureOpenAIForm, error) {
 		HasKey: stored.APIKey != "", Endpoint: stored.Endpoint,
 		ChatAPIVersion: stored.ChatAPIVersion, TranscribeAPIVersion: stored.TranscribeAPIVersion,
 		ChatDeployment: stored.ChatDeployment, TranscribeDeployment: stored.TranscribeDeployment,
-		LiveDeployment: stored.LiveDeployment,
+		LiveDeployment: stored.LiveDeployment, SpeechDeployment: stored.SpeechDeployment,
 	}, nil
 }
 
@@ -175,7 +196,7 @@ func (a *App) GetAzureOpenAISettings() (AzureOpenAIForm, error) {
 // versions on the same resource. An empty apiKey keeps whatever key is
 // already stored (so the rest can be edited without retyping it); clearing
 // the key itself is a separate, explicit action — pass clearKey=true.
-func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersion, chatDeployment, transcribeDeployment, liveDeployment, apiKey string, clearKey bool) error {
+func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersion, chatDeployment, transcribeDeployment, liveDeployment, speechDeployment, apiKey string, clearKey bool) error {
 	if a.backend == nil {
 		return fmt.Errorf("backend no inicializado")
 	}
@@ -190,6 +211,7 @@ func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersio
 		ChatDeployment:       strings.TrimSpace(chatDeployment),
 		TranscribeDeployment: strings.TrimSpace(transcribeDeployment),
 		LiveDeployment:       strings.TrimSpace(liveDeployment),
+		SpeechDeployment:     strings.TrimSpace(speechDeployment),
 	}
 	switch {
 	case clearKey:
@@ -206,7 +228,7 @@ func (a *App) SetAzureOpenAIConfig(endpoint, chatAPIVersion, transcribeAPIVersio
 		APIKey: settings.APIKey, Endpoint: settings.Endpoint,
 		ChatAPIVersion: settings.ChatAPIVersion, TranscribeAPIVersion: settings.TranscribeAPIVersion,
 		ChatDeployment: settings.ChatDeployment, TranscribeDeployment: settings.TranscribeDeployment,
-		LiveDeployment: settings.LiveDeployment,
+		LiveDeployment: settings.LiveDeployment, SpeechDeployment: settings.SpeechDeployment,
 	}); err != nil {
 		return err
 	}

@@ -59,7 +59,8 @@ type Config struct {
 	// gpt-live-transcribe: it sends text while the person is still talking,
 	// which the gpt-4o-*-transcribe models (TranscribeDeployment) only do
 	// after a pause. Empty falls back to TranscribeDeployment.
-	LiveDeployment string
+	LiveDeployment   string
+	SpeechDeployment string
 }
 
 type Gateway struct {
@@ -89,6 +90,7 @@ func (g *Gateway) SetConfig(cfg Config) {
 	cfg.ChatDeployment = strings.TrimSpace(cfg.ChatDeployment)
 	cfg.TranscribeDeployment = strings.TrimSpace(cfg.TranscribeDeployment)
 	cfg.LiveDeployment = strings.TrimSpace(cfg.LiveDeployment)
+	cfg.SpeechDeployment = strings.TrimSpace(cfg.SpeechDeployment)
 	g.cfg = cfg
 	g.mu.Unlock()
 }

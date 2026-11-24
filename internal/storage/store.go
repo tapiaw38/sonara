@@ -194,6 +194,7 @@ type AzureOpenAISettings struct {
 	ChatDeployment       string `json:"chatDeployment"`
 	TranscribeDeployment string `json:"transcribeDeployment"`
 	LiveDeployment       string `json:"liveDeployment"`
+	SpeechDeployment     string `json:"speechDeployment"`
 }
 
 func (s *Store) AzureOpenAISettings() (AzureOpenAISettings, error) {
@@ -220,6 +221,7 @@ func (s *Store) SaveAzureOpenAISettings(settings AzureOpenAISettings) error {
 // explicit choice each, no fallback chain. Empty fields default to "openai".
 type CapabilityProviders struct {
 	Text            string `json:"text"`
+	PracticeVoice   string `json:"practiceVoice"`
 	Vision          string `json:"vision"`
 	LiveTranscribe  string `json:"liveTranscribe"`
 	MeetingProvider string `json:"meeting"`

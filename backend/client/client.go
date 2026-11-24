@@ -22,13 +22,14 @@ import (
 // provider, chosen in Settings and persisted there — never an automatic
 // fallback chain. See providers.Registry/Selector/Transcriber.
 type Client struct {
-	usageRecorder usage.Recorder
-	mu            sync.RWMutex
-	cfg           config.Config
-	provider      openai.Gateway
-	deepseek      *deepseek.Gateway
-	azure         *azureopenai.Gateway
-	local         *localwhisper.Gateway
+	usageRecorder         usage.Recorder
+	practiceVoiceProvider string
+	mu                    sync.RWMutex
+	cfg                   config.Config
+	provider              openai.Gateway
+	deepseek              *deepseek.Gateway
+	azure                 *azureopenai.Gateway
+	local                 *localwhisper.Gateway
 
 	textVision        *providers.Selector
 	liveTranscribe    *providers.Transcriber
@@ -70,6 +71,7 @@ type AzureConfig struct {
 	ChatDeployment       string
 	TranscribeDeployment string
 	LiveDeployment       string
+	SpeechDeployment     string
 }
 
 func New() *Client { return NewWithUsage(nil) }
@@ -170,7 +172,7 @@ func (c *Client) SetAzureOpenAIConfig(cfg AzureConfig) error {
 		APIKey: key, Endpoint: cfg.Endpoint,
 		ChatAPIVersion: cfg.ChatAPIVersion, TranscribeAPIVersion: cfg.TranscribeAPIVersion,
 		ChatDeployment: cfg.ChatDeployment, TranscribeDeployment: cfg.TranscribeDeployment,
-		LiveDeployment: cfg.LiveDeployment,
+		LiveDeployment: cfg.LiveDeployment, SpeechDeployment: cfg.SpeechDeployment,
 	})
 	return nil
 }
@@ -326,12 +328,56 @@ func (c *Client) TranscribePractice(ctx context.Context, audio []byte, language 
 	return toTranscript(&output, err)
 }
 
-// Speak turns text into spoken audio (wav bytes) for the practice mode's
-// interviewer voice. Always OpenAI, by design: unlike text/vision/transcribe,
-// this capability has no Settings-level provider choice.
+// Speak synthesizes through the configured Practice voice provider.
 func (c *Client) Speak(ctx context.Context, text string) ([]byte, error) {
+	if c.PracticeVoiceProvider() == providers.Azure {
+		return c.SpeakAzurePractice(ctx, text)
+	}
 	ctx = usage.With(ctx, c.usageRecorder, usage.TTS)
 	return c.speak.Execute(ctx, assistant.SpeakInput{Text: text})
+}
+
+func (c *Client) PracticeVoiceProvider() string {
+	c.mu.RLock()
+	name := c.practiceVoiceProvider
+	c.mu.RUnlock()
+	if name == "" {
+		if c.TextProvider() == providers.Azure {
+			return providers.Azure
+		}
+		return providers.OpenAI
+	}
+	return name
+}
+
+func (c *Client) SetPracticeVoiceProvider(name string) error {
+	if name != providers.OpenAI && name != providers.Azure {
+		return fmt.Errorf("proveedor de voz inválido")
+	}
+	c.mu.Lock()
+	c.practiceVoiceProvider = name
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) CheckAzurePractice() error {
+	if err := c.azure.CheckSpeech(); err != nil {
+		return err
+	}
+	if !c.azure.TranscribeConfigured() {
+		return fmt.Errorf("Práctica con voz Azure requiere un deployment de transcripción de Azure")
+	}
+	return nil
+}
+
+// The running Azure session keeps its selected audio provider until it ends.
+func (c *Client) SpeakAzurePractice(ctx context.Context, text string) ([]byte, error) {
+	return c.azure.Speak(usage.With(ctx, c.usageRecorder, usage.TTS), text, "alloy", "")
+}
+
+func (c *Client) TranscribeAzurePractice(ctx context.Context, wav []byte, language string) (Transcript, error) {
+	output, err := c.azure.Transcribe(usage.With(ctx, c.usageRecorder, usage.Practice), wav, "practice.wav", language)
+	return toTranscript(&output, err)
 }
 
 func toTranscript(output *domain.Transcript, err error) (Transcript, error) {
@@ -348,7 +394,7 @@ func toTranscript(output *domain.Transcript, err error) (Transcript, error) {
 
 func responseFunction(mode string) string {
 	switch mode {
-	case "practice", "practice-turn", "practice-suggestion":
+	case "practice", "practice-turn", "practice-question", "practice-suggestion":
 		return usage.Practice
 	case "summary", "memory":
 		return usage.Summary

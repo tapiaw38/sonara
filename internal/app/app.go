@@ -182,7 +182,7 @@ func (a *App) startup(ctx context.Context) {
 				APIKey: azure.APIKey, Endpoint: azure.Endpoint,
 				ChatAPIVersion: azure.ChatAPIVersion, TranscribeAPIVersion: azure.TranscribeAPIVersion,
 				ChatDeployment: azure.ChatDeployment, TranscribeDeployment: azure.TranscribeDeployment,
-				LiveDeployment: azure.LiveDeployment,
+				LiveDeployment: azure.LiveDeployment, SpeechDeployment: azure.SpeechDeployment,
 			}); err != nil {
 				logf("stored Azure OpenAI settings rejected: %v", err)
 			}
@@ -190,6 +190,11 @@ func (a *App) startup(ctx context.Context) {
 		if chosen, err := database.CapabilityProviders(); err != nil {
 			logf("stored provider selection unreadable: %v", err)
 		} else {
+			if chosen.PracticeVoice != "" {
+				if err := a.backend.SetPracticeVoiceProvider(chosen.PracticeVoice); err != nil {
+					logf("stored voice provider rejected: %v", err)
+				}
+			}
 			chosen = defaultedProviders(chosen)
 			if err := a.backend.SetTextProvider(chosen.Text); err != nil {
 				logf("stored text provider rejected: %v", err)

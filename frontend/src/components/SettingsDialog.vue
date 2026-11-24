@@ -11,6 +11,7 @@ import {
   SetMeetingProvider,
   SetOpenAIAPIKey,
   SetTextProvider,
+  SetPracticeVoiceProvider,
   SetVisionProvider,
   AIEndpoint,
   ProviderStatus,
@@ -48,6 +49,7 @@ const azureTranscribeApiVersion = ref('')
 const azureChatDeployment = ref('')
 const azureTranscribeDeployment = ref('')
 const azureLiveDeployment = ref('')
+const azureSpeechDeployment = ref('')
 const azureKey = ref('')
 const azureHasKey = ref(false)
 const azureMessage = ref('')
@@ -100,6 +102,7 @@ const providerText = ref('openai')
 const providerVision = ref('openai')
 const providerLiveTranscribe = ref('openai')
 const providerMeeting = ref('openai')
+const providerVoice = ref('openai')
 const liveMode = ref('batch')
 const providersMessage = ref('')
 
@@ -112,6 +115,7 @@ async function loadAzureSettings() {
     azureChatDeployment.value = form.chatDeployment
     azureTranscribeDeployment.value = form.transcribeDeployment
     azureLiveDeployment.value = form.liveDeployment
+    azureSpeechDeployment.value = form.speechDeployment
     azureHasKey.value = form.hasKey
   } catch {
     // Settings dialog just shows blank fields; not worth a user-facing error.
@@ -125,6 +129,7 @@ async function loadProviders() {
     providerVision.value = providers.vision
     providerLiveTranscribe.value = providers.liveTranscribe
     providerMeeting.value = providers.meeting
+    providerVoice.value = providers.practiceVoice
     liveMode.value = providers.liveMode || 'batch'
   } catch {
     // Keep the "openai" defaults the refs already have.
@@ -193,6 +198,7 @@ async function saveAzureConfig(clearKey: boolean) {
       azureChatDeployment.value,
       azureTranscribeDeployment.value,
       azureLiveDeployment.value,
+      azureSpeechDeployment.value,
       azureKey.value,
       clearKey,
     )
@@ -227,20 +233,23 @@ async function refreshEndpoint() {
 }
 
 async function setProvider(
-  capability: 'text' | 'vision' | 'liveTranscribe' | 'meeting',
+  capability: 'text' | 'vision' | 'liveTranscribe' | 'meeting' | 'voice',
   name: string,
 ) {
   providersMessage.value = ''
   try {
     if (capability === 'text') {
       await SetTextProvider(name)
-      providerText.value = name
+      await loadProviders()
     } else if (capability === 'vision') {
       await SetVisionProvider(name)
       providerVision.value = name
     } else if (capability === 'liveTranscribe') {
       await SetLiveTranscribeProvider(name)
       providerLiveTranscribe.value = name
+    } else if (capability === 'voice') {
+      await SetPracticeVoiceProvider(name)
+      providerVoice.value = name
     } else {
       await SetMeetingProvider(name)
       providerMeeting.value = name
@@ -366,6 +375,25 @@ onMounted(async () => {
           <option value="azure">Azure OpenAI{{ missing('azure', true) }}</option>
           <option value="local">Whisper local (gratis)</option>
         </select>
+        <label for="provider-voice">Voz (Práctica)</label>
+        <select
+          id="provider-voice"
+          :value="providerVoice"
+          @change="setProvider('voice', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="openai">OpenAI{{ missing('openai') }}</option>
+          <option value="azure">
+            Azure OpenAI{{
+              !azureHasKey || !azureSpeechDeployment || !azureTranscribeDeployment
+                ? ' (falta configurar)'
+                : ''
+            }}
+          </option>
+        </select>
+        <small v-if="providerVoice === 'azure'" class="provider-hint"
+          >Azure usa los deployments de voz y transcripción de Claves. Los cambios se aplican a la
+          próxima práctica.</small
+        >
         <label for="live-mode">Modo de transcripción en vivo (copiloto)</label>
         <select
           id="live-mode"
@@ -484,6 +512,14 @@ onMounted(async () => {
               autocomplete="off"
               spellcheck="false"
               placeholder="gpt-live-transcribe (vacío = el de transcripción)"
+            />
+            <label for="azure-speech-deployment">Deployment de voz (TTS)</label>
+            <input
+              id="azure-speech-deployment"
+              v-model="azureSpeechDeployment"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Ej. gpt-4o-mini-tts"
             />
             <label for="azure-key">API key</label
             ><input

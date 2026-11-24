@@ -166,8 +166,8 @@ export function SetAudioSource(arg1) {
   return window['go']['app']['App']['SetAudioSource'](arg1);
 }
 
-export function SetAzureOpenAIConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
-  return window['go']['app']['App']['SetAzureOpenAIConfig'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+export function SetAzureOpenAIConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
+  return window['go']['app']['App']['SetAzureOpenAIConfig'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
 export function SetDeepSeekAPIKey(arg1) {
@@ -204,6 +204,10 @@ export function SetMicrophone(arg1) {
 
 export function SetOpenAIAPIKey(arg1) {
   return window['go']['app']['App']['SetOpenAIAPIKey'](arg1);
+}
+
+export function SetPracticeVoiceProvider(arg1) {
+  return window['go']['app']['App']['SetPracticeVoiceProvider'](arg1);
 }
 
 export function SetTextProvider(arg1) {
