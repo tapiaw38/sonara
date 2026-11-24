@@ -142,17 +142,18 @@ onMounted(() => {
         </button>
       </header>
       <div class="usage-toolbar">
-        <div class="usage-periods" aria-label="Período">
+        <div class="usage-periods" role="group" aria-label="Período">
           <button
             v-for="range in ranges"
             :key="range.id"
+            class="speaker-chip"
             :aria-pressed="periodID === range.id"
             @click="periodID = range.id"
           >
             {{ range.name }}
           </button>
         </div>
-        <button :disabled="loading || saving" @click="refresh">
+        <button class="meeting-secondary" :disabled="loading || saving" @click="refresh">
           {{ loading ? 'Cargando…' : 'Actualizar' }}
         </button>
       </div>
@@ -197,10 +198,11 @@ onMounted(() => {
         >
           <div class="breakdown-header">
             <h3 id="usage-breakdown-title">Desglose</h3>
-            <div class="usage-periods" aria-label="Agrupar consumo">
+            <div class="usage-periods" role="group" aria-label="Agrupar consumo">
               <button
                 v-for="item in breakdowns"
                 :key="item.id"
+                class="speaker-chip"
                 :aria-pressed="breakdown === item.id"
                 @click="breakdown = item.id"
               >
@@ -208,112 +210,126 @@ onMounted(() => {
               </button>
             </div>
           </div>
-          <ul class="usage-groups">
-            <li v-for="row in groups" :key="row.name">
-              <div>
-                <strong>{{ groupName(row.name) }}</strong>
-                <span class="usage-details">
-                  <span>{{ number.format(row.totals.calls) }} llamadas</span>
-                  <span v-if="row.totals.input || row.totals.output"
-                    >{{ number.format(row.totals.input) }} entrada ·
-                    {{ number.format(row.totals.output) }} salida</span
+          <table class="usage-groups" aria-labelledby="usage-breakdown-title">
+            <thead>
+              <tr>
+                <th scope="col">{{ breakdowns.find((item) => item.id === breakdown)?.label }}</th>
+                <th scope="col" class="row-cost">Costo estimado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in groups" :key="row.name">
+                <td>
+                  <strong>{{ groupName(row.name) }}</strong>
+                  <span class="usage-details">
+                    <span>{{ number.format(row.totals.calls) }} llamadas</span>
+                    <span v-if="row.totals.input || row.totals.output"
+                      >{{ number.format(row.totals.input) }} entrada ·
+                      {{ number.format(row.totals.output) }} salida</span
+                    >
+                    <span v-if="row.totals.audioSeconds"
+                      >{{ audioTime(row.totals.audioSeconds) }} de audio</span
+                    >
+                    <span v-if="row.totals.characters"
+                      >{{ number.format(row.totals.characters) }} caracteres</span
+                    >
+                    <span v-if="row.totals.errors"
+                      >{{ number.format(row.totals.errors) }} con error</span
+                    >
+                  </span>
+                </td>
+                <td class="row-cost">
+                  <strong>{{
+                    row.totals.unpriced === row.totals.calls ? '—' : currency.format(row.totals.usd)
+                  }}</strong>
+                  <small v-if="row.totals.unpriced"
+                    >{{ number.format(row.totals.unpriced) }} sin estimar</small
                   >
-                  <span v-if="row.totals.audioSeconds"
-                    >{{ audioTime(row.totals.audioSeconds) }} de audio</span
-                  >
-                  <span v-if="row.totals.characters"
-                    >{{ number.format(row.totals.characters) }} caracteres</span
-                  >
-                  <span v-if="row.totals.errors"
-                    >{{ number.format(row.totals.errors) }} con error</span
-                  >
-                </span>
-              </div>
-              <div class="row-cost">
-                <strong>{{
-                  row.totals.unpriced === row.totals.calls ? '—' : currency.format(row.totals.usd)
-                }}</strong>
-                <small v-if="row.totals.unpriced"
-                  >{{ number.format(row.totals.unpriced) }} sin estimar</small
-                >
-              </div>
-            </li>
-          </ul>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </section>
-        <div v-else class="usage-empty">Todavía no hay llamadas registradas en este período.</div>
-        <details class="usage-prices">
+        <div v-else class="empty-state">
+          <span class="empty-icon" aria-hidden="true">✦</span>
+          <p>Todavía no hay llamadas registradas en este período.</p>
+        </div>
+        <details class="key-group usage-prices">
           <summary>Precios por modelo</summary>
-          <p>
-            Los precios se aplican también al historial. Las tarifas faltantes se excluyen del
-            costo.
-          </p>
-          <p v-if="report.catalogUpdated">
-            Catálogo LiteLLM actualizado el
-            {{ new Date(report.catalogUpdated).toLocaleString('es') }}.
-          </p>
-          <p v-else>Consumo usa las tarifas de referencia mientras se descarga el catálogo.</p>
-          <form v-if="selectedPrice" @submit.prevent="save()">
-            <label class="price-model">
-              Modelo
-              <select v-model="priceKey">
-                <option
-                  v-for="price in report.prices"
-                  :key="modelKey(price)"
-                  :value="modelKey(price)"
-                >
-                  {{ labels[price.provider] ?? price.provider }} · {{ price.model
-                  }}{{ price.enabled ? '' : ' (sin tarifa)' }}
-                </option>
-              </select>
-            </label>
-            <div class="price-fields">
-              <label v-for="field in fields" :key="field.key">
-                {{ field.label }}
-                <input
-                  v-model.number="selectedPrice[field.key]"
-                  type="number"
-                  required
-                  min="0"
-                  step="any"
-                />
-                <small>{{
-                  field.key === 'perMinute'
-                    ? 'USD/min'
-                    : field.key === 'perMillionChars'
-                      ? 'USD/millón de caracteres'
-                      : 'USD/millón de tokens'
-                }}</small>
+          <div class="price-body">
+            <p>
+              Los precios se aplican también al historial. Las tarifas faltantes se excluyen del
+              costo.
+            </p>
+            <p v-if="report.catalogUpdated">
+              Catálogo LiteLLM actualizado el
+              {{ new Date(report.catalogUpdated).toLocaleString('es') }}.
+            </p>
+            <p v-else>Consumo usa las tarifas de referencia mientras se descarga el catálogo.</p>
+            <form v-if="selectedPrice" @submit.prevent="save()">
+              <label class="price-model">
+                Modelo
+                <select v-model="priceKey">
+                  <option
+                    v-for="price in report.prices"
+                    :key="modelKey(price)"
+                    :value="modelKey(price)"
+                  >
+                    {{ labels[price.provider] ?? price.provider }} · {{ price.model
+                    }}{{ price.enabled ? '' : ' (sin tarifa)' }}
+                  </option>
+                </select>
               </label>
-            </div>
-            <div class="price-footer">
-              <label><input v-model="selectedPrice.enabled" type="checkbox" /> Usar tarifa</label>
-              <label
-                ><input v-model="selectedPrice.durationBilling" type="checkbox" /> Priorizar
-                minutos</label
-              >
-              <small>{{
-                selectedPrice.source === 'manual'
-                  ? 'Tarifa manual'
-                  : selectedPrice.source === 'catalog'
-                    ? 'Fuente: LiteLLM'
-                    : selectedPrice.source === 'default'
-                      ? 'Tarifa de referencia'
-                      : 'Sin tarifa disponible'
-              }}</small>
-              <button
-                v-if="selectedPrice.source === 'manual'"
-                type="button"
-                :disabled="loading || saving"
-                @click="save(true)"
-              >
-                Restaurar automática
-              </button>
-              <button type="submit" :disabled="loading || saving">
-                {{ saving ? 'Guardando…' : 'Guardar precios' }}
-              </button>
-            </div>
-            <p v-if="message" role="status">{{ message }}</p>
-          </form>
+              <div class="price-fields">
+                <label v-for="field in fields" :key="field.key">
+                  {{ field.label }}
+                  <input
+                    v-model.number="selectedPrice[field.key]"
+                    type="number"
+                    required
+                    min="0"
+                    step="any"
+                  />
+                  <small>{{
+                    field.key === 'perMinute'
+                      ? 'USD/min'
+                      : field.key === 'perMillionChars'
+                        ? 'USD/millón de caracteres'
+                        : 'USD/millón de tokens'
+                  }}</small>
+                </label>
+              </div>
+              <div class="price-footer">
+                <label><input v-model="selectedPrice.enabled" type="checkbox" /> Usar tarifa</label>
+                <label
+                  ><input v-model="selectedPrice.durationBilling" type="checkbox" /> Priorizar
+                  minutos</label
+                >
+                <small>{{
+                  selectedPrice.source === 'manual'
+                    ? 'Tarifa manual'
+                    : selectedPrice.source === 'catalog'
+                      ? 'Fuente: LiteLLM'
+                      : selectedPrice.source === 'default'
+                        ? 'Tarifa de referencia'
+                        : 'Sin tarifa disponible'
+                }}</small>
+                <button
+                  class="meeting-secondary"
+                  v-if="selectedPrice.source === 'manual'"
+                  type="button"
+                  :disabled="loading || saving"
+                  @click="save(true)"
+                >
+                  Restaurar automática
+                </button>
+                <button class="meeting-secondary" type="submit" :disabled="loading || saving">
+                  {{ saving ? 'Guardando…' : 'Guardar precios' }}
+                </button>
+              </div>
+              <p v-if="message" role="status">{{ message }}</p>
+            </form>
+          </div>
         </details>
       </template>
     </section>
@@ -322,17 +338,22 @@ onMounted(() => {
 
 <style scoped>
 .usage-dialog {
-  width: min(820px, 96vw);
+  width: min(760px, 96vw);
   display: grid;
-  gap: 16px;
-  color: #e8e9ee;
-}
-.usage-dialog p,
-.usage-dialog small {
-  color: #a7a9b5;
+  gap: 10px;
+  font-size: 12px;
 }
 .usage-dialog p {
   margin: 0;
+}
+.usage-dialog small,
+.usage-summary dt,
+.usage-groups th,
+.usage-details,
+.price-body p,
+.price-body label {
+  color: #9b9daa;
+  font-size: 11px;
 }
 .usage-toolbar,
 .breakdown-header,
@@ -344,30 +365,17 @@ onMounted(() => {
   gap: 8px;
 }
 .usage-periods {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid #343643;
-  border-radius: 8px;
-  background: #18191f;
+  gap: 6px;
 }
-.usage-toolbar button,
-.usage-periods button,
-.usage-prices button {
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  color: #c5c7d2;
-  background: transparent;
-}
-.usage-toolbar > button,
-.usage-prices button {
-  border-color: #414351;
+.usage-periods button {
+  font-family: inherit;
 }
 .usage-periods [aria-pressed='true'] {
-  color: #b5f3df;
-  background: #253a32;
+  color: #b9f2df;
+  background: rgb(27 57 47 / var(--surface-opacity));
+  box-shadow: inset 0 0 0 1px rgb(62 126 108 / var(--surface-opacity));
 }
 .usage-summary {
   display: grid;
@@ -375,74 +383,67 @@ onMounted(() => {
   gap: 8px;
   margin: 0;
 }
-.usage-summary > div,
-.usage-empty,
-.usage-prices {
-  padding: 12px;
-  border: 1px solid #343643;
-  border-radius: 9px;
-  background: #191c23;
+.usage-summary > div {
+  padding: 8px 10px;
+  border: 1px solid rgb(41 42 53 / var(--surface-opacity));
+  border-radius: 7px;
 }
-.usage-summary .usage-cost {
-  border-color: #36584b;
-  background: #1b2926;
-}
-dt,
-.usage-details,
-.price-fields small {
-  color: #a7a9b5;
-  font-size: 11px;
-}
-dd {
-  margin: 5px 0;
+.usage-summary dd {
+  margin: 4px 0 0;
   overflow-wrap: anywhere;
-  font-size: 20px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+  font-size: 13px;
 }
 .usage-cost dd {
-  color: #b5f3df;
+  color: #b9f2df;
 }
-h3 {
-  font-size: 14px;
+.usage-summary dd,
+.usage-summary small,
+.usage-details,
+.row-cost strong,
+.row-cost small,
+.price-fields input {
+  font-family: 'DM Mono', monospace;
+}
+.breakdown-header h3 {
+  font-size: 12px;
+  font-weight: 600;
   margin: 0;
 }
 .usage-groups {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid #343643;
-  border-radius: 8px;
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  text-align: left;
 }
-.usage-groups li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 9px 12px;
+.usage-groups th,
+.usage-groups td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgb(41 42 53 / var(--surface-opacity));
   overflow-wrap: anywhere;
+  vertical-align: top;
 }
-.usage-groups li + li {
-  border-top: 1px solid #343643;
+.usage-groups th {
+  font-weight: 600;
 }
 .usage-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 10px;
-  margin-top: 4px;
+  gap: 2px 8px;
+  margin-top: 2px;
 }
 .row-cost {
-  display: grid;
-  align-content: start;
-  gap: 4px;
   text-align: right;
-  font-variant-numeric: tabular-nums;
 }
-.usage-prices summary {
-  cursor: pointer;
-  font-weight: 600;
+.row-cost small {
+  display: block;
 }
-.usage-prices[open] summary {
-  margin-bottom: 9px;
+.usage-prices {
+  margin-top: 0;
+}
+.price-body {
+  display: grid;
+  gap: 6px;
+  padding: 0 13px 13px;
 }
 .usage-prices form,
 .price-fields,
