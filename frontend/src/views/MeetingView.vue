@@ -63,6 +63,7 @@ const emit = defineEmits<{
   (event: 'sessions-changed'): void
   (event: 'opened', id: string): void
   (event: 'set-audio-language', language: string): void
+  (event: 'live-state', state: string): void
 }>()
 
 const status = ref<Status>({
@@ -110,6 +111,21 @@ const shownIsLive = computed(
     view.value.sessionId === status.value.sessionId &&
     status.value.state !== 'idle',
 )
+const liveText = computed(() => {
+  if (!shownIsLive.value) return 'En pausa'
+  return processing.value ? 'Procesando' : 'Grabando'
+})
+const diarizeNoteShown = computed(
+  () =>
+    status.value.diarizeEnabled &&
+    !!status.value.diarizeNote &&
+    !!view.value &&
+    status.value.diarizeSessionId === view.value.sessionId,
+)
+const hasAlerts = computed(
+  () =>
+    !!status.value.message || !!status.value.failed || diarizeNoteShown.value || !!message.value,
+)
 const providerLabels: Record<string, string> = {
   deepseek: 'DeepSeek',
   azure: 'Azure OpenAI',
@@ -149,10 +165,18 @@ const presentSpeakers = computed<SpeakerRef[]>(() => {
 // above and the names in the transcript.
 const speakerPalette = ['#86d6b0', '#c2a8ff', '#f2b880', '#7cc4f2', '#f28aa8', '#d8d27a']
 function speakerColor(track: string, speakerKey = '') {
-  const index = presentSpeakers.value.findIndex(
-    (ref) => ref.track === track && ref.speakerKey === speakerKey,
-  )
-  return speakerPalette[Math.max(index, 0) % speakerPalette.length]
+  const refs = presentSpeakers.value
+  let index = refs.findIndex((ref) => ref.track === track && ref.speakerKey === speakerKey)
+  // Live partials carry no speaker key: borrow the first speaker of the same
+  // track, else take the next palette slot not used by a saved speaker.
+  if (index < 0) index = refs.findIndex((ref) => ref.track === track)
+  if (index < 0) {
+    const pending = partialRows.value
+      .map(([t]) => t)
+      .filter((t) => !refs.some((r) => r.track === t))
+    index = refs.length + Math.max(pending.indexOf(track), 0)
+  }
+  return speakerPalette[index % speakerPalette.length]
 }
 
 // Chat-style: name and time only when the speaker changes or after a pause,
@@ -313,6 +337,7 @@ function applyStatus(next: Status) {
   const wasBusy = status.value.state !== 'idle'
   status.value = next
   statusAt.value = Date.now()
+  emit('live-state', next.state)
   if (wasBusy && next.state === 'idle') {
     emit('sessions-changed')
     void refreshSpeakers()
@@ -454,10 +479,10 @@ const partialRows = computed(() =>
 )
 
 onMounted(async () => {
+  applyStatus((await MeetingTranscriptStatus()) as Status)
   await refreshMics()
   hasVoiceSample.value = await HasVoiceSample().catch(() => false)
   people.value = await MeetingPeople().catch(() => 0)
-  applyStatus((await MeetingTranscriptStatus()) as Status)
   offStatus = EventsOn('meeting:status', (next: Status) => applyStatus(next))
   offSegment = EventsOn('meeting:segment', (event: { sessionId: string; segment: Segment }) => {
     if (event.sessionId !== view.value?.sessionId) return
@@ -529,6 +554,7 @@ watch(
           <span :title="selectedMicLabel">{{ selectedMicLabel }}</span>
           <span>{{ audioLanguage === 'en' ? 'English' : 'Español' }}</span>
           <span>{{ providerLabel }}</span>
+          <span v-if="!status.diarizeEnabled">sin separación</span>
         </div>
         <button
           class="meeting-secondary setup-toggle"
@@ -644,6 +670,9 @@ watch(
             sampleMessage
           }}</small>
         </details>
+        <p v-if="!status.diarizeEnabled" class="meeting-note">
+          Separación de participantes desactivada. Requiere sherpa-onnx o una clave de Gemini.
+        </p>
         <p
           class="meeting-note"
           title="Graba tu micrófono y el audio de la reunión (Teams o navegador, fuente elegida en ♫)."
@@ -651,29 +680,8 @@ watch(
           El audio no se guarda. Avisá que estás transcribiendo.
         </p>
       </section>
-      <div v-if="Object.keys(suggestions).length" class="name-suggestions" role="status">
-        <span>Se mencionaron estos nombres en la conversación:</span>
-        <span v-for="(name, key) in suggestions" :key="key" class="suggestion-chip">
-          {{ speaker('meeting_output', key) }} → <strong>{{ name }}</strong>
-          <button title="Usar este nombre" @click="acceptSuggestion(key)">Aplicar</button>
-          <button title="Descartar" @click="dismissSuggestion(key)">×</button>
-        </span>
-      </div>
-      <small v-if="suggestMessage" class="meeting-message" role="status">{{
-        suggestMessage
-      }}</small>
-      <div v-if="!status.diarizeEnabled" class="meeting-warning" role="status">
-        Separación de participantes desactivada. Requiere sherpa-onnx o una clave de Gemini.
-      </div>
-      <div
-        v-else-if="status.diarizeNote && view && status.diarizeSessionId === view.sessionId"
-        class="meeting-warning"
-        role="status"
-      >
-        {{ status.diarizeNote }}
-      </div>
       <div v-if="status.state !== 'idle'" class="track-status" role="status">
-        <span class="rec-dot" :class="{ live: recording }"></span><strong>{{ elapsed }}</strong>
+        <span class="rec-dot" :class="{ live: recording }"></span>
         <span
           >Tu micrófono:
           <em :class="status.microphoneState">{{ trackLabel(status.microphoneState) }}</em></span
@@ -687,12 +695,28 @@ watch(
         <span v-if="status.pending">En cola: {{ status.pending }}</span>
         <span v-if="processing">Terminando de transcribir lo grabado…</span>
       </div>
-      <div v-if="status.message" class="meeting-warning" role="alert">{{ status.message }}</div>
-      <div v-if="status.failed" class="meeting-warning" role="alert">
-        {{ status.failed }} fragmento(s) no se pudieron transcribir y quedan marcados.
-        <button class="meeting-secondary" @click="retry">Reintentar</button>
+      <div v-if="hasAlerts" class="meeting-alerts">
+        <div v-if="status.message" class="meeting-warning" role="alert">{{ status.message }}</div>
+        <div v-if="status.failed" class="meeting-warning" role="alert">
+          {{ status.failed }} fragmento(s) no se pudieron transcribir y quedan marcados.
+          <button class="meeting-secondary" @click="retry">Reintentar</button>
+        </div>
+        <div v-if="diarizeNoteShown" class="meeting-warning" role="status">
+          {{ status.diarizeNote }}
+        </div>
+        <small v-if="message" class="meeting-message" role="status">{{ message }}</small>
       </div>
-      <small v-if="message" class="meeting-message" role="status">{{ message }}</small>
+      <div v-if="Object.keys(suggestions).length" class="name-suggestions" role="status">
+        <span>Se mencionaron estos nombres en la conversación:</span>
+        <span v-for="(name, key) in suggestions" :key="key" class="suggestion-chip">
+          {{ speaker('meeting_output', key) }} → <strong>{{ name }}</strong>
+          <button title="Usar este nombre" @click="acceptSuggestion(key)">Aplicar</button>
+          <button title="Descartar" @click="dismissSuggestion(key)">×</button>
+        </span>
+      </div>
+      <small v-if="suggestMessage" class="meeting-message" role="status">{{
+        suggestMessage
+      }}</small>
     </div>
 
     <section
@@ -702,6 +726,13 @@ watch(
     >
       <div class="panel-heading transcript-heading">
         <span>Transcripción</span>
+        <span
+          class="live-label"
+          :class="{ 'is-live': shownIsLive && recording, 'is-busy': shownIsLive && processing }"
+          role="status"
+        >
+          <i></i>{{ liveText }}<template v-if="shownIsLive"> · {{ elapsed }}</template>
+        </span>
         <span v-if="view" class="speaker-names">
           <template v-for="ref in presentSpeakers" :key="ref.track + ':' + ref.speakerKey">
             <input
@@ -888,6 +919,9 @@ watch(
   font-size: 11px;
   letter-spacing: 0.02em;
 }
+.sample-actions .meeting-secondary {
+  padding: 5px 9px;
+}
 .sample-actions {
   display: flex;
   gap: 10px;
@@ -895,7 +929,7 @@ watch(
   flex-wrap: wrap;
   min-height: 30px;
 }
-.sample-actions .track-status {
+.track-status {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 16px;
@@ -919,6 +953,7 @@ watch(
   color: #eed39a;
 }
 .rec-dot {
+  display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -932,6 +967,25 @@ watch(
   50% {
     opacity: 0.35;
   }
+}
+.meeting-alerts {
+  display: grid;
+  gap: 6px;
+  max-height: 96px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.live-label.is-busy {
+  color: #eed39a;
+}
+.live-label.is-busy i {
+  background: #eed39a;
+}
+.meeting > .content-header h1,
+.meeting > .content-header .workspace-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .meeting-warning {
   padding: 8px 10px;

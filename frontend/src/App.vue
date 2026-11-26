@@ -84,8 +84,22 @@ const selectedAudioSource = ref('')
 const audioSourceMessage = ref('')
 const audioLanguage = ref(localStorage.getItem('sonara-audio-language') === 'en' ? 'en' : 'es')
 
-const statusLabel = computed(() => (listening.value ? 'Escuchando' : 'En pausa'))
-const statusClass = computed(() => (listening.value ? 'is-live' : 'is-idle'))
+const meetingState = ref('idle')
+const statusLabel = computed(() => {
+  if (view.value === 'meeting') {
+    if (meetingState.value === 'recording') return 'Grabando'
+    if (meetingState.value === 'processing') return 'Procesando'
+    return 'En pausa'
+  }
+  return listening.value ? 'Escuchando' : 'En pausa'
+})
+const statusClass = computed(() => {
+  if (view.value === 'meeting') {
+    if (meetingState.value === 'processing') return 'is-busy'
+    return meetingState.value === 'idle' ? 'is-idle' : 'is-live'
+  }
+  return listening.value ? 'is-live' : 'is-idle'
+})
 
 async function setAudioLanguage(language: string) {
   audioLanguage.value = await SetAudioLanguage(language)
@@ -345,6 +359,7 @@ async function toggleAlwaysOnTop() {
           :audio-language="audioLanguage"
           @set-audio-language="setAudioLanguage"
           @opened="meetingSessionID = $event"
+          @live-state="meetingState = $event"
           @sessions-changed="refreshSessions"
         />
         <PracticeView v-if="view === 'practice'" @open-session-setup="showSessionSetup = true" />

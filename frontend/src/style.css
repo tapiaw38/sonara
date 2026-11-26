@@ -121,6 +121,10 @@ button:focus-visible,
 .status-dot.is-idle {
   background: #777986;
 }
+.status-dot.is-busy {
+  background: #eed39a;
+  box-shadow: none;
+}
 .icon-button {
   color: #7d7f8d;
   background: transparent;
