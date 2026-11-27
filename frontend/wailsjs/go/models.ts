@@ -402,6 +402,7 @@ export namespace storage {
 		}
 	}
 	export class SessionProfile {
+	    perspective: string;
 	    scenario: string;
 	    company: string;
 	    role: string;
@@ -414,6 +415,7 @@ export namespace storage {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.perspective = source["perspective"];
 	        this.scenario = source["scenario"];
 	        this.company = source["company"];
 	        this.role = source["role"];

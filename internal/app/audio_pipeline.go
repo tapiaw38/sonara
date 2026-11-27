@@ -197,7 +197,8 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 	a.voiceSequence++
 	a.streaming = true
 	a.listenStatus = "Escuchando audio de la reunión" // the reply itself shows it is being written
-	mode := a.assistantMode
+	mode := copilotRequestMode(a.assistantMode, a.sessionProfile)
+	perspective := a.sessionProfile.Perspective
 	contextText := a.buildSessionContextLocked()
 	backend := a.backend
 	voiceContext := a.voiceContext
@@ -216,7 +217,7 @@ func (a *App) startVoiceResponse(session uint64, language, transcript string, qu
 		var streamed strings.Builder
 		asked := time.Now()
 		var firstToken time.Duration
-		output, err := backend.RespondStream(ctx, voicePrompt(language, transcript), mode, contextText, func(delta string) {
+		output, err := backend.RespondStream(ctx, voicePrompt(language, transcript, perspective), mode, contextText, func(delta string) {
 			streamed.WriteString(delta)
 			if firstToken == 0 {
 				firstToken = time.Since(asked)

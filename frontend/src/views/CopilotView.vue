@@ -20,8 +20,11 @@ import type { Message, TranscriptEntry } from '../types'
 import TranscriptTurnText from '../components/TranscriptTurnText.vue'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
-const props = defineProps<{ assistantMode: string }>()
-const emit = defineEmits<{ (event: 'open-session-setup'): void }>()
+const props = defineProps<{ assistantMode: string; perspective: string }>()
+const emit = defineEmits<{
+  (event: 'open-session-setup'): void
+  (event: 'change-perspective', perspective: string): void
+}>()
 
 const listening = defineModel<boolean>('listening', { default: false })
 const startedAt = defineModel<string>('startedAt', { default: '—' })
@@ -456,7 +459,7 @@ async function refreshListening() {
         messages.value.pop()
       streamingIndex.value = null
     }
-    if (state.sequence > lastVoiceSequence.value) {
+    if (state.sequence > lastVoiceSequence.value && state.response) {
       messages.value.push({
         role: 'assistant',
         text: state.response,
@@ -567,7 +570,23 @@ async function restoreOpenedSession(opened: {
   transcript.value = state.transcript
 }
 
-defineExpose({ beginSessionSwitch, resetAfterNewSession, restoreOpenedSession })
+async function clearPreviousSuggestion() {
+  uiSessionGeneration.value++
+  if (messages.value.at(-1)?.role === 'assistant') messages.value.pop()
+  streamingIndex.value = null
+  try {
+    lastVoiceSequence.value = (await ListeningStatus()).sequence
+  } catch {
+    // The backend has already invalidated the previous reply.
+  }
+}
+
+defineExpose({
+  beginSessionSwitch,
+  resetAfterNewSession,
+  restoreOpenedSession,
+  clearPreviousSuggestion,
+})
 
 let captureTimer = 0
 let listeningTimer = 0
@@ -603,7 +622,28 @@ onBeforeUnmount(() => {
   <div class="content-header">
     <div>
       <p class="eyebrow">{{ assistantModeLabel.toUpperCase() }} · SESIÓN ACTUAL</p>
-      <h1>{{ assistantModeTitle }}</h1>
+      <div class="copilot-title-row">
+        <h1>{{ assistantModeTitle }}</h1>
+        <button
+          v-if="assistantMode === 'interview'"
+          class="ghost-button perspective-switch"
+          type="button"
+          role="switch"
+          aria-label="Mi rol: entrevistador"
+          :aria-checked="perspective === 'interviewer'"
+          :title="
+            'Mi rol: ' +
+            (perspective === 'interviewer' ? 'entrevistador' : 'entrevistado') +
+            '. Cambiar rol'
+          "
+          @click="
+            emit('change-perspective', perspective === 'interviewer' ? 'candidate' : 'interviewer')
+          "
+        >
+          {{ perspective === 'interviewer' ? 'Entrevistador' : 'Entrevistado' }}
+          <span aria-hidden="true">⇄</span>
+        </button>
+      </div>
       <p class="workspace-subtitle">
         Escucha la conversación y prepara respuestas mientras hablas.
       </p>
@@ -729,7 +769,11 @@ onBeforeUnmount(() => {
       :style="panelHeightStyle(responsePanelHeight)"
     >
       <div class="panel-heading">
-        <span>Respuesta sugerida</span>
+        <span>{{
+          assistantMode === 'interview' && perspective === 'interviewer'
+            ? 'Siguiente pregunta'
+            : 'Respuesta sugerida'
+        }}</span>
         <div class="response-tools">
           <div v-if="assistantMode === 'coding'" class="font-tools" aria-label="Tamaño de código">
             <button

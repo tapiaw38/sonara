@@ -52,6 +52,9 @@ const showConsumption = ref(false)
 const showSessionSetup = ref(false)
 const sessionSetupMessage = ref('')
 const sessionScenario = ref('General')
+const sessionPerspective = ref('candidate')
+const persistedPerspective = ref('candidate')
+const perspectiveSaving = ref(false)
 const sessionCompany = ref('')
 const sessionRole = ref('')
 const sessionObjective = ref('')
@@ -154,10 +157,14 @@ async function activateSessionProfile(id: string) {
   sessionObjective.value = ''
   sessionNotes.value = ''
   sessionScenario.value = 'General'
+  sessionPerspective.value = 'candidate'
+  persistedPerspective.value = 'candidate'
   if (id) {
     try {
       const saved = await GetSessionProfile(id)
       sessionScenario.value = saved.scenario || 'General'
+      sessionPerspective.value = saved.perspective === 'interviewer' ? 'interviewer' : 'candidate'
+      persistedPerspective.value = sessionPerspective.value
       sessionCompany.value = saved.company || ''
       sessionRole.value = saved.role || ''
       sessionObjective.value = saved.objective || ''
@@ -188,20 +195,39 @@ async function migrateLegacySessionProfiles() {
 }
 
 async function saveSessionSetup() {
+  if (perspectiveSaving.value) return
+  perspectiveSaving.value = true
+  const id = currentSessionID.value
+  const previous = persistedPerspective.value
   const profile = {
     scenario: sessionScenario.value,
+    perspective: sessionPerspective.value,
     company: sessionCompany.value.trim(),
     role: sessionRole.value.trim(),
     objective: sessionObjective.value.trim(),
     notes: sessionNotes.value.trim(),
   }
   try {
-    if (!currentSessionID.value) throw new Error('No hay sesión activa')
-    await SaveSessionProfile(currentSessionID.value, profile)
+    if (!id) throw new Error('No hay sesión activa')
+    await SaveSessionProfile(id, profile)
+    if (id !== currentSessionID.value) return
+    persistedPerspective.value = profile.perspective
+    if (previous !== profile.perspective) await copilotRef.value?.clearPreviousSuggestion()
     sessionSetupMessage.value = 'Contexto aplicado a esta sesión.'
   } catch {
-    sessionSetupMessage.value = 'No se pudo aplicar el contexto.'
+    if (id === currentSessionID.value) {
+      sessionPerspective.value = previous
+      sessionSetupMessage.value = 'No se pudo aplicar el contexto.'
+    }
+  } finally {
+    perspectiveSaving.value = false
   }
+}
+
+async function changePerspective(value: string) {
+  if (perspectiveSaving.value || value === sessionPerspective.value) return
+  sessionPerspective.value = value
+  await saveSessionSetup()
 }
 
 const sessions = ref<SessionRow[]>([])
@@ -367,6 +393,7 @@ async function toggleAlwaysOnTop() {
           <CopilotView
             ref="copilotRef"
             :assistant-mode="assistantMode"
+            :perspective="sessionPerspective"
             v-model:listening="listening"
             v-model:started-at="startedAt"
             v-model:capture-status="captureStatus"
@@ -376,6 +403,7 @@ async function toggleAlwaysOnTop() {
             v-model:code-font-size="codeFontSize"
             v-model:panels-resizing="panelsResizing"
             @open-session-setup="showSessionSetup = true"
+            @change-perspective="changePerspective"
           />
         </div>
 
@@ -410,6 +438,8 @@ async function toggleAlwaysOnTop() {
     <SessionSetupDialog
       v-model:show="showSessionSetup"
       v-model:session-scenario="sessionScenario"
+      v-model:session-perspective="sessionPerspective"
+      :show-perspective="view === 'copilot'"
       v-model:session-company="sessionCompany"
       v-model:session-role="sessionRole"
       v-model:session-objective="sessionObjective"

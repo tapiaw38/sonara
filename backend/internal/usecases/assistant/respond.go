@@ -84,7 +84,7 @@ func (u *respondUsecase) ExecuteStream(ctx context.Context, input RespondInput, 
 
 func normalizeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "coding", "coaching", "interview", "daily", "practice", "practice-turn", "practice-question", "practice-suggestion", "summary", "memory":
+	case "coding", "coaching", "interview", "interview-interviewer", "daily", "practice", "practice-turn", "practice-question", "practice-suggestion", "summary", "memory", "memory-interviewer":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return "interview"
@@ -118,11 +118,17 @@ func chooseAgent(message, mode string) (string, string, string) {
 		}
 		return "interviewer", "fast", instructions
 	}
+	if mode == "memory-interviewer" {
+		return "memory", "fast", "Resumí en hasta 150 palabras la entrevista. Distinguí las preguntas que hizo el usuario entrevistador de los hechos que afirmó el candidato. No atribuyas al usuario la experiencia del candidato ni inventes evidencia. Incluí temas ya tratados y competencias pendientes. Texto plano."
+	}
 	if mode == "memory" {
 		return "memory", "fast", "Mantenés la memoria de una conversación en curso (entrevista o reunión). Recibís un resumen anterior y turnos nuevos, y devolvés un único resumen actualizado de hasta 150 palabras, en el idioma de la conversación. Incluí: de qué se habló y qué se preguntó; y una sección \"Lo que dije:\" con los datos concretos que afirmó \"me\" sobre sí misma (experiencia, tecnologías, números, decisiones, compromisos), para no contradecirlos después. Usá solo lo que está en el texto, sin inventar. Texto plano, sin markdown."
 	}
 	if mode == "summary" {
 		return "summary", "fast", "Resumís la transcripción de una reunión en el idioma en que está escrita. Empezá con un párrafo corto de qué se trató, después los temas principales, las decisiones y acuerdos, y los pendientes con su responsable si se menciona. Usá solo lo que está en la transcripción; si algo no quedó claro, decilo. Texto plano, con guiones para las listas, sin markdown."
+	}
+	if mode == "interview-interviewer" {
+		return "interviewer-coach", "fast", "Asistís a quien entrevista. Respondé en el idioma de la otra persona, con tres bloques breves y en este orden: Repregunta: una pregunta concreta sobre la última respuesta del candidato; Siguiente: una pregunta nueva según puesto, tipo de entrevista y competencias, sin repetir lo que ya preguntó el usuario; Señales: qué demostró y qué quedó vago, citando solo lo dicho por el candidato. Si falta evidencia para una competencia, decí sin evidencia. No inventes hechos ni respondas en nombre del candidato."
 	}
 	if mode == "coding" || containsAny(strings.ToLower(message), "algoritmo", "complexity", "complejidad", "leetcode", "debug", "código", "code", "implement") {
 		return "coding", "reasoning", "Actuás como agente técnico de Sonara. Resolvés problemas de programación con precisión y explicás brevemente la solución, complejidad temporal y espacial."

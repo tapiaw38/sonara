@@ -277,14 +277,18 @@ const SessionNotesMaxChars = 4000
 
 // SessionProfile is interview-specific context saved with its session.
 type SessionProfile struct {
-	Scenario  string `json:"scenario"`
-	Company   string `json:"company"`
-	Role      string `json:"role"`
-	Objective string `json:"objective"`
-	Notes     string `json:"notes"`
+	Perspective string `json:"perspective"`
+	Scenario    string `json:"scenario"`
+	Company     string `json:"company"`
+	Role        string `json:"role"`
+	Objective   string `json:"objective"`
+	Notes       string `json:"notes"`
 }
 
 func NormalizeSessionProfile(profile SessionProfile) SessionProfile {
+	if profile.Perspective != "interviewer" {
+		profile.Perspective = "candidate"
+	}
 	profile.Scenario = strutil.Truncate(strings.TrimSpace(profile.Scenario), 120)
 	if profile.Scenario == "" {
 		profile.Scenario = "General"
@@ -298,9 +302,16 @@ func NormalizeSessionProfile(profile SessionProfile) SessionProfile {
 	return profile
 }
 
-func (profile SessionProfile) PromptContext() string {
+func (profile SessionProfile) PromptContext(includePerspective ...bool) string {
 	profile = NormalizeSessionProfile(profile)
 	var parts []string
+	if len(includePerspective) == 0 || includePerspective[0] {
+		if profile.Perspective == "interviewer" {
+			parts = append(parts, "User is the interviewer")
+		} else {
+			parts = append(parts, "User is the candidate")
+		}
+	}
 	if profile.Scenario != "" {
 		parts = append(parts, "Interview scenario: "+profile.Scenario)
 	}
@@ -314,7 +325,11 @@ func (profile SessionProfile) PromptContext() string {
 		parts = append(parts, "Interview goal: "+profile.Objective)
 	}
 	if profile.Notes != "" {
-		parts = append(parts, "Candidate background and instructions: "+profile.Notes)
+		if profile.Perspective == "interviewer" {
+			parts = append(parts, "Candidate CV and competencies to assess: "+profile.Notes)
+		} else {
+			parts = append(parts, "Candidate background and instructions: "+profile.Notes)
+		}
 	}
 	return strings.Join(parts, "\n")
 }
