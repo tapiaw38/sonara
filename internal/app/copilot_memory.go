@@ -48,25 +48,32 @@ func (a *App) trimMemoryLocked() {
 	}
 	a.memorySummarizing = true
 	batch := append([]storage.Message(nil), a.memoryPending...)
-	go a.summarizeMemory(a.sessionGeneration, a.assistantMode, a.memorySummary, batch)
+	go a.summarizeMemory(a.sessionGeneration, a.assistantMode, a.sessionProfile.Perspective, a.memorySummary, batch)
 }
 
 func (a *App) resetMemoryLocked() {
 	a.memorySummary, a.memoryPending = "", nil
 }
 
-func (a *App) summarizeMemory(generation uint64, mode, previous string, batch []storage.Message) {
+func (a *App) summarizeMemory(generation uint64, mode, perspective, previous string, batch []storage.Message) {
 	var prompt strings.Builder
 	if previous != "" {
 		prompt.WriteString("Resumen anterior:\n" + previous + "\n\n")
 	}
 	prompt.WriteString("Turnos nuevos:\n")
 	for _, message := range batch {
-		prompt.WriteString(memoryRole(mode, message.Role) + ": " + message.Text + "\n")
+		prompt.WriteString(memoryRole(mode, message.Role, perspective) + ": " + message.Text + "\n")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	output, err := a.backend.Respond(ctx, prompt.String(), "memory", "")
+	if mode == "interview" && perspective == "interviewer" {
+		prompt.WriteString("\nResumí lo que preguntó el usuario y lo que afirmó el candidato por separado; no atribuyas afirmaciones del candidato al usuario.\n")
+	}
+	memoryMode := "memory"
+	if mode == "interview" && perspective == "interviewer" {
+		memoryMode = "memory-interviewer"
+	}
+	output, err := a.backend.Respond(ctx, prompt.String(), memoryMode, "")
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -87,8 +94,20 @@ func (a *App) summarizeMemory(generation uint64, mode, previous string, batch []
 // memoryRole names who spoke for the model. In practice the stored "user"
 // turns are the candidate's own spoken answers, so they are "me" there too:
 // the summary keeps them under "Lo que dije" and the interviewer builds on them.
-func memoryRole(mode, role string) string {
+func memoryRole(mode, role string, perspectives ...string) string {
+	perspective := "candidate"
+	if len(perspectives) > 0 {
+		perspective = perspectives[0]
+	}
 	practice := mode == "practice" || mode == "practice-turn"
+	if mode == "interview" && perspective == "interviewer" {
+		if role == "me" {
+			return "me (what I asked as interviewer)"
+		}
+		if role == "user" {
+			return "candidate"
+		}
+	}
 	switch {
 	case role == "me", practice && role == "user":
 		return "me (what I said out loud)"

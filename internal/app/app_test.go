@@ -152,8 +152,8 @@ func TestVoicePromptAsksForASuggestionNotAnAnswer(t *testing.T) {
 	if strings.Contains(english, translationMarker) {
 		t.Error("the translation of what they said is its own parallel request now; the reply prompt must not ask for it")
 	}
-	if !strings.Contains(english, replyTranslationMarker) {
-		t.Error("English prompt must ask for the suggested answer to be translated too")
+	if !strings.Contains(english, "Respondé en inglés.") {
+		t.Error("English prompt must ask for the suggestion in English")
 	}
 	if strings.Contains(voicePrompt("es", "hola"), translationMarker) {
 		t.Error("Spanish audio needs no translation line")

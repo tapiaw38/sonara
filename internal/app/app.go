@@ -39,27 +39,31 @@ type App struct {
 	preferredAudioApp   string
 	// audioGuessing and audioCandidates let the UI warn that the current
 	// source is a heuristic pick, not a confident match: see audioTarget.
-	audioGuessing       bool
-	audioCandidates     int
-	store               *storage.Store
-	listening           bool
-	sessionHistory      []storage.Message
-	sessionProfile      storage.SessionProfile
-	assistantMode       string
-	latestVisualContext string
-	listenerCancel      context.CancelFunc
-	transcript          string
-	listenStatus        string
-	voiceReply          string
-	voiceSequence       uint64
-	streaming           bool
-	manualSend          bool
-	pendingAudio        []byte
-	audioLevel          float64
-	audioLanguage       string
-	translation         string
-	overlayMu           sync.Mutex // serialize compositor commands across toggles
-	floatedForOverlay   bool
+	audioGuessing         bool
+	audioCandidates       int
+	store                 *storage.Store
+	listening             bool
+	sessionHistory        []storage.Message
+	sessionProfile        storage.SessionProfile
+	assistantMode         string
+	latestVisualContext   string
+	listenerCancel        context.CancelFunc
+	transcript            string
+	transcriptFinal       bool
+	listenStatus          string
+	voiceReply            string
+	voiceReplyTranslation string
+	voiceReplyLines       []sonaraBackend.TranslationLine
+	voiceSequence         uint64
+	streaming             bool
+	manualSend            bool
+	pendingAudio          []byte
+	audioLevel            float64
+	audioLanguage         string
+	translation           string
+	translationLines      []sonaraBackend.TranslationLine
+	overlayMu             sync.Mutex // serialize compositor commands across toggles
+	floatedForOverlay     bool
 	// Meeting transcription state, independent of the copilot's listening.
 	meeting       *meetingRun
 	preferredMic  string

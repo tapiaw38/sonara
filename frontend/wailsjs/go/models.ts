@@ -59,15 +59,19 @@ export namespace app {
 	export class ListeningState {
 	    listening: boolean;
 	    transcript: string;
+	    transcriptFinal: boolean;
 	    partial: boolean;
 	    status: string;
 	    response: string;
+	    responseTranslation: string;
+	    responseLines: assistant.TranslationLine[];
 	    sequence: number;
 	    manualSend: boolean;
 	    pendingSeconds: number;
 	    streaming: boolean;
 	    language: string;
 	    translation: string;
+	    translationLines: assistant.TranslationLine[];
 	    droppedSegments: number;
 	    audioSource: string;
 	    sessionId: string;
@@ -84,15 +88,19 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.listening = source["listening"];
 	        this.transcript = source["transcript"];
+	        this.transcriptFinal = source["transcriptFinal"];
 	        this.partial = source["partial"];
 	        this.status = source["status"];
 	        this.response = source["response"];
+	        this.responseTranslation = source["responseTranslation"];
+	        this.responseLines = this.convertValues(source["responseLines"], assistant.TranslationLine);
 	        this.sequence = source["sequence"];
 	        this.manualSend = source["manualSend"];
 	        this.pendingSeconds = source["pendingSeconds"];
 	        this.streaming = source["streaming"];
 	        this.language = source["language"];
 	        this.translation = source["translation"];
+	        this.translationLines = this.convertValues(source["translationLines"], assistant.TranslationLine);
 	        this.droppedSegments = source["droppedSegments"];
 	        this.audioSource = source["audioSource"];
 	        this.sessionId = source["sessionId"];
@@ -101,6 +109,24 @@ export namespace app {
 	        this.retractions = source["retractions"];
 	        this.liveMode = source["liveMode"];
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class MeetingStatus {
 	    state: string;
@@ -194,6 +220,25 @@ export namespace app {
 	        this.azure = source["azure"];
 	        this.azureTranscribe = source["azureTranscribe"];
 	        this.gemini = source["gemini"];
+	    }
+	}
+
+}
+
+export namespace assistant {
+
+	export class TranslationLine {
+	    original: string;
+	    translation: string;
+
+	    static createFrom(source: any = {}) {
+	        return new TranslationLine(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.original = source["original"];
+	        this.translation = source["translation"];
 	    }
 	}
 
@@ -357,6 +402,7 @@ export namespace storage {
 		}
 	}
 	export class SessionProfile {
+	    perspective: string;
 	    scenario: string;
 	    company: string;
 	    role: string;
@@ -369,6 +415,7 @@ export namespace storage {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.perspective = source["perspective"];
 	        this.scenario = source["scenario"];
 	        this.company = source["company"];
 	        this.role = source["role"];

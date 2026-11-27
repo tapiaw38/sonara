@@ -347,6 +347,8 @@ func (a *App) cancelReply(session uint64) {
 	a.replySequence++
 	a.streaming = false
 	a.translation, a.voiceReply = "", ""
+	a.translationLines, a.voiceReplyLines = nil, nil
+	a.voiceReplyTranslation = ""
 	a.voiceRetractions++
 }
 
@@ -359,9 +361,10 @@ func (a *App) setLivePartial(session uint64, text string, first bool) {
 	if a.sessionGeneration != session || !a.listening {
 		return
 	}
-	a.transcript, a.livePartial = text, text
+	a.transcript, a.livePartial, a.transcriptFinal = text, text, false
 	if first {
 		a.translation = ""
+		a.translationLines = nil
 	}
 }
 
@@ -369,7 +372,7 @@ func (a *App) setLiveFinalText(session uint64, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.sessionGeneration == session {
-		a.transcript, a.livePartial = text, ""
+		a.transcript, a.livePartial, a.transcriptFinal = text, "", true
 	}
 }
 

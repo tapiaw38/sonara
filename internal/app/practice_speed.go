@@ -8,7 +8,7 @@ import (
 const practiceVoiceSpeedSetting = "practice_voice_speed"
 
 func validPracticeVoiceSpeed(speed float64) bool {
-	return speed >= 0.8 && speed <= 1.3
+	return speed >= 0.5 && speed <= 1.5
 }
 
 func (a *App) practiceVoiceSpeed(provider string) float64 {
@@ -35,7 +35,7 @@ func (a *App) GetPracticeVoiceSpeed() float64 {
 
 func (a *App) SetPracticeVoiceSpeed(speed float64) error {
 	if !validPracticeVoiceSpeed(speed) {
-		return fmt.Errorf("la velocidad de la voz debe estar entre 0,8× y 1,3×")
+		return fmt.Errorf("la velocidad de la voz debe estar entre 0,5× y 1,5×")
 	}
 	a.mu.RLock()
 	database := a.store

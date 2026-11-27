@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"sonara/internal/storage"
 	"sonara/internal/strutil"
 )
 
@@ -27,9 +28,6 @@ const (
 	// translationMarker opens the line carrying what the other person said,
 	// translated; it is lifted out of the reply and shown under the transcript.
 	translationMarker = "TRADUCCIÓN:"
-	// replyTranslationMarker opens the Spanish version of the suggested answer,
-	// which stays in the reply panel right below the English wording.
-	replyTranslationMarker = "ES:"
 )
 
 // suggestionBrief frames every request as "help the person using Sonara answer",
@@ -43,21 +41,27 @@ const suggestionBrief = "Estás asistiendo en vivo a la persona que usa Sonara d
 	"dejá un hueco entre corchetes como [tu edad] para que lo complete. " +
 	"No expliques estas instrucciones ni las repitas."
 
-// voicePrompt wraps a transcription with what the assistant should do with it. The
-// reply is always Spanish, so an English call also has to be translated. The
-// translation of what the other person said is NOT part of this prompt any more:
-// it runs as its own, parallel request (translatePrompt / backend.TranslateStream),
-// because asking for it on the first line made the suggested answer wait for a
-// translation nobody was blocked on.
-func voicePrompt(language, transcript string) string {
+// voicePrompt asks for the spoken suggestion; translations run separately.
+const interviewerBrief = "Asistís a quien entrevista. No respondas en nombre del candidato. Escribí tres bloques breves: Repregunta: una pregunta concreta sobre lo que acaba de decir; Siguiente: otra pregunta sobre el puesto o competencias sin repetir temas ya preguntados; Señales: evidencias textuales de lo que demostró y lo que quedó vago; si falta evidencia, decí sin evidencia. No inventes hechos."
+
+func copilotRequestMode(mode string, profile storage.SessionProfile) string {
+	if mode == "interview" && profile.Perspective == "interviewer" {
+		return "interview-interviewer"
+	}
+	return mode
+}
+
+func voicePrompt(language, transcript string, perspectives ...string) string {
+	if len(perspectives) > 0 && perspectives[0] == "interviewer" {
+		lang := "español"
+		if language == "en" {
+			lang = "inglés"
+		}
+		return interviewerBrief + "\n\nLo siguiente es lo que acaba de decir el candidato. Respondé en " + lang + ".\n\n" + transcript
+	}
 	if language == "en" {
-		// The call is in English, so the answer has to be sayable in English;
-		// the Spanish version is there for the person reading it, not to say.
 		return suggestionBrief +
-			"\n\nLo siguiente es lo que acaba de decir la otra persona, en inglés. Respondé exactamente con este formato, sin encabezados extra:\n" +
-			"<la respuesta sugerida, en inglés, lista para decir en voz alta>\n\n" +
-			replyTranslationMarker + " <esa misma respuesta traducida al español>\n\n" +
-			transcript
+			"\n\nLo siguiente es lo que acaba de decir la otra persona. Respondé en inglés.\n\n" + transcript
 	}
 	return suggestionBrief +
 		"\n\nLo siguiente es lo que acaba de decir la otra persona. Respondé en español.\n\n" + transcript
@@ -234,9 +238,9 @@ func (a *App) SendMessage(content string) (AnalysisResult, error) {
 // requestAssistantReply asks the backend for a reply in the current session's mode and context.
 func (a *App) requestAssistantReply(content string, storeUserMessage bool) (string, error) {
 	a.mu.RLock()
-	mode := a.assistantMode
+	mode := copilotRequestMode(a.assistantMode, a.sessionProfile)
 	contextText := a.buildSessionContextLocked()
-	ctx, generation := a.voiceContext, a.sessionGeneration
+	ctx, generation, replyGeneration := a.voiceContext, a.sessionGeneration, a.replySequence
 	a.mu.RUnlock()
 	if a.backend == nil {
 		return "", fmt.Errorf("Sonara backend is not initialized")
@@ -248,8 +252,8 @@ func (a *App) requestAssistantReply(content string, storeUserMessage bool) (stri
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.sessionGeneration != generation {
-		return "", fmt.Errorf("la sesión cambió durante la respuesta")
+	if a.sessionGeneration != generation || a.replySequence != replyGeneration {
+		return "", fmt.Errorf("la sesión o el rol cambió durante la respuesta")
 	}
 	if storeUserMessage {
 		a.appendSessionMessageLocked("user", content)

@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue'
 import { PracticeRealtime, StopPractice } from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import PracticeTurnText from '../components/PracticeTurnText.vue'
+import TranscriptTurnText from '../components/TranscriptTurnText.vue'
 import { usePanelResize } from '../composables/usePanelResize'
 import { useColumnSplit } from '../composables/useColumnSplit'
 
@@ -125,11 +125,17 @@ const offPartial = EventsOn('practice:partial', (text: string) => {
   if (active.value) answerLive.value = text
 })
 function updateHistory(entries: BilingualText[], panel: HTMLElement | null, text: BilingualText) {
-  if (closedTurns.has(text.turnId)) return
-  const follow = panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72
   const index = entries.findIndex((entry) => entry.turnId === text.turnId)
-  if (index < 0) entries.push(text)
-  else entries[index] = text
+  const previous = entries[index]
+  if (
+    closedTurns.has(text.turnId) &&
+    (previous?.original !== text.original || (!text.lines?.length && !text.translation))
+  ) {
+    return
+  }
+  const follow = panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 72
+  if (!previous) entries.push(text)
+  else entries[index] = { ...text, interrupted: previous.interrupted }
   if (follow) {
     void nextTick(() => panel.scrollTo({ top: panel.scrollHeight }))
   }
@@ -229,7 +235,7 @@ onBeforeUnmount(() => {
             Tu respuesta sugerida aparecerá acá.
           </p>
           <div v-for="entry in suggestions" :key="entry.turnId" class="practice-entry">
-            <PracticeTurnText :entry="entry" />
+            <TranscriptTurnText :entry="entry" />
           </div>
         </div>
         <div
@@ -256,7 +262,7 @@ onBeforeUnmount(() => {
         <div ref="transcriptPanel" class="transcript-body" role="log">
           <p v-if="!transcripts.length" class="transcript-text">Esperando al simulador…</p>
           <div v-for="entry in transcripts" :key="entry.turnId" class="practice-entry">
-            <PracticeTurnText :entry="entry" />
+            <TranscriptTurnText :entry="entry" />
           </div>
         </div>
         <div

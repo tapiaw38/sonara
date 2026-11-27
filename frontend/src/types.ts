@@ -1,4 +1,10 @@
-export type Message = { role: 'user' | 'assistant'; text: string; time: string }
+export type Message = {
+  role: 'user' | 'assistant'
+  text: string
+  time: string
+  voiceSequence?: number
+  voiceTranslation?: TranscriptEntry
+}
 export type AudioSourceOption = {
   target: string
   label: string
@@ -14,4 +20,9 @@ export type SessionRow = {
   preview: string
   title: string
 }
-export type TranscriptEntry = { text: string; translation: string }
+export type TranscriptEntry = {
+  original: string
+  language: string
+  translation: string
+  lines: { original: string; translation: string }[]
+}

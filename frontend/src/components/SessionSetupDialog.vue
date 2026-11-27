@@ -1,9 +1,10 @@
 <script setup lang="ts">
-defineProps<{ sessionSetupMessage: string }>()
+defineProps<{ sessionSetupMessage: string; showPerspective: boolean }>()
 const emit = defineEmits<{ (event: 'save'): void }>()
 
 const show = defineModel<boolean>('show', { default: false })
 const sessionScenario = defineModel<string>('sessionScenario', { default: 'General' })
+const sessionPerspective = defineModel<string>('sessionPerspective', { default: 'candidate' })
 const sessionCompany = defineModel<string>('sessionCompany', { default: '' })
 const sessionRole = defineModel<string>('sessionRole', { default: '' })
 const sessionObjective = defineModel<string>('sessionObjective', { default: '' })
@@ -29,6 +30,13 @@ const notesMaxChars = 4000
         <button class="dialog-close" aria-label="Cerrar contexto" @click="show = false">×</button>
       </header>
       <form class="session-setup-form" @submit.prevent="emit('save')">
+        <template v-if="showPerspective">
+          <label for="session-perspective">Mi rol en la entrevista</label>
+          <select id="session-perspective" v-model="sessionPerspective">
+            <option value="candidate">Entrevistado</option>
+            <option value="interviewer">Entrevistador</option>
+          </select>
+        </template>
         <label for="session-scenario">Tipo de entrevista</label
         ><select id="session-scenario" v-model="sessionScenario">
           <option>General</option>
@@ -49,14 +57,22 @@ const notesMaxChars = 4000
           placeholder="Ej. entrevista técnica, primera ronda…"
         />
         <label for="session-notes"
-          >Tu experiencia o instrucciones
+          >{{
+            showPerspective && sessionPerspective === 'interviewer'
+              ? 'CV del candidato y competencias a evaluar'
+              : 'Tu experiencia o instrucciones'
+          }}
           <span>{{ sessionNotes.length }}/{{ notesMaxChars }}</span></label
         ><textarea
           id="session-notes"
           v-model="sessionNotes"
           rows="10"
           :maxlength="notesMaxChars"
-          placeholder="Trabajos y proyectos (qué era, tu rol, tecnologías, resultado), logros, tono y datos que Sonara debe tener en cuenta…"
+          :placeholder="
+            showPerspective && sessionPerspective === 'interviewer'
+              ? 'CV del candidato, competencias a evaluar y preguntas clave…'
+              : 'Trabajos y proyectos (qué era, tu rol, tecnologías, resultado), logros, tono y datos que Sonara debe tener en cuenta…'
+          "
         ></textarea>
         <small class="profile-hint"
           >Este contexto se agrega al prompt de la sesión y las sesiones nuevas lo heredan, así no

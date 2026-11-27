@@ -38,6 +38,7 @@ func TestVoiceSessionStreamsAndTruncatesAudio(t *testing.T) {
 				{"type": "input_audio_buffer.speech_started", "item_id": "candidate-2"},
 			},
 			nil,
+			nil,
 		} {
 			var message map[string]any
 			if err := conn.ReadJSON(&message); err != nil {
@@ -118,4 +119,15 @@ func TestVoiceSessionStreamsAndTruncatesAudio(t *testing.T) {
 	if truncate["type"] != "conversation.item.truncate" || truncate["item_id"] != "assistant-1" || truncate["audio_end_ms"] != float64(120) {
 		t.Fatalf("unexpected truncation: %v", truncate)
 	}
+	if err := session.SetSpeed(0.5); err != nil {
+		t.Fatal(err)
+	}
+	update := next(t, received)
+	body, _ = update["session"].(map[string]any)
+	audio, _ = body["audio"].(map[string]any)
+	output, _ = audio["output"].(map[string]any)
+	if update["type"] != "session.update" || output["speed"] != 0.5 {
+		t.Fatalf("unexpected speed update: %v", update)
+	}
+
 }

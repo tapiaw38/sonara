@@ -67,7 +67,10 @@ func (a *App) OpenSession(id string) (storage.OpenSessionResult, error) {
 	a.latestVisualContext = visual
 	a.pendingAudio = nil
 	a.transcript = "Sesión reabierta"
+	a.transcriptFinal = false
 	a.translation, a.voiceReply = "", ""
+	a.translationLines, a.voiceReplyLines = nil, nil
+	a.voiceReplyTranslation = ""
 	a.voiceSequence++
 	a.streaming = false
 	a.droppedSegments = 0
@@ -134,6 +137,17 @@ func (a *App) SaveSessionProfile(sessionID string, profile storage.SessionProfil
 	}
 	a.mu.Lock()
 	if a.sessionID == sessionID {
+		if a.assistantMode == "interview" && a.sessionProfile.Perspective != profile.Perspective {
+			if a.replyCancel != nil {
+				a.replyCancel()
+				a.replyCancel = nil
+			}
+			a.replySequence++
+			a.voiceReply, a.voiceReplyTranslation = "", ""
+			a.voiceReplyLines = nil
+			a.streaming = false
+			a.voiceSequence++
+		}
 		a.sessionProfile = profile
 	}
 	a.mu.Unlock()
@@ -195,8 +209,11 @@ func (a *App) NewSession() bool {
 	a.latestVisualContext = ""
 	a.pendingAudio = nil
 	a.transcript = "Esperando audio de la reunión…"
+	a.transcriptFinal = false
 	a.translation = ""
+	a.translationLines = nil
 	a.voiceReply = ""
+	a.voiceReplyLines, a.voiceReplyTranslation = nil, ""
 	a.voiceSequence++
 	a.streaming = false
 	a.droppedSegments = 0
@@ -281,7 +298,13 @@ func (a *App) buildSessionContextLocked() string {
 	// The profile is bounded on its own (normalizeSessionProfile) and stays
 	// out of the shared budget: long notes must not crowd out the summary.
 	var profile string
-	if brief := a.sessionProfile.PromptContext(); strings.TrimSpace(brief) != "" {
+	perspective := a.sessionProfile.Perspective
+	if a.assistantMode != "interview" {
+		perspective = "candidate"
+	}
+	activeProfile := a.sessionProfile
+	activeProfile.Perspective = perspective
+	if brief := activeProfile.PromptContext(a.assistantMode == "interview"); strings.TrimSpace(brief) != "" {
 		profile = "Interview profile and goals:\n" + brief + "\n\n"
 	}
 	var context strings.Builder
@@ -298,7 +321,7 @@ func (a *App) buildSessionContextLocked() string {
 	header := strutil.Truncate(context.String(), memoryContextChars/2)
 	var recent strings.Builder
 	for _, message := range a.sessionHistory {
-		recent.WriteString(memoryRole(a.assistantMode, message.Role))
+		recent.WriteString(memoryRole(a.assistantMode, message.Role, perspective))
 		recent.WriteString(": ")
 		recent.WriteString(message.Text)
 		recent.WriteString("\n")
